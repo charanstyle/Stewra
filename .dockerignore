@@ -1,0 +1,18 @@
+# Keep build contexts small and reproducible: never ship host node_modules, build outputs, secrets,
+# or VCS metadata into the image — the Dockerfiles install and build everything fresh.
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.gitignore
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+**/.DS_Store
+*.tsbuildinfo
+**/*.tsbuildinfo
+.claude
+scratchpad

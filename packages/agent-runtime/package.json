@@ -1,0 +1,19 @@
+{
+  "name": "@stewra/agent-runtime",
+  "version": "0.0.0",
+  "description": "Stewra agent runtime — UNTRUSTED data plane. Depends ONLY on @stewra/shared-types.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@stewra/shared-types": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,2 @@
+# TSC Commands by Repo
+backend: npx tsc --noEmit

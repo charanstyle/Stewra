@@ -1,0 +1,53 @@
+# Production deployment artifact for the SSH host (home / 192.168.1.179).
+# Lives at /media/WDHD/docker/stewra/ alongside the other apps and is fronted by the host's
+# `tunnel-access` nginx (Cloudflare tunnel -> nginx :8080 -> these loopback ports).
+#
+# This does NOT define Postgres — it reuses the shared `postgres` container (external network
+# `postgres_default`, reachable as host `postgres:5432`). Stewra has its own isolated `stewra`
+# database + role; set DATABASE_URL in stewra.env to postgresql://stewra:<pw>@postgres:5432/stewra.
+#
+# Two env files are involved:
+#   stewra.env  — backend RUNTIME env (DATABASE_URL, JWT_SECRET, VAULT_KEY, model + Google creds, …)
+#   .env        — compose-substitution only; supplies the website's build-time VITE_API_BASE_URL
+#
+# Deploy (run ON the host, not the dev machine):
+#   cd /media/WDHD/docker/stewra
+#   docker compose -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.prod.yml run --rm backend node backend/dist/database/migrate.js
+#   docker compose -f docker-compose.prod.yml up -d
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: stewra-backend:latest
+    restart: unless-stopped
+    env_file: ./stewra.env
+    # Loopback-only; the host nginx proxies /api/ here and strips the prefix.
+    ports:
+      - "127.0.0.1:3023:3001"
+    networks:
+      - postgres_default
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  website:
+    build:
+      context: .
+      dockerfile: website/Dockerfile
+      args:
+        # Baked into the SPA at build time. Fails loud if unset (see website/Dockerfile).
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:?set VITE_API_BASE_URL in ./.env}
+    image: stewra-website:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+    # Loopback-only; the host nginx proxies / here.
+    ports:
+      - "127.0.0.1:3022:80"
+
+# The shared Postgres container's network, created by the postgres stack.
+networks:
+  postgres_default:
+    external: true

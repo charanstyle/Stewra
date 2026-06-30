@@ -1,0 +1,36 @@
+{
+  "name": "@stewra/monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Stewra — trust-first personal assistant (Milestone 0)",
+  "workspaces": [
+    "packages/*",
+    "backend",
+    "website"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build:types": "npm run build -w @stewra/shared-types",
+    "build:agent": "npm run build -w @stewra/agent-runtime",
+    "build": "npm run build:types && npm run build:agent && npm run build -w backend",
+    "typecheck": "npm run typecheck -w @stewra/shared-types && npm run typecheck -w @stewra/agent-runtime && npm run typecheck -w backend",
+    "lint": "eslint \"backend/src/**/*.ts\" \"packages/*/src/**/*.ts\"",
+    "lint:fix": "eslint \"backend/src/**/*.ts\" \"packages/*/src/**/*.ts\" --fix",
+    "dev:backend": "npm run dev -w backend",
+    "dev:web": "npm run dev -w website",
+    "db:migrate": "npm run db:migrate -w backend",
+    "test": "npm test -w backend",
+    "boundaries": "depcruise --config .dependency-cruiser.cjs packages/agent-runtime/src",
+    "tunnel": "ssh -f -N -o ExitOnForwardFailure=yes -L 127.0.0.1:5433:127.0.0.1:5433 home && echo 'tunnel up: local 5433 -> home:5433'"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "dependency-cruiser": "^16.4.0",
+    "eslint": "^10.6.0",
+    "globals": "^17.7.0",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.62.1"
+  }
+}
