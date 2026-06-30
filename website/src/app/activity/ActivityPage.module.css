@@ -186,6 +186,11 @@
   color: white;
 }
 
+.primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .secondary {
   background: var(--panel-2);
   color: var(--text);
