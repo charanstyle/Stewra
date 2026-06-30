@@ -11,11 +11,13 @@ import type {
   User,
 } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig';
+import { logger } from '../utils/logger';
 import { AuthenticationError, ConflictError, NotFoundError } from '../utils/errors';
-import type { UserRepository} from '../repositories/userRepository';
-import { userRepository, type UserRow } from '../repositories/userRepository';
+import type { UserRepository } from '../repositories/userRepository';
+import { userRepository, toUserModel } from '../repositories/userRepository';
 import type { AuditWriter } from '../control-plane/audit/auditWriter';
 import { auditWriter } from '../control-plane/audit/auditWriter';
+import { emailVerificationService } from './emailVerificationService';
 
 const TokenClaimsSchema = z.object({
   sub: z.string().min(1),
@@ -36,17 +38,6 @@ function durationToSeconds(value: string): number {
     throw new Error(`Invalid duration unit: ${unit ?? value}`);
   }
   return amount * factor;
-}
-
-function toUser(row: UserRow): User {
-  return {
-    id: row.id,
-    email: row.email,
-    displayName: row.display_name,
-    role: row.role,
-    createdAt: row.created_at.toISOString(),
-    updatedAt: row.updated_at.toISOString(),
-  };
 }
 
 export class AuthService {
@@ -95,7 +86,7 @@ export class AuthService {
       passwordHash,
       role: 'user',
     });
-    const user = toUser(row);
+    const user = toUserModel(row);
     await this.audit.write({
       userId: user.id,
       action: 'auth.register',
@@ -105,7 +96,21 @@ export class AuthService {
       success: true,
       metadata: {},
     });
-    return { user, tokens: this.issueTokens(user.id) };
+    // Email the first verification code. A transient send failure must NOT fail registration — the
+    // account exists and is audited; the user lands on the verify screen and can resend.
+    try {
+      await emailVerificationService.issue(user.id, user.email);
+    } catch (error) {
+      logger.error('Failed to send verification email at registration', {
+        userId: user.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return {
+      user,
+      tokens: this.issueTokens(user.id),
+      requiresVerification: !user.emailVerified,
+    };
   }
 
   async login(req: LoginRequest): Promise<LoginResponse> {
@@ -116,7 +121,7 @@ export class AuthService {
     if (!row || !ok) {
       throw new AuthenticationError('Invalid email or password');
     }
-    const user = toUser(row);
+    const user = toUserModel(row);
     await this.audit.write({
       userId: user.id,
       action: 'auth.login',
@@ -152,7 +157,7 @@ export class AuthService {
     if (!row) {
       throw new NotFoundError('User not found');
     }
-    return toUser(row);
+    return toUserModel(row);
   }
 }
 

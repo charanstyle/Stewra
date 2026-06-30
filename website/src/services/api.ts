@@ -15,6 +15,9 @@ import type {
   GetPreferencesResponse,
   UpdatePreferencesRequest,
   UpdatePreferencesResponse,
+  VerifyEmailRequest,
+  VerifyEmailResponse,
+  ResendVerificationResponse,
 } from '@stewra/shared-types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -98,6 +101,12 @@ export const api = {
     request('/auth/login', { method: 'POST', body, auth: false }),
 
   me: (): Promise<GetAuthStatusResponse> => request('/auth/me'),
+
+  verifyEmail: (body: VerifyEmailRequest): Promise<VerifyEmailResponse> =>
+    request('/email-verification/verify', { method: 'POST', body }),
+
+  resendVerification: (): Promise<ResendVerificationResponse> =>
+    request('/email-verification/resend', { method: 'POST', body: {} }),
 
   listActivity: (): Promise<ListActivityResponse> => request('/activity'),
 

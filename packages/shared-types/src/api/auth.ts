@@ -15,6 +15,11 @@ export interface RegisterRequest {
 export interface RegisterResponse {
   readonly user: User;
   readonly tokens: AuthTokens;
+  /**
+   * True when a verification code was emailed and the user must verify before using gated features.
+   * (Derivable from `user.emailVerified`, surfaced explicitly so the client can route to /verify-email.)
+   */
+  readonly requiresVerification: boolean;
 }
 
 export interface LoginRequest {

@@ -36,3 +36,20 @@ export class NotFoundError extends AppError {
   readonly statusCode = 404;
   readonly code = 'NOT_FOUND';
 }
+
+/** Authenticated but not allowed — e.g. trying to use a gated feature before verifying email. */
+export class ForbiddenError extends AppError {
+  readonly statusCode = 403;
+  readonly code: string;
+
+  constructor(message: string, code = 'FORBIDDEN') {
+    super(message);
+    this.code = code;
+  }
+}
+
+/** Too many attempts / too soon — used for the verify lockout and the resend cooldown. */
+export class RateLimitError extends AppError {
+  readonly statusCode = 429;
+  readonly code = 'RATE_LIMITED';
+}

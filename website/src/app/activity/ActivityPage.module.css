@@ -38,6 +38,20 @@
   cursor: pointer;
 }
 
+.verifyBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: rgba(255, 183, 77, 0.12);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  padding: 12px 14px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
 .error {
   background: rgba(229, 115, 115, 0.12);
   border: 1px solid var(--danger);

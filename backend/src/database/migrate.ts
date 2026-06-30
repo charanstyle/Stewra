@@ -7,6 +7,7 @@ import * as m002 from './migrations/002_audit_log';
 import * as m003 from './migrations/003_connections';
 import * as m004 from './migrations/004_vault_secrets';
 import * as m005 from './migrations/005_user_preferences';
+import * as m006 from './migrations/006_email_verification';
 import { logger } from '../utils/logger';
 
 interface Migration {
@@ -21,6 +22,7 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '003_connections', up: m003.up },
   { name: '004_vault_secrets', up: m004.up },
   { name: '005_user_preferences', up: m005.up },
+  { name: '006_email_verification', up: m006.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

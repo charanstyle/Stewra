@@ -16,7 +16,8 @@ export type AuditResourceType =
 /**
  * Actions the audit log records. `read` covers brokered data access; `insight` covers an
  * agent-produced insight; `propose` covers a model-proposed (never silently written) memory;
- * `connect`/`disconnect` cover a user adding or revoking a sanctioned source.
+ * `connect`/`disconnect` cover a user adding or revoking a sanctioned source; `verify` covers the
+ * user proving ownership of their email.
  */
 export type AuditAction =
   | 'read'
@@ -24,6 +25,7 @@ export type AuditAction =
   | 'propose'
   | 'connect'
   | 'disconnect'
+  | 'verify'
   | 'auth.register'
   | 'auth.login'
   | 'auth.refresh';

@@ -13,6 +13,8 @@ export interface UsersTable {
   display_name: string;
   password_hash: string;
   role: UserRole;
+  /** Email-ownership flag. DB default false; flipped true when the user enters their code. */
+  email_verified: Generated<boolean>;
   created_at: CreatedAt;
   updated_at: ColumnType<Date, never, Date>;
 }
@@ -63,6 +65,22 @@ export interface VaultSecretsTable {
   created_at: CreatedAt;
 }
 
+export interface EmailVerificationCodesTable {
+  id: Generated<string>;
+  user_id: string;
+  /** The numeric code the user must enter. */
+  code: string;
+  /** Address the code was emailed to (snapshot at issue time). */
+  email: string;
+  /** Set on insert, read back; never updated. */
+  expires_at: ColumnType<Date, Date, never>;
+  /** DB default false; flipped true once the code is consumed. */
+  used: ColumnType<boolean, boolean | undefined, boolean>;
+  /** DB default 0; incremented on each failed entry until the lockout cap. */
+  attempts: ColumnType<number, number | undefined, number>;
+  created_at: CreatedAt;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -70,4 +88,5 @@ export interface Database {
   user_preferences: UserPreferencesTable;
   migrations: MigrationsTable;
   vault_secrets: VaultSecretsTable;
+  email_verification_codes: EmailVerificationCodesTable;
 }

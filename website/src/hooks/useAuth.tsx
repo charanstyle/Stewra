@@ -8,8 +8,11 @@ interface AuthContextValue {
   readonly user: User | null;
   readonly loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, displayName: string) => Promise<void>;
+  /** Resolves to true when the new account still needs email verification. */
+  register: (email: string, password: string, displayName: string) => Promise<boolean>;
   logout: () => void;
+  /** Replace the cached user (e.g. after the email is verified). */
+  applyUser: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -41,10 +44,11 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
   }, []);
 
   const register = useCallback(
-    async (email: string, password: string, displayName: string): Promise<void> => {
+    async (email: string, password: string, displayName: string): Promise<boolean> => {
       const res = await api.register({ email, password, displayName });
       writeTokens(res.tokens);
       setUser(res.user);
+      return res.requiresVerification;
     },
     [],
   );
@@ -54,8 +58,12 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     setUser(null);
   }, []);
 
+  const applyUser = useCallback((next: User): void => {
+    setUser(next);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, applyUser }}>
       {children}
     </AuthContext.Provider>
   );

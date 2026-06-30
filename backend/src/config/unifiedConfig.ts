@@ -33,6 +33,21 @@ const EnvSchema = z.object({
     .int()
     .min(GMAIL_LOOKBACK_MIN_DAYS)
     .max(GMAIL_LOOKBACK_MAX_DAYS),
+  // Outbound mail (Mailu mailbox), used for the email-verification code. Required: a new account
+  // can't be verified without it, so we fail loud rather than silently skip verification.
+  SMTP_HOST: z.string().min(1, 'SMTP_HOST is required'),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535),
+  // Implicit TLS (true, port 465) vs STARTTLS/plain (false). A string enum, NOT z.coerce.boolean —
+  // coercion treats the literal 'false' as truthy, which would silently break TLS selection.
+  SMTP_SECURE: z.enum(['true', 'false']).transform((v) => v === 'true'),
+  SMTP_USER: z.string().min(1, 'SMTP_USER is required'),
+  SMTP_PASSWORD: z.string().min(1, 'SMTP_PASSWORD is required'),
+  // Envelope/header From (e.g. "Stewra <no-reply@stewra.com>").
+  EMAIL_FROM: z.string().min(1, 'EMAIL_FROM is required'),
+  // Verification policy knobs — sane defaults, overridable per deploy (no magic numbers in code).
+  EMAIL_VERIFICATION_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
+  EMAIL_VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+  EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
   // The user picks the model provider. 'claude_cli' (default) shells out to the locally installed
   // `claude` CLI in print mode, using the user's existing Claude Code subscription — no API key.
   // The rest are API providers: 'anthropic' uses @anthropic-ai/sdk; 'openai', 'gemini', and 'grok'
@@ -129,6 +144,19 @@ export const config = {
   gmail: {
     // Default lookback window (days); a per-insight request may override within the shared bounds.
     lookbackDays: env.GMAIL_LOOKBACK_DAYS,
+  },
+  email: {
+    host: env.SMTP_HOST,
+    port: env.SMTP_PORT,
+    secure: env.SMTP_SECURE,
+    user: env.SMTP_USER,
+    password: env.SMTP_PASSWORD,
+    from: env.EMAIL_FROM,
+  },
+  emailVerification: {
+    ttlMinutes: env.EMAIL_VERIFICATION_TTL_MINUTES,
+    maxAttempts: env.EMAIL_VERIFICATION_MAX_ATTEMPTS,
+    resendCooldownSeconds: env.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS,
   },
   model: {
     provider: env.MODEL_PROVIDER,

@@ -1,11 +1,15 @@
 import { Router } from 'express';
 import { connectionController } from '../controllers/connectionController';
 import { requireAuth } from '../middleware/requireAuth';
+import { requireEmailVerification } from '../middleware/requireEmailVerification';
 
 const router = Router();
 
 // Start connecting a Google account (one consent grants read-only Calendar + Gmail).
-router.post('/google/start', requireAuth, (req, res) => {
+// Gated on a verified email — no data connections until the account owner is confirmed.
+router.post('/google/start', requireAuth, (req, res, next) => {
+  void requireEmailVerification(req, res, next);
+}, (req, res) => {
   void connectionController.startGoogle(req, res);
 });
 

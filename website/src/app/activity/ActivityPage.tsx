@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   GMAIL_LOOKBACK_MIN_DAYS,
   GMAIL_LOOKBACK_MAX_DAYS,
@@ -18,7 +18,10 @@ function describeError(err: unknown): string {
 
 export default function ActivityPage(): React.JSX.Element {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const emailVerified = user?.emailVerified ?? false;
 
   const [events, setEvents] = useState<ReadonlyArray<AuditEvent>>([]);
   const [connections, setConnections] = useState<ReadonlyArray<Connection>>([]);
@@ -139,6 +142,21 @@ export default function ActivityPage(): React.JSX.Element {
         </div>
       </header>
 
+      {!emailVerified && (
+        <div className={styles.verifyBanner} role="status">
+          <span>
+            Verify your email to connect accounts and ask for insights. We sent a code to{' '}
+            <strong>{user?.email}</strong>.
+          </span>
+          <button
+            type="button"
+            className={styles.primary}
+            onClick={() => navigate('/verify-email')}
+          >
+            Enter code
+          </button>
+        </div>
+      )}
       {justConnected && (
         <div className={styles.banner} onClick={dismissConnected} role="status">
           ✓ Google account connected. Generate an insight below to see it in action.
@@ -175,7 +193,13 @@ export default function ActivityPage(): React.JSX.Element {
                 </li>
               ))}
             </ul>
-            <button type="button" className={styles.primary} onClick={() => void startConnect()}>
+            <button
+              type="button"
+              className={styles.primary}
+              disabled={!emailVerified}
+              title={emailVerified ? undefined : 'Verify your email first'}
+              onClick={() => void startConnect()}
+            >
               Connect a Google account
             </button>
           </div>
@@ -210,7 +234,8 @@ export default function ActivityPage(): React.JSX.Element {
               <button
                 type="button"
                 className={styles.secondary}
-                disabled={busy}
+                disabled={busy || !emailVerified}
+                title={emailVerified ? undefined : 'Verify your email first'}
                 onClick={() => void generate('calendar')}
               >
                 Look at my calendar
@@ -218,7 +243,8 @@ export default function ActivityPage(): React.JSX.Element {
               <button
                 type="button"
                 className={styles.secondary}
-                disabled={busy}
+                disabled={busy || !emailVerified}
+                title={emailVerified ? undefined : 'Verify your email first'}
                 onClick={() => void generate('gmail')}
               >
                 Look at my inbox

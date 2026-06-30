@@ -26,6 +26,12 @@ export type {
 export type { GenerateInsightRequest, GenerateInsightResponse } from './api/insights';
 export { GMAIL_LOOKBACK_MIN_DAYS, GMAIL_LOOKBACK_MAX_DAYS } from './api/insights';
 export type {
+  VerifyEmailRequest,
+  VerifyEmailResponse,
+  ResendVerificationResponse,
+} from './api/emailVerification';
+export { EMAIL_VERIFICATION_CODE_LENGTH } from './api/emailVerification';
+export type {
   GetPreferencesResponse,
   UpdatePreferencesRequest,
   UpdatePreferencesResponse,

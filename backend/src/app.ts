@@ -5,6 +5,7 @@ import cors from 'cors';
 import type { ApiResponse } from '@stewra/shared-types';
 import { config } from './config/unifiedConfig';
 import authRoutes from './routes/auth';
+import emailVerificationRoutes from './routes/emailVerification';
 import activityRoutes from './routes/activity';
 import connectionRoutes from './routes/connections';
 import insightRoutes from './routes/insights';
@@ -30,6 +31,7 @@ export function createApp(): Express {
   });
 
   app.use('/auth', authRoutes);
+  app.use('/email-verification', emailVerificationRoutes);
   app.use('/activity', activityRoutes);
   app.use('/connections', connectionRoutes);
   app.use('/insights', insightRoutes);

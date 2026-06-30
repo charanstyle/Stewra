@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, ProtectedRoute } from './hooks/useAuth';
 import LoginPage from './app/login/LoginPage';
+import VerifyEmailPage from './app/verify/VerifyEmailPage';
 import ActivityPage from './app/activity/ActivityPage';
 
 export default function App(): React.JSX.Element {
@@ -8,6 +9,14 @@ export default function App(): React.JSX.Element {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/verify-email"
+          element={
+            <ProtectedRoute>
+              <VerifyEmailPage />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/activity"
           element={

@@ -31,10 +31,15 @@ export default function LoginPage(): React.JSX.Element {
     setServerError(null);
     try {
       if (mode === 'register') {
-        await registerUser(values.email, values.password, values.displayName ?? '');
-      } else {
-        await login(values.email, values.password);
+        const requiresVerification = await registerUser(
+          values.email,
+          values.password,
+          values.displayName ?? '',
+        );
+        navigate(requiresVerification ? '/verify-email' : '/activity');
+        return;
       }
+      await login(values.email, values.password);
       navigate('/activity');
     } catch (err) {
       setServerError(err instanceof ApiError ? err.message : 'Something went wrong');
