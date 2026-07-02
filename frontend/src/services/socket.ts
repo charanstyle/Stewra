@@ -81,6 +81,21 @@ interface ClientToServerEvents {
 
 export type StewraSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
+/**
+ * Split the WS base into the origin to connect to and the Socket.IO `path`. In prod the backend's
+ * `/socket.io/` mount is fronted by nginx under `/api/`, so a base of `https://host/api` must connect to
+ * the origin `https://host` with path `/api/socket.io/` — passing the full base as the connect URL would
+ * make Socket.IO treat `/api` as a namespace and default the path to `/socket.io/`, missing the backend.
+ * Parsed with a regex rather than `new URL` because React Native lacks a spec-compliant URL. A base with
+ * no path prefix (e.g. `http://10.0.2.2:3001`) yields the default `/socket.io/`.
+ */
+function resolveSocketTarget(base: string): { readonly url: string; readonly path: string } {
+  const match = base.match(/^(https?:\/\/[^/]+)(\/.*)?$/i);
+  const url = match?.[1] ?? base;
+  const prefix = (match?.[2] ?? '').replace(/\/+$/, '');
+  return { url, path: `${prefix}/socket.io/` };
+}
+
 let socket: StewraSocket | null = null;
 let connecting: Promise<StewraSocket> | null = null;
 
@@ -103,10 +118,11 @@ export async function connectSocket(): Promise<StewraSocket> {
       throw new Error('Cannot connect the realtime socket without an access token');
     }
 
+    const { url, path } = resolveSocketTarget(config.wsBaseUrl);
     const next: StewraSocket =
       socket ??
-      io(config.wsBaseUrl, {
-        path: '/socket.io/',
+      io(url, {
+        path,
         autoConnect: false,
         transports: ['websocket'],
         auth: { token: tokens.accessToken },

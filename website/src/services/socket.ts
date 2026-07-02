@@ -90,11 +90,24 @@ interface ServerToClientEvents {
 export type StewraSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 /**
- * WebSocket origin. Defaults to the REST API origin (same host serves both) unless VITE_WS_BASE_URL
- * overrides it. The socket path is external `/socket.io/`; in prod nginx proxies `/api/` → backend and
- * WS upgrades pass through, so we point at the API origin's root.
+ * Resolve the Socket.IO connection target from the API base. The base may be an absolute origin (dev:
+ * `http://localhost:3001`) or a same-origin path prefix (prod: `/api`, where nginx proxies `/api/` →
+ * backend and strips the prefix). Socket.IO needs the ORIGIN as its connect URL plus an explicit `path`
+ * — a bare `io('/api')` would be read as a *namespace* on the page origin with the default `/socket.io/`
+ * path, so the handshake would hit the website container, not the backend. Deriving `path` from the base
+ * prefix (`/api` → `/api/socket.io/`, `''` → `/socket.io/`) keeps the default `/` namespace and routes
+ * the upgrade through nginx to the backend's default `/socket.io/` mount.
  */
-const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL ?? BASE_URL;
+function resolveSocketTarget(): { url: string | undefined; path: string } {
+  const base = import.meta.env.VITE_WS_BASE_URL ?? BASE_URL;
+  const parsed = new URL(base, window.location.origin);
+  const prefix = parsed.pathname.replace(/\/+$/, '');
+  const path = `${prefix}/socket.io/`;
+  // Same-origin (relative base): let Socket.IO use the page origin (pass undefined). Cross-origin (dev):
+  // connect to the explicit origin. Either way the default `/` namespace is used.
+  const url = parsed.origin === window.location.origin ? undefined : parsed.origin;
+  return { url, path };
+}
 
 let socket: StewraSocket | null = null;
 
@@ -111,7 +124,9 @@ export function getSocket(): StewraSocket | null {
   if (socket) {
     return socket;
   }
-  socket = io(WS_BASE_URL, {
+  const { url, path } = resolveSocketTarget();
+  socket = io(url ?? window.location.origin, {
+    path,
     auth: { token: tokens.accessToken },
     autoConnect: true,
     transports: ['websocket'],
