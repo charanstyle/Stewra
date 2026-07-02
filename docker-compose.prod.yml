@@ -17,6 +17,25 @@
 #   docker compose -f docker-compose.prod.yml up -d
 
 services:
+  # Stewra's OWN coturn (TURN/STUN) — deliberately NOT the shared rankrise-coturn, which runs in
+  # use-auth-secret mode with a single global secret (a second realm there couldn't have its own
+  # secret). This instance has a distinct realm, secret, ports (3481 / relay 49202-49250), and never
+  # touches RankRise/TrueTalk. network_mode: host mirrors rankrise so relay candidates use the real LAN
+  # IP. The secret + public IP are injected on the command line (never committed): TURN_STATIC_AUTH_SECRET
+  # and TURN_EXTERNAL_IP come from the compose ./.env file; the SAME secret is TURN_SECRET in stewra.env
+  # (the backend mints matching HMAC credentials). Gated by CALLS_ENABLED in stewra.env on the app side.
+  coturn:
+    image: coturn/coturn:latest
+    container_name: stewra-coturn
+    restart: unless-stopped
+    network_mode: host
+    command: >-
+      -c /etc/coturn/turnserver.conf
+      --static-auth-secret=${TURN_STATIC_AUTH_SECRET:?set TURN_STATIC_AUTH_SECRET in ./.env}
+      --external-ip=${TURN_EXTERNAL_IP:?set TURN_EXTERNAL_IP in ./.env}
+    volumes:
+      - ./deploy/coturn/turnserver-stewra.conf:/etc/coturn/turnserver.conf:ro
+
   # Redis is REQUIRED by the realtime layer: the Socket.IO adapter (cross-instance room fan-out) and the
   # presence store. Isolated to this stack's own instance; set REDIS_URL=redis://redis:6379 in stewra.env.
   redis:

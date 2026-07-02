@@ -1,107 +1,103 @@
-# Adding Stewra to the shared coturn on `home`
+# Stewra TURN — a dedicated coturn instance on `home`
 
-Stewra reuses the **coturn already running on the `home` host** (the same one serving TrueTalk and
-RankRise). We do **not** stand up a new coturn container. Stewra gets its **own realm** and its **own
-`static-auth-secret`**, so a leak or misconfiguration in one app's realm cannot mint credentials for
-another.
+Stewra runs its **own** coturn container (`stewra-coturn`, defined in `docker-compose.prod.yml`). It does
+**not** share, and does not modify, the `rankrise-coturn` that also runs on `home`.
 
-This is a **one-time, manually reviewed** change to the host's coturn config. Treat it carefully: a
-fat-fingered edit takes down calling for three apps at once.
+## Why a dedicated instance (not a realm on the shared coturn)
+
+`rankrise-coturn` runs in coturn's `use-auth-secret` (TURN REST) mode with a **single global**
+`static-auth-secret`. In that mode the ephemeral credential is `username="<expiry>:<userId>"`,
+`credential=base64(HMAC-SHA1(secret, username))`, and coturn validates the HMAC against the one global
+secret **regardless of realm**. Adding a `realm=stewra.com` line to that instance would therefore force
+Stewra to reuse RankRise's secret — no isolation, and a risky edit to a file that fronts three apps.
+
+A separate container gives Stewra its own realm, its own secret, its own ports, and its own relay range,
+while RankRise/TrueTalk are never touched.
 
 ## How Stewra authenticates to TURN
 
-The backend (`turnCredentialsService`) mints short-lived credentials in coturn's `use-auth-secret`
-(RFC 5766 REST) mode:
+Same REST scheme, validated by `turnCredentialsService` on the backend and `stewra-coturn`:
 
 ```
 username   = "<unix-expiry>:<userId>"
 credential = base64( HMAC-SHA1( TURN_SECRET, username ) )
 ```
 
-`TURN_SECRET` is the shared static-auth-secret — known only to this backend and coturn, never sent to
-clients. Clients receive only the ephemeral `username`/`credential` pair (valid for
-`TURN_CRED_TTL_SECONDS`, default 3600s). Calls **force-relay** (no public STUN), so a broken TURN
-surfaces as a failed call in the loopback test rather than a silent NAT-traversal failure.
+`TURN_SECRET` (in `stewra.env`, backend side) and `TURN_STATIC_AUTH_SECRET` (in the compose `./.env`,
+coturn side) **must be the identical value**. Clients only ever receive the ephemeral username/credential
+(TTL `TURN_CRED_TTL_SECONDS`, default 3600s). Calls force-relay, so a broken TURN surfaces as a failed
+call, never a silent degrade.
 
-These four values must agree between coturn and `stewra.env`:
+## Port map (distinct from rankrise-coturn's 3478/5349 + relay 49152–49200)
 
-| stewra.env               | coturn                                    |
-| ------------------------ | ----------------------------------------- |
-| `TURN_SECRET`            | the realm's `static-auth-secret`          |
-| `TURN_REALM`             | the realm string                          |
-| `TURN_URLS`              | the listening address/port + transport    |
-| `TURN_CRED_TTL_SECONDS`  | (client-side only; ≤ coturn's own max)    |
+| Purpose            | Stewra port           | rankrise (do not collide) |
+| ------------------ | --------------------- | ------------------------- |
+| TURN listener      | `3481` (udp + tcp)    | `3478`                    |
+| Relay range        | `49202–49250` (udp)   | `49152–49200`             |
+| TLS (turns:)       | not enabled (v1)      | `5349`                    |
 
-## 1. Generate a Stewra-only secret
+`network_mode: host` (mirrors rankrise) so relay candidates use the real interface. coturn binds
+`listening-ip=relay-ip=192.168.1.179` (the LAN interface where forwarded packets arrive) and advertises
+`--external-ip=38.77.165.20` (the public IP) in relay candidates, so remote peers on other networks
+connect to the public IP and the router forwards to the host.
 
-On `home`:
+## Production reachability — the one manual step (router port-forward)
 
-```bash
-openssl rand -hex 32
+The home host sits behind NAT (public IP `38.77.165.20` lives on the router, not the host). RankRise's
+ports are already forwarded; Stewra's new ports are **not**, so live calls between different networks
+require adding this forward on the router (→ `192.168.1.179`):
+
+```
+UDP  3481          -> 192.168.1.179:3481
+TCP  3481          -> 192.168.1.179:3481
+UDP  49202-49250   -> 192.168.1.179:49202-49250
 ```
 
-Put it in `/media/WDHD/docker/stewra/stewra.env` (mode 600, gitignored) as `TURN_SECRET=<value>` and set
-`CALLS_ENABLED=true` plus:
+Until this exists, calls only relay for clients that are on the same LAN as `home`. This is the sole
+piece that cannot be done from the deploy machine.
+
+## Config values
+
+`./.env` (compose-substitution only; gitignored, alongside `VITE_API_BASE_URL`):
 
 ```
+TURN_STATIC_AUTH_SECRET=<openssl rand -hex 32>
+TURN_EXTERNAL_IP=38.77.165.20
+```
+
+`stewra.env` (backend runtime; gitignored):
+
+```
+CALLS_ENABLED=true
+TURN_SECRET=<the SAME value as TURN_STATIC_AUTH_SECRET>
 TURN_REALM=stewra.com
-TURN_URLS=turns:turn.stewra.com:5349?transport=tcp
+TURN_URLS=turn:38.77.165.20:3481?transport=udp,turn:38.77.165.20:3481?transport=tcp
 TURN_CRED_TTL_SECONDS=3600
 ```
 
-`TURN_URLS` is comma-separated if you offer more than one (e.g. a `turn:…:3478` UDP entry alongside the
-TLS `turns:…:5349`). Reuse the **existing** TLS listener/cert on `5349` that TrueTalk/RankRise already
-use — Stewra does not add ports.
+Plain `turn:` (not `turns:`) — WebRTC permits `turn:` from an https page, and `turns:` would need a
+`turn.stewra.com` certificate. Adding a DNS name + TLS listener on `5350` is a documented hardening
+follow-up; the raw public IP is fully functional for real remote users in the meantime.
 
-## 2. Add the Stewra realm to coturn
-
-coturn supports multiple realms with per-realm secrets via `use-auth-secret` + realm-scoped secret
-lines. Edit the coturn config on `home` (typically `/etc/turnserver.conf`, or the compose-mounted
-config if coturn runs in a container). Alongside the existing TrueTalk/RankRise realm lines, add:
-
-```conf
-# --- Stewra realm (added <date>) ---
-realm=stewra.com
-# Per-realm static secret used only by Stewra's backend to mint ephemeral REST credentials.
-static-auth-secret=<the value from step 1>
-```
-
-If the running coturn uses the single-realm `static-auth-secret` form and you need true per-app secret
-isolation, prefer coturn's database/`userdb` or `secret` table with a realm column, or run the realms
-with `--use-auth-secret` and distinct `static-auth-secret` blocks per realm as supported by your coturn
-version. **Match whatever pattern TrueTalk/RankRise already use on this host** — do not restructure the
-shared file. TLS (`5349`), `cert`/`pkey`, `min-port`/`max-port` relay range, and `external-ip` are
-shared and unchanged.
-
-## 3. Validate BEFORE reloading
+## Bring up + validate
 
 ```bash
-# Syntax/sanity check without disrupting live calls:
-turnadmin -C /etc/turnserver.conf 2>/dev/null || true   # if available on this build
-sudo turnserver -c /etc/turnserver.conf --check-config   # dry run where supported
+cd /media/WDHD/docker/stewra
+docker compose -f docker-compose.prod.yml up -d coturn
+docker logs stewra-coturn --tail 20        # expect "Relay ... 192.168.1.179" and no bind errors
 ```
 
-Then reload (graceful; existing calls survive a HUP on most builds):
-
-```bash
-sudo systemctl reload coturn        # host service
-# or, if containerized:
-docker compose -f <coturn-compose>.yml restart coturn
-```
-
-## 4. Loopback verification (proves realm + secret + relay)
-
-With `CALLS_ENABLED=true` and the stack redeployed:
-
-1. `GET /api/calls/turn-credentials` (authenticated) returns `iceServers` with a `username` of the form
-   `<expiry>:<userId>` and a base64 `credential`.
-2. In one browser, open the website, start a 1:1 audio call to a second logged-in user (or use the
-   single-browser two-`RTCPeerConnection` loopback from the plan's verification section). With
-   `iceTransportPolicy: 'relay'` the ICE candidates must be **relay** type and the connection must reach
-   `connected`. If it stalls at `checking`, the realm/secret disagree or the relay port range is blocked.
+1. `GET /api/calls/turn-credentials` (authenticated) returns `iceServers` with `username` `<expiry>:<uid>`
+   and a base64 `credential`, and the `turn:38.77.165.20:3481` URLs.
+2. With `iceTransportPolicy: 'relay'`, a 1:1 call (or the single-page two-`RTCPeerConnection` loopback)
+   must gather **relay** candidates and reach `connected`. Stalling at `checking` means the port-forward
+   is missing or the secret disagrees between `./.env` and `stewra.env`.
 
 ## Rollback
 
-Remove the Stewra realm/secret lines you added, reload coturn, and set `CALLS_ENABLED=false` in
-`stewra.env` (Stewra's `/calls` routes then 503 and no credentials are minted). TrueTalk and RankRise are
-untouched because their realm lines and secrets were never modified.
+```bash
+docker compose -f docker-compose.prod.yml stop coturn && docker rm stewra-coturn
+```
+
+Set `CALLS_ENABLED=false` in `stewra.env` and redeploy the backend (its `/calls` routes then 503).
+RankRise/TrueTalk are unaffected — their coturn, realm, and secret were never modified.
