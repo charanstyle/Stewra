@@ -1,11 +1,14 @@
 // Sentry must be the FIRST import so it instruments everything loaded afterwards.
 import './instrument';
 
-import type { Server } from 'node:http';
+import { createServer, type Server } from 'node:http';
+import { Server as SocketIOServer } from 'socket.io';
 import { createApp } from './app';
 import { config } from './config/unifiedConfig';
 import { assertDbConnection, closeDb } from './database/index';
 import { logger } from './utils/logger';
+import { initSockets } from './websocket';
+import type { AppServer } from './websocket/types';
 
 /**
  * Process entry point. Owns the lifecycle that `app.ts` deliberately doesn't: it proves the DB is
@@ -17,24 +20,36 @@ async function main(): Promise<void> {
   logger.info('Database connection OK');
 
   const app = createApp();
-  const server: Server = app.listen(config.port, () => {
+  // Own the http.Server explicitly (rather than app.listen) so Socket.IO can attach to it. createApp()
+  // stays listener-free for supertest; the realtime layer lives only here on the running process.
+  const server: Server = createServer(app);
+  const io: AppServer = new SocketIOServer(server, {
+    // The website is the browser client; RN sends the same token via handshake auth.
+    cors: { origin: config.web.appUrl, credentials: true },
+  });
+  initSockets(io);
+
+  server.listen(config.port, () => {
     logger.info(`Stewra backend listening on port ${config.port}`);
   });
 
   const shutdown = (signal: string): void => {
     logger.info(`Received ${signal}, shutting down gracefully`);
-    server.close(() => {
-      closeDb()
-        .then(() => {
-          logger.info('Shutdown complete');
-          process.exit(0);
-        })
-        .catch((err: unknown) => {
-          logger.error('Error during shutdown', {
-            error: err instanceof Error ? err.message : String(err),
+    // Close Socket.IO first (drops live connections) before the HTTP server stops accepting.
+    io.close(() => {
+      server.close(() => {
+        closeDb()
+          .then(() => {
+            logger.info('Shutdown complete');
+            process.exit(0);
+          })
+          .catch((err: unknown) => {
+            logger.error('Error during shutdown', {
+              error: err instanceof Error ? err.message : String(err),
+            });
+            process.exit(1);
           });
-          process.exit(1);
-        });
+      });
     });
   };
 

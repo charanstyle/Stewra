@@ -17,6 +17,15 @@
 #   docker compose -f docker-compose.prod.yml up -d
 
 services:
+  # Redis is REQUIRED by the realtime layer: the Socket.IO adapter (cross-instance room fan-out) and the
+  # presence store. Isolated to this stack's own instance; set REDIS_URL=redis://redis:6379 in stewra.env.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - postgres_default
+
   backend:
     build:
       context: .
@@ -24,6 +33,8 @@ services:
     image: stewra-backend:latest
     restart: unless-stopped
     env_file: ./stewra.env
+    depends_on:
+      - redis
     # Loopback-only; the host nginx proxies /api/ here and strips the prefix.
     ports:
       - "127.0.0.1:3023:3001"
@@ -31,6 +42,10 @@ services:
       - postgres_default
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Persisted media (recorded voice clips + Piper TTS output). Set UPLOADS_DIR=/data/uploads in
+    # stewra.env so mediaService writes here; the named volume survives image rebuilds/redeploys.
+    volumes:
+      - stewra_uploads:/data/uploads
 
   website:
     build:
@@ -51,3 +66,7 @@ services:
 networks:
   postgres_default:
     external: true
+
+volumes:
+  # Owner-scoped media store (voice-in clips + TTS-out WAVs), served only via authenticated GET /media/:id.
+  stewra_uploads:

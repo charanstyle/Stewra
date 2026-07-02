@@ -15,6 +15,14 @@ import * as m010 from './migrations/010_process_memory';
 import * as m011 from './migrations/011_sent_mail_optin';
 import * as m012 from './migrations/012_insight_engagement';
 import * as m013 from './migrations/013_process_memory_reward_double';
+import * as m014 from './migrations/014_contacts';
+import * as m015 from './migrations/015_conversations';
+import * as m016 from './migrations/016_messages';
+import * as m017 from './migrations/017_message_reactions_read_receipts';
+import * as m018 from './migrations/018_call_sessions';
+import * as m019 from './migrations/019_call_push_tokens';
+import * as m020 from './migrations/020_stewra_ai_conversation';
+import * as m021 from './migrations/021_media_assets';
 import { logger } from '../utils/logger';
 
 interface Migration {
@@ -37,6 +45,14 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '011_sent_mail_optin', up: m011.up },
   { name: '012_insight_engagement', up: m012.up },
   { name: '013_process_memory_reward_double', up: m013.up },
+  { name: '014_contacts', up: m014.up },
+  { name: '015_conversations', up: m015.up },
+  { name: '016_messages', up: m016.up },
+  { name: '017_message_reactions_read_receipts', up: m017.up },
+  { name: '018_call_sessions', up: m018.up },
+  { name: '019_call_push_tokens', up: m019.up },
+  { name: '020_stewra_ai_conversation', up: m020.up },
+  { name: '021_media_assets', up: m021.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

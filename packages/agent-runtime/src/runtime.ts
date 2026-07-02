@@ -1,6 +1,7 @@
 import type {
   AgentInsight,
   BrokerRequest,
+  ConversationTurn,
   IBrokerClient,
   IModelClient,
   ModelMessage,
@@ -82,6 +83,60 @@ export class AgentRuntime {
     const reply = await this.model.complete(messages);
 
     return { kind, summary: reply.trim() };
+  }
+
+  /**
+   * A multi-turn conversation turn — the Talk-to-Stewra path. Stays exactly as untrusted as
+   * `produceInsight`: the control plane has already loaded the prior turns from the DB and passes them
+   * in as PLAIN DATA (`history`); this runtime never queries the DB. It recalls the user's conversational
+   * style through the SAME broker path the single-shot path uses (a `memory` profile slice), builds the
+   * `ModelMessage[]` (system persona + style + prior turns + the new utterance), asks the model for one
+   * reply, and returns it. No new capability, no action, no data handle — `npm run boundaries` stays green.
+   */
+  async converse(
+    userId: string,
+    history: ReadonlyArray<ConversationTurn>,
+    latestUserText: string,
+  ): Promise<string> {
+    // The user's standing "how I like advice given" rules — shapes tone/approach, same as insights.
+    const styleProfile = await this.recallConversationStyle(userId);
+
+    let systemContent =
+      'You are Stewra, the user\'s personal AI companion, in an ongoing back-and-forth conversation. ' +
+      'Your reply is BOTH spoken aloud and shown as text, so keep it warm, natural, and brief — a ' +
+      'sentence or two, the way a thoughtful person talks. You reason things through and give advice; ' +
+      'you never take actions or claim to have done anything on the user\'s behalf (you can read and ' +
+      'advise, never act).';
+    if (styleProfile.length > 0) {
+      systemContent +=
+        '\n\nHow this user likes their advice given — follow these standing preferences, but never ' +
+        'mention, cite, or ask about them:\n- ' +
+        styleProfile.join('\n- ');
+    }
+
+    const messages: ModelMessage[] = [{ role: 'system', content: systemContent }, ...history];
+    const utterance = latestUserText.trim();
+    if (utterance.length > 0) {
+      messages.push({ role: 'user', content: utterance });
+    }
+
+    const reply = await this.model.complete(messages);
+    return reply.trim();
+  }
+
+  /**
+   * Recall the user's active process/style profile for the `advice` domain — the conversational
+   * counterpart to `recallStyleProfile`, fixed to the domain that governs how Stewra advises. Goes
+   * through the SAME broker `memory`/`profile` path; any denial/empty result just means "no profile".
+   */
+  private async recallConversationStyle(userId: string): Promise<ReadonlyArray<string>> {
+    const result = await this.broker.request({
+      userId,
+      kind: 'memory',
+      purpose: 'ongoing voice conversation with Stewra',
+      params: { slice: 'profile', domain: 'advice' },
+    });
+    return result.allowed ? result.facts : [];
   }
 
   /**

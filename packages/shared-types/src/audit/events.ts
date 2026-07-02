@@ -13,7 +13,9 @@ export type AuditResourceType =
   | 'gmail'
   | 'money'
   | 'memory'
-  | 'process_profile';
+  | 'process_profile'
+  | 'conversation'
+  | 'call';
 
 /**
  * Actions the audit log records. `read` covers brokered data access; `insight` covers an
@@ -38,6 +40,8 @@ export type AuditAction =
   | 'verify'
   | 'view'
   | 'dismiss'
+  | 'converse'
+  | 'call'
   | 'auth.register'
   | 'auth.login'
   | 'auth.refresh';

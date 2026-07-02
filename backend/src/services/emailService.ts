@@ -44,6 +44,30 @@ class EmailService {
     await this.getTransporter().sendMail({ from: config.email.from, to, subject, text, html });
     logger.info(`Verification code emailed to ${to}`);
   }
+
+  /**
+   * Email a contact invitation. `inviterName` is the sender's display name; `inviteUrl` is the link the
+   * invitee follows to accept (it carries the opaque server token). Fails loudly like the code email.
+   */
+  async sendContactInvite(to: string, inviterName: string, inviteUrl: string): Promise<void> {
+    const subject = `${inviterName} invited you to connect on Stewra`;
+    const text =
+      `${inviterName} invited you to connect on Stewra.\n\n` +
+      `Open this link to accept: ${inviteUrl}\n\n` +
+      `Stewra is a careful advisor that only reads — and never acts without you. ` +
+      `If you don't know ${inviterName}, you can safely ignore this email.`;
+    const html =
+      `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;color:#1a1a2e">` +
+      `<h1 style="font-size:20px;margin:0 0 4px">Stewra</h1>` +
+      `<p style="color:#555;margin:0 0 24px">A careful advisor that only reads — and never acts without you.</p>` +
+      `<p style="margin:0 0 16px"><strong>${inviterName}</strong> invited you to connect on Stewra.</p>` +
+      `<p style="margin:0 0 24px"><a href="${inviteUrl}" style="display:inline-block;background:#1a1a2e;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:600">Accept invitation</a></p>` +
+      `<p style="color:#888;font-size:13px;margin:0">If you don't know ${inviterName}, you can safely ignore this email — nothing happens until you act.</p>` +
+      `</div>`;
+
+    await this.getTransporter().sendMail({ from: config.email.from, to, subject, text, html });
+    logger.info(`Contact invite emailed to ${to}`);
+  }
 }
 
 export const emailService = new EmailService();

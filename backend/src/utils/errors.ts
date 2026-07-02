@@ -53,3 +53,9 @@ export class RateLimitError extends AppError {
   readonly statusCode = 429;
   readonly code = 'RATE_LIMITED';
 }
+
+/** A feature the operator has disabled by a kill-switch (e.g. calling when CALLS_ENABLED=false). */
+export class ServiceUnavailableError extends AppError {
+  readonly statusCode = 503;
+  readonly code = 'SERVICE_UNAVAILABLE';
+}

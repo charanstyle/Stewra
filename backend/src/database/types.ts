@@ -2,13 +2,24 @@ import type { ColumnType, Generated } from 'kysely';
 import type {
   AuditAction,
   AuditResourceType,
+  CallEndReason,
+  CallKind,
+  CallPushPlatform,
+  CallStatus,
+  ContactStatus,
+  ConversationType,
+  InviteStatus,
+  MessageType,
+  ParticipantRole,
   ProcessDomain,
   ProcessDimension,
   ProcessRuleSource,
   ProcessRuleStatus,
   ProcessTier,
   Rating,
+  ReactionType,
   ResourceKind,
+  SenderKind,
   UserRole,
 } from '@stewra/shared-types';
 
@@ -192,6 +203,149 @@ export interface EmailVerificationCodesTable {
   created_at: CreatedAt;
 }
 
+/** jsonb bag for message/call structured context. Never raw records or secrets. */
+export type JsonMetadata = Record<string, string | number | boolean | null>;
+
+/**
+ * A directed contact edge (migration 014). One row per direction so "is a contact" is a symmetric
+ * lookup; `status='blocked'` is a one-way suppression the owner sets.
+ */
+export interface ContactsTable {
+  id: Generated<string>;
+  owner_id: string;
+  contact_user_id: string;
+  status: ColumnType<ContactStatus, ContactStatus | undefined, ContactStatus>;
+  created_at: CreatedAt;
+}
+
+/** An invitation to connect, addressed to an email (migration 014). `token` never leaves the server. */
+export interface ContactInvitesTable {
+  id: Generated<string>;
+  inviter_id: string;
+  invitee_email: string;
+  /** Resolved when the email already belongs to a user; null otherwise. */
+  invitee_user_id: string | null;
+  status: ColumnType<InviteStatus, InviteStatus | undefined, InviteStatus>;
+  token: string;
+  created_at: CreatedAt;
+  responded_at: ColumnType<Date | null, Date | null, Date | null>;
+}
+
+/** A conversation thread (migration 015). `type='stewra_ai'` is the singleton assistant thread. */
+export interface ConversationsTable {
+  id: Generated<string>;
+  type: ConversationType;
+  title: string | null;
+  avatar_url: string | null;
+  created_by: string;
+  last_message_at: ColumnType<Date, Date | undefined, Date>;
+  is_archived: ColumnType<boolean, boolean | undefined, boolean>;
+  created_at: CreatedAt;
+}
+
+/** Membership + per-user read state (migration 015). `left_at IS NULL` = still a participant. */
+export interface ConversationParticipantsTable {
+  id: Generated<string>;
+  conversation_id: string;
+  user_id: string;
+  role: ColumnType<ParticipantRole, ParticipantRole | undefined, ParticipantRole>;
+  is_muted: ColumnType<boolean, boolean | undefined, boolean>;
+  last_read_at: ColumnType<Date | null, Date | null, Date | null>;
+  joined_at: ColumnType<Date, Date | undefined, Date>;
+  left_at: ColumnType<Date | null, Date | null, Date | null>;
+}
+
+/**
+ * One message (migration 016). `sender_id` is null for assistant turns (sender_kind='assistant').
+ * `audio_url`/`transcript` back the heard-and-read Stewra reply.
+ */
+export interface MessagesTable {
+  id: Generated<string>;
+  conversation_id: string;
+  sender_id: string | null;
+  sender_kind: ColumnType<SenderKind, SenderKind | undefined, SenderKind>;
+  message_type: ColumnType<MessageType, MessageType | undefined, MessageType>;
+  content: string | null;
+  media_url: string | null;
+  media_type: string | null;
+  media_duration_sec: number | null;
+  thumbnail_url: string | null;
+  audio_url: string | null;
+  transcript: string | null;
+  metadata: ColumnType<JsonMetadata, string | undefined, string>;
+  reply_to_message_id: string | null;
+  is_edited: ColumnType<boolean, boolean | undefined, boolean>;
+  is_deleted: ColumnType<boolean, boolean | undefined, boolean>;
+  delivered_at: ColumnType<Date | null, Date | null, Date | null>;
+  created_at: CreatedAt;
+}
+
+/** One reaction per (message, user, type) (migration 017). */
+export interface MessageReactionsTable {
+  id: Generated<string>;
+  message_id: string;
+  user_id: string;
+  reaction_type: ReactionType;
+  created_at: CreatedAt;
+}
+
+/** Per-recipient read receipt (migration 017); row presence = that user read that message. */
+export interface MessageReadReceiptsTable {
+  id: Generated<string>;
+  message_id: string;
+  user_id: string;
+  read_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/** One row per call attempt (migration 018). Media never touches the server; this is the record. */
+export interface CallSessionsTable {
+  id: Generated<string>;
+  conversation_id: string;
+  initiated_by: string;
+  call_type: CallKind;
+  status: ColumnType<CallStatus, CallStatus | undefined, CallStatus>;
+  started_at: ColumnType<Date | null, Date | null, Date | null>;
+  ended_at: ColumnType<Date | null, Date | null, Date | null>;
+  duration_sec: number | null;
+  end_reason: CallEndReason | null;
+  metadata: ColumnType<JsonMetadata, string | undefined, string>;
+  created_at: CreatedAt;
+}
+
+/** Per-participant call state (migration 018). Enables the group-call mesh. */
+export interface CallParticipantsTable {
+  id: Generated<string>;
+  call_id: string;
+  user_id: string;
+  joined_at: ColumnType<Date | null, Date | null, Date | null>;
+  left_at: ColumnType<Date | null, Date | null, Date | null>;
+  audio_enabled: ColumnType<boolean, boolean | undefined, boolean>;
+  video_enabled: ColumnType<boolean, boolean | undefined, boolean>;
+}
+
+/** Push routing for background ringing (migration 019). One row per (user, platform). */
+export interface CallPushTokensTable {
+  id: Generated<string>;
+  user_id: string;
+  platform: CallPushPlatform;
+  voip_token: string | null;
+  fcm_token: string | null;
+  created_at: ColumnType<Date, Date | undefined, Date>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/** One stored binary (migration 021), owner-scoped so `GET /media/:id` can authorize before streaming. */
+export interface MediaAssetsTable {
+  id: Generated<string>;
+  owner_id: string;
+  conversation_id: string | null;
+  kind: 'voice_in' | 'tts_out' | 'image' | 'video' | 'audio' | 'file';
+  path: string;
+  mime: string;
+  bytes: ColumnType<bigint, bigint | number, never>;
+  created_at: CreatedAt;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -204,4 +358,15 @@ export interface Database {
   insight_feedback: InsightFeedbackTable;
   agent_memory: AgentMemoryTable;
   process_memory: ProcessMemoryTable;
+  contacts: ContactsTable;
+  contact_invites: ContactInvitesTable;
+  conversations: ConversationsTable;
+  conversation_participants: ConversationParticipantsTable;
+  messages: MessagesTable;
+  message_reactions: MessageReactionsTable;
+  message_read_receipts: MessageReadReceiptsTable;
+  call_sessions: CallSessionsTable;
+  call_participants: CallParticipantsTable;
+  call_push_tokens: CallPushTokensTable;
+  media_assets: MediaAssetsTable;
 }

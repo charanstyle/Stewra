@@ -13,6 +13,11 @@ import feedbackRoutes from './routes/feedback';
 import memoryRoutes from './routes/memory';
 import processRulesRoutes from './routes/processRules';
 import preferencesRoutes from './routes/preferences';
+import contactsRoutes from './routes/contacts';
+import conversationsRoutes from './routes/conversations';
+import messagesRoutes from './routes/messages';
+import callsRoutes from './routes/calls';
+import mediaRoutes from './routes/media';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 
 /**
@@ -42,6 +47,11 @@ export function createApp(): Express {
   app.use('/memory', memoryRoutes);
   app.use('/process-rules', processRulesRoutes);
   app.use('/preferences', preferencesRoutes);
+  app.use('/contacts', contactsRoutes);
+  app.use('/conversations', conversationsRoutes);
+  app.use('/messages', messagesRoutes);
+  app.use('/calls', callsRoutes);
+  app.use('/media', mediaRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -33,9 +33,33 @@ import type {
   UpdateProcessRuleRequest,
   UpdateProcessRuleResponse,
   DeleteProcessRuleResponse,
+  SearchUsersResponse,
+  ListContactsResponse,
+  SendInviteRequest,
+  SendInviteResponse,
+  ListInvitesResponse,
+  RespondInviteRequest,
+  RespondInviteResponse,
+  BlockContactRequest,
+  BlockContactResponse,
+  CreateConversationRequest,
+  CreateConversationResponse,
+  ListConversationsResponse,
+  GetConversationResponse,
+  GetStewraConversationResponse,
+  MarkReadResponse,
+  SendMessageRequest,
+  SendMessageResponse,
+  ListMessagesResponse,
+  ReactRequest,
+  ReactResponse,
+  DeleteMessageResponse,
+  SendVoiceMessageResponse,
+  TurnCredentialsResponse,
+  ListCallHistoryResponse,
 } from '@stewra/shared-types';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 if (!BASE_URL) {
   // Fail loud: no hardcoded fallback URL (see the project's no-hardcoding rule).
   throw new Error('VITE_API_BASE_URL is not set — configure website/.env');
@@ -100,6 +124,25 @@ async function request<T>(
     init.body = JSON.stringify(options.body);
   }
   const response = await fetch(`${BASE_URL}${path}`, init);
+
+  const payload: ApiResponse<T> = await response.json();
+  if (!payload.success) {
+    throw new ApiError(payload.error.message, payload.error.code);
+  }
+  return payload.data;
+}
+
+/**
+ * Like `request`, but sends a `FormData` body (multipart) — used for the voice/media upload routes.
+ * The browser sets the `Content-Type` (with the multipart boundary) itself, so we must NOT set it here.
+ */
+async function requestMultipart<T>(path: string, form: FormData): Promise<T> {
+  const headers: Record<string, string> = {};
+  const tokens = readTokens();
+  if (tokens) {
+    headers.Authorization = `Bearer ${tokens.accessToken}`;
+  }
+  const response = await fetch(`${BASE_URL}${path}`, { method: 'POST', headers, body: form });
 
   const payload: ApiResponse<T> = await response.json();
   if (!payload.success) {
@@ -199,4 +242,112 @@ export const api = {
 
   deleteProcessRule: (id: string): Promise<DeleteProcessRuleResponse> =>
     request(`/process-rules/${id}`, { method: 'DELETE' }),
+
+  // --- Contacts & invites ---
+
+  searchUsers: (query: string): Promise<SearchUsersResponse> =>
+    request(`/contacts/search?query=${encodeURIComponent(query)}`),
+
+  listContacts: (): Promise<ListContactsResponse> => request('/contacts'),
+
+  sendInvite: (body: SendInviteRequest): Promise<SendInviteResponse> =>
+    request('/contacts/invite', { method: 'POST', body }),
+
+  listInvites: (): Promise<ListInvitesResponse> => request('/contacts/invites'),
+
+  respondInvite: (
+    inviteId: string,
+    body: RespondInviteRequest,
+  ): Promise<RespondInviteResponse> =>
+    request(`/contacts/invites/${inviteId}/respond`, { method: 'POST', body }),
+
+  blockContact: (body: BlockContactRequest): Promise<BlockContactResponse> =>
+    request('/contacts/block', { method: 'POST', body }),
+
+  // --- Conversations ---
+
+  createConversation: (
+    body: CreateConversationRequest,
+  ): Promise<CreateConversationResponse> =>
+    request('/conversations', { method: 'POST', body }),
+
+  listConversations: (): Promise<ListConversationsResponse> => request('/conversations'),
+
+  getConversation: (id: string): Promise<GetConversationResponse> =>
+    request(`/conversations/${id}`),
+
+  getStewraConversation: (): Promise<GetStewraConversationResponse> =>
+    request('/conversations/stewra'),
+
+  markConversationRead: (
+    id: string,
+    upToMessageId: string,
+  ): Promise<MarkReadResponse> =>
+    request(`/conversations/${id}/read`, { method: 'POST', body: { upToMessageId } }),
+
+  // --- Messages ---
+
+  sendMessage: (body: SendMessageRequest): Promise<SendMessageResponse> =>
+    request('/messages', { method: 'POST', body }),
+
+  listMessages: (
+    conversationId: string,
+    params: { cursor?: string; limit?: number } = {},
+  ): Promise<ListMessagesResponse> => {
+    const query = new URLSearchParams({ conversationId });
+    if (params.cursor !== undefined) {
+      query.set('cursor', params.cursor);
+    }
+    if (params.limit !== undefined) {
+      query.set('limit', String(params.limit));
+    }
+    return request(`/messages?${query.toString()}`);
+  },
+
+  reactToMessage: (id: string, body: ReactRequest): Promise<ReactResponse> =>
+    request(`/messages/${id}/react`, { method: 'POST', body }),
+
+  deleteMessage: (id: string): Promise<DeleteMessageResponse> =>
+    request(`/messages/${id}`, { method: 'DELETE' }),
+
+  /**
+   * Upload a recorded voice clip as a multipart form (field name `audio`). The backend transcribes it
+   * (whisper.cpp) and, for the Stewra-AI conversation, also returns the assistant's spoken reply.
+   */
+  sendVoiceMessage: (
+    conversationId: string,
+    audio: Blob,
+    filename = 'voice.webm',
+  ): Promise<SendVoiceMessageResponse> => {
+    const form = new FormData();
+    form.set('conversationId', conversationId);
+    form.set('audio', audio, filename);
+    return requestMultipart('/messages/voice', form);
+  },
+
+  // --- Calls ---
+
+  getTurnCredentials: (): Promise<TurnCredentialsResponse> =>
+    request('/calls/turn-credentials'),
+
+  listCallHistory: (): Promise<ListCallHistoryResponse> => request('/calls/history'),
 };
+
+/**
+ * Fetch an authenticated `/media/:id` asset and return an object URL for playback in an
+ * `<audio>`/`<img>` element. The caller owns the returned URL and should `URL.revokeObjectURL` it when
+ * the element unmounts. `mediaPath` is a message's `audioUrl`/`mediaUrl` (e.g. `/media/<uuid>`).
+ */
+export async function fetchMediaObjectUrl(mediaPath: string): Promise<string> {
+  const tokens = readTokens();
+  const headers: Record<string, string> = {};
+  if (tokens) {
+    headers.Authorization = `Bearer ${tokens.accessToken}`;
+  }
+  const response = await fetch(`${BASE_URL}${mediaPath}`, { headers });
+  if (!response.ok) {
+    throw new ApiError(`Failed to load media (${response.status})`, 'MEDIA_FETCH_FAILED');
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}

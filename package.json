@@ -6,7 +6,8 @@
   "workspaces": [
     "packages/*",
     "backend",
-    "website"
+    "website",
+    "frontend"
   ],
   "engines": {
     "node": ">=18"
@@ -15,7 +16,7 @@
     "build:types": "npm run build -w @stewra/shared-types",
     "build:agent": "npm run build -w @stewra/agent-runtime",
     "build": "npm run build:types && npm run build:agent && npm run build -w backend",
-    "typecheck": "npm run typecheck -w @stewra/shared-types && npm run typecheck -w @stewra/agent-runtime && npm run typecheck -w backend",
+    "typecheck": "npm run typecheck -w @stewra/shared-types && npm run typecheck -w @stewra/agent-runtime && npm run typecheck -w backend && npm run typecheck -w website && npm run typecheck -w frontend",
     "lint": "eslint \"backend/src/**/*.ts\" \"packages/*/src/**/*.ts\"",
     "lint:fix": "eslint \"backend/src/**/*.ts\" \"packages/*/src/**/*.ts\" --fix",
     "dev:backend": "npm run dev -w backend",

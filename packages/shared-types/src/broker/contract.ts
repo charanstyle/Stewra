@@ -47,11 +47,23 @@ export interface ModelMessage {
 }
 
 /**
+ * A turn in a multi-turn conversation with the assistant. Same shape as a `ModelMessage`; the alias
+ * exists only to read clearly at the `converse` call site (a list of prior turns, not a one-shot prompt).
+ */
+export type ConversationTurn = ModelMessage;
+
+/**
  * The model interface, injected into the agent. Swappable behind one interface (no hardcoded
  * vendor). In M0 the concrete impl is a deterministic stub so the agent loop runs without a key.
+ *
+ * `complete` buffers the whole reply (the preferred Claude-CLI path cannot stream). The OPTIONAL
+ * `completeStream` is implemented ONLY by streaming-capable providers (the Anthropic SDK path); the
+ * agent/host must treat its absence as "no streaming" and fall back to `complete`. Adding it grants the
+ * agent NO new capability — it is still just "ask the model", never data access or actions.
  */
 export interface IModelClient {
   complete(messages: ReadonlyArray<ModelMessage>): Promise<string>;
+  completeStream?(messages: ReadonlyArray<ModelMessage>): AsyncIterable<string>;
 }
 
 /** An insight produced by the agent — advice only, never an action (read-first product). */

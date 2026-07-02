@@ -137,6 +137,44 @@ const EnvSchema = z.object({
   OPENAI_API_KEY: z.string().min(1).optional(),
   GEMINI_API_KEY: z.string().min(1).optional(),
   GROK_API_KEY: z.string().min(1).optional(),
+  // Redis is a REQUIRED dependency of the realtime layer: it backs the Socket.IO adapter (so multiple
+  // backend instances share rooms/presence) and the presence store. Fail loud if absent — we never
+  // silently fall back to a single-process in-memory bus (that would break fan-out in prod).
+  REDIS_URL: z.string().url('REDIS_URL must be a valid redis:// URL'),
+  // Master switch for audio/video calling. When false, the /calls routes return 503 and signaling is
+  // not wired — a dev box without coturn isn't blocked. The TURN_* knobs below are required only when
+  // this is true (checked post-parse, mirroring the MODEL_PROVIDER block).
+  CALLS_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // coturn (shared on `home`, distinct Stewra realm + secret). Comma-separated TURN URLs (e.g.
+  // 'turns:turn.stewra.com:5349?transport=tcp'); the shared static-auth-secret used to mint ephemeral
+  // HMAC-SHA1 creds; the realm; and the credential TTL. Required when CALLS_ENABLED=true. Force-relay
+  // (no public STUN) so calls fail loud rather than silently degrade to a direct path.
+  TURN_URLS: z.string().min(1).optional(),
+  TURN_SECRET: z.string().min(1).optional(),
+  TURN_REALM: z.string().min(1).optional(),
+  TURN_CRED_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
+  // Background-ringing push credentials — all OPTIONAL. Ringing degrades to in-app when unset. APNs
+  // VoIP/PushKit for iOS; an FCM service-account JSON (raw JSON string) for Android data pushes.
+  APNS_KEY_ID: z.string().min(1).optional(),
+  APNS_TEAM_ID: z.string().min(1).optional(),
+  APNS_BUNDLE_ID: z.string().min(1).optional(),
+  APNS_KEY_P8: z.string().min(1).optional(),
+  FCM_SERVICE_ACCOUNT_JSON: z.string().min(1).optional(),
+  // Master switch for talk-to-Stewra voice (STT/TTS). When false, /messages/voice returns 503 so a dev
+  // box without whisper.cpp/Piper isn't blocked. The WHISPER_*/PIPER_*/UPLOADS_* knobs are required
+  // only when this is true (checked post-parse). Binaries are invoked via execFile (no shell) like the
+  // Claude CLI — fail-loud, config-driven paths, never hardcoded.
+  VOICE_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  WHISPER_BIN: z.string().min(1).optional(),
+  WHISPER_MODEL: z.string().min(1).optional(),
+  PIPER_BIN: z.string().min(1).optional(),
+  PIPER_VOICE: z.string().min(1).optional(),
+  // Where uploaded/synthesized media is written (a mounted volume in prod). Required when voice is on
+  // (voice notes + TTS output land here); also used by any media upload. Served ONLY via the
+  // authenticated GET /media/:id — never statically/publicly.
+  UPLOADS_DIR: z.string().min(1).optional(),
+  // Hard cap on an uploaded clip/attachment size, in bytes. Bounds multer + guards disk. Default 25 MB.
+  MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).max(536870912).default(26214400),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -173,6 +211,26 @@ if (env.MODEL_PROVIDER !== 'claude_cli') {
   }
   if (!env.MODEL_ID) {
     throw new Error(`MODEL_PROVIDER='${env.MODEL_PROVIDER}' requires MODEL_ID to be set`);
+  }
+}
+
+// Fail loud when calling is enabled but its coturn credentials are incomplete. Force-relay depends on
+// real TURN creds; a half-configured realm would let calls silently fail at connect time.
+if (env.CALLS_ENABLED) {
+  const missing = (['TURN_URLS', 'TURN_SECRET', 'TURN_REALM'] as const).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`CALLS_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+}
+
+// Fail loud when voice is enabled but a binary/model/uploads path is missing — STT/TTS can't run
+// without them, and we never want a 500 mid-conversation from an unset path.
+if (env.VOICE_ENABLED) {
+  const missing = (
+    ['WHISPER_BIN', 'WHISPER_MODEL', 'PIPER_BIN', 'PIPER_VOICE', 'UPLOADS_DIR'] as const
+  ).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`VOICE_ENABLED=true requires: ${missing.join(', ')}`);
   }
 }
 
@@ -273,6 +331,46 @@ export const config = {
     apiKey: API_KEY_BY_PROVIDER[env.MODEL_PROVIDER] ?? '',
     // OpenAI-compatible base URL ('' for claude_cli / anthropic, which don't use it).
     baseUrl: resolvedBaseUrl,
+  },
+  redis: {
+    // Backs the Socket.IO adapter + presence store. Required — no single-process fallback.
+    url: env.REDIS_URL,
+  },
+  calls: {
+    // Master switch; when false the /calls routes 503 and signaling stays unwired.
+    enabled: env.CALLS_ENABLED,
+    // Trimmed TURN URL list (force-relay). Empty when calling is disabled.
+    turnUrls: (env.TURN_URLS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+    // Shared static-auth-secret for the distinct Stewra realm; '' when disabled.
+    turnSecret: env.TURN_SECRET ?? '',
+    turnRealm: env.TURN_REALM ?? '',
+    // TTL of a minted ephemeral credential (seconds).
+    turnCredTtlSeconds: env.TURN_CRED_TTL_SECONDS,
+  },
+  push: {
+    // APNs VoIP/PushKit (iOS) — all optional; ringing degrades to in-app when unset.
+    apnsKeyId: env.APNS_KEY_ID ?? '',
+    apnsTeamId: env.APNS_TEAM_ID ?? '',
+    apnsBundleId: env.APNS_BUNDLE_ID ?? '',
+    apnsKeyP8: env.APNS_KEY_P8 ?? '',
+    // FCM service-account JSON (raw string) for Android data pushes; '' when unset.
+    fcmServiceAccountJson: env.FCM_SERVICE_ACCOUNT_JSON ?? '',
+  },
+  voice: {
+    // Master switch; when false /messages/voice 503s. STT/TTS binaries invoked via execFile.
+    enabled: env.VOICE_ENABLED,
+    whisperBin: env.WHISPER_BIN ?? '',
+    whisperModel: env.WHISPER_MODEL ?? '',
+    piperBin: env.PIPER_BIN ?? '',
+    piperVoice: env.PIPER_VOICE ?? '',
+  },
+  uploads: {
+    // Mounted volume for uploaded/synthesized media; served only via authenticated GET /media/:id.
+    dir: env.UPLOADS_DIR ?? '',
+    maxBytes: env.MAX_UPLOAD_BYTES,
   },
 } as const;
 
