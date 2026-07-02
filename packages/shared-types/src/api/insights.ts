@@ -1,9 +1,16 @@
+import type { UUID } from '../common/base';
 import type { AgentInsight, ResourceKind } from '../broker/contract';
 
 /** Inclusive bounds on the Gmail lookback window (in days). Single source of truth shared by the
  * API request validator (backend) and the UI form (website) — never re-typed as a literal. */
 export const GMAIL_LOOKBACK_MIN_DAYS = 1;
 export const GMAIL_LOOKBACK_MAX_DAYS = 90;
+
+/** Inclusive bounds on the Calendar look-AHEAD window (in days). Single source of truth for the
+ * backend config validator — the deploy-level default must fall within these. Kept here beside the
+ * Gmail bounds so both windows share one contract rather than scattering magic numbers in code. */
+export const CALENDAR_LOOKAHEAD_MIN_DAYS = 1;
+export const CALENDAR_LOOKAHEAD_MAX_DAYS = 30;
 
 /**
  * Ask the agent to produce one advice-only insight over a connected resource. `purpose` is an
@@ -20,4 +27,9 @@ export interface GenerateInsightRequest {
 
 export interface GenerateInsightResponse {
   readonly insight: AgentInsight;
+  /**
+   * The id of the persisted insight, so the client can attach feedback to it
+   * (POST /insights/:insightId/feedback). The control plane assigns it when it records the insight.
+   */
+  readonly insightId: UUID;
 }

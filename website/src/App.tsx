@@ -3,6 +3,7 @@ import { AuthProvider, ProtectedRoute } from './hooks/useAuth';
 import LoginPage from './app/login/LoginPage';
 import VerifyEmailPage from './app/verify/VerifyEmailPage';
 import ActivityPage from './app/activity/ActivityPage';
+import MemoryPage from './app/memory/MemoryPage';
 
 export default function App(): React.JSX.Element {
   return (
@@ -22,6 +23,14 @@ export default function App(): React.JSX.Element {
           element={
             <ProtectedRoute>
               <ActivityPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/memory"
+          element={
+            <ProtectedRoute>
+              <MemoryPage />
             </ProtectedRoute>
           }
         />

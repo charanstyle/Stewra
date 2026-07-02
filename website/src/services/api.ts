@@ -18,6 +18,20 @@ import type {
   VerifyEmailRequest,
   VerifyEmailResponse,
   ResendVerificationResponse,
+  SubmitFeedbackRequest,
+  SubmitFeedbackResponse,
+  ListMemoriesRequest,
+  ListMemoriesResponse,
+  UpdateMemoryRequest,
+  UpdateMemoryResponse,
+  DeleteMemoryResponse,
+  ListProcessRulesRequest,
+  ListProcessRulesResponse,
+  CreateProcessRuleRequest,
+  CreateProcessRuleResponse,
+  UpdateProcessRuleRequest,
+  UpdateProcessRuleResponse,
+  DeleteProcessRuleResponse,
 } from '@stewra/shared-types';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -121,8 +135,59 @@ export const api = {
   generateInsight: (body: GenerateInsightRequest): Promise<GenerateInsightResponse> =>
     request('/insights', { method: 'POST', body }),
 
+  submitFeedback: (
+    insightId: string,
+    body: SubmitFeedbackRequest,
+  ): Promise<SubmitFeedbackResponse> =>
+    request(`/insights/${insightId}/feedback`, { method: 'POST', body }),
+
+  listMemories: (params: ListMemoriesRequest = {}): Promise<ListMemoriesResponse> => {
+    const query = new URLSearchParams();
+    if (params.search !== undefined) {
+      query.set('search', params.search);
+    }
+    if (params.kind !== undefined) {
+      query.set('kind', params.kind);
+    }
+    const suffix = query.toString();
+    return request(`/memory${suffix ? `?${suffix}` : ''}`);
+  },
+
+  updateMemory: (id: string, body: UpdateMemoryRequest): Promise<UpdateMemoryResponse> =>
+    request(`/memory/${id}`, { method: 'PATCH', body }),
+
+  deleteMemory: (id: string): Promise<DeleteMemoryResponse> =>
+    request(`/memory/${id}`, { method: 'DELETE' }),
+
   getPreferences: (): Promise<GetPreferencesResponse> => request('/preferences'),
 
   updatePreferences: (body: UpdatePreferencesRequest): Promise<UpdatePreferencesResponse> =>
     request('/preferences', { method: 'PATCH', body }),
+
+  listProcessRules: (params: ListProcessRulesRequest = {}): Promise<ListProcessRulesResponse> => {
+    const query = new URLSearchParams();
+    if (params.domain !== undefined) {
+      query.set('domain', params.domain);
+    }
+    if (params.status !== undefined) {
+      query.set('status', params.status);
+    }
+    if (params.search !== undefined) {
+      query.set('search', params.search);
+    }
+    const suffix = query.toString();
+    return request(`/process-rules${suffix ? `?${suffix}` : ''}`);
+  },
+
+  createProcessRule: (body: CreateProcessRuleRequest): Promise<CreateProcessRuleResponse> =>
+    request('/process-rules', { method: 'POST', body }),
+
+  updateProcessRule: (
+    id: string,
+    body: UpdateProcessRuleRequest,
+  ): Promise<UpdateProcessRuleResponse> =>
+    request(`/process-rules/${id}`, { method: 'PATCH', body }),
+
+  deleteProcessRule: (id: string): Promise<DeleteProcessRuleResponse> =>
+    request(`/process-rules/${id}`, { method: 'DELETE' }),
 };

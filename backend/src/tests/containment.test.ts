@@ -45,9 +45,22 @@ describe('agent containment', () => {
 
     const insight = await runtime.produceInsight('user-1', 'calendar', 'weekly look');
 
-    // It asked the broker exactly once, and the model exactly once — no other capability exists.
-    expect(broker.requests).toHaveLength(1);
+    // It reaches data ONLY through the broker: one call for the calendar slice, one for the user's
+    // process/style profile (kind:'memory', slice:'profile'), and one for the past-success exemplars
+    // (kind:'memory', scoped to calendar). All three go through the SAME broker — the single access
+    // path — and the model is called exactly once. No other capability exists.
+    expect(broker.requests).toHaveLength(3);
     expect(broker.requests[0]).toMatchObject({ userId: 'user-1', kind: 'calendar' });
+    expect(broker.requests[1]).toMatchObject({
+      userId: 'user-1',
+      kind: 'memory',
+      params: { slice: 'profile', domain: 'calendar' },
+    });
+    expect(broker.requests[2]).toMatchObject({
+      userId: 'user-1',
+      kind: 'memory',
+      params: { scopeKind: 'calendar' },
+    });
     expect(model.calls).toHaveLength(1);
     expect(insight.summary).toContain('Thursday');
   });

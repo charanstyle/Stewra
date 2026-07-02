@@ -9,6 +9,9 @@ import emailVerificationRoutes from './routes/emailVerification';
 import activityRoutes from './routes/activity';
 import connectionRoutes from './routes/connections';
 import insightRoutes from './routes/insights';
+import feedbackRoutes from './routes/feedback';
+import memoryRoutes from './routes/memory';
+import processRulesRoutes from './routes/processRules';
 import preferencesRoutes from './routes/preferences';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 
@@ -35,6 +38,9 @@ export function createApp(): Express {
   app.use('/activity', activityRoutes);
   app.use('/connections', connectionRoutes);
   app.use('/insights', insightRoutes);
+  app.use('/insights', feedbackRoutes);
+  app.use('/memory', memoryRoutes);
+  app.use('/process-rules', processRulesRoutes);
   app.use('/preferences', preferencesRoutes);
 
   app.use(notFoundHandler);

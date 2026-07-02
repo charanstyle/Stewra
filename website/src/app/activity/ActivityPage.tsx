@@ -10,6 +10,7 @@ import {
 } from '@stewra/shared-types';
 import { useAuth } from '../../hooks/useAuth';
 import { api, ApiError } from '../../services/api';
+import { FeedbackControl } from '../../components/FeedbackControl/FeedbackControl';
 import styles from './ActivityPage.module.css';
 
 function describeError(err: unknown): string {
@@ -31,10 +32,13 @@ export default function ActivityPage(): React.JSX.Element {
   const [consentPrompt, setConsentPrompt] = useState<string | null>(null);
   const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null);
   const [insight, setInsight] = useState<string | null>(null);
+  const [insightId, setInsightId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const justConnected = searchParams.get('connected') === 'google';
+  const connectedParam = searchParams.get('connected');
+  const justConnected = connectedParam === 'google';
+  const connectFailed = connectedParam === 'error';
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -95,10 +99,12 @@ export default function ActivityPage(): React.JSX.Element {
     async (kind: ResourceKind): Promise<void> => {
       setError(null);
       setInsight(null);
+      setInsightId(null);
       setBusy(true);
       try {
         const res = await api.generateInsight({ kind });
         setInsight(res.insight.summary);
+        setInsightId(res.insightId);
         await refresh();
       } catch (err) {
         setError(describeError(err));
@@ -125,6 +131,21 @@ export default function ActivityPage(): React.JSX.Element {
     }
   }, [lookbackInput]);
 
+  const toggleSentMailLearning = useCallback(async (): Promise<void> => {
+    if (!preferences) {
+      return;
+    }
+    setError(null);
+    try {
+      const res = await api.updatePreferences({
+        learnFromSentMail: !preferences.learnFromSentMail,
+      });
+      setPreferences(res.preferences);
+    } catch (err) {
+      setError(describeError(err));
+    }
+  }, [preferences]);
+
   const dismissConnected = useCallback((): void => {
     searchParams.delete('connected');
     setSearchParams(searchParams, { replace: true });
@@ -136,6 +157,9 @@ export default function ActivityPage(): React.JSX.Element {
         <h1 className={styles.brand}>Stewra</h1>
         <div className={styles.headerRight}>
           <span className={styles.who}>{user?.displayName}</span>
+          <button type="button" className={styles.ghost} onClick={() => navigate('/memory')}>
+            What I’ve learned
+          </button>
           <button type="button" className={styles.ghost} onClick={logout}>
             Sign out
           </button>
@@ -162,8 +186,14 @@ export default function ActivityPage(): React.JSX.Element {
           ✓ Google account connected. Generate an insight below to see it in action.
         </div>
       )}
+      {connectFailed && (
+        <div className={styles.error} onClick={dismissConnected} role="alert">
+          We couldn’t finish connecting your Google account. Nothing was changed — please try again.
+        </div>
+      )}
       {error && <div className={styles.error}>{error}</div>}
       {insight && <div className={styles.insight}>💡 {insight}</div>}
+      {insightId !== null && <FeedbackControl key={insightId} insightId={insightId} />}
 
       <section className={styles.grid}>
         <div className={styles.col}>
@@ -226,6 +256,29 @@ export default function ActivityPage(): React.JSX.Element {
             {preferences && (
               <p className={styles.mutedSmall}>Currently {preferences.gmailLookbackDays} days.</p>
             )}
+          </div>
+
+          <div className={styles.card}>
+            <h2 className={styles.cardTitle}>Learn my writing style</h2>
+            <p className={styles.muted}>
+              Let Stewra study <strong>how</strong> you write from your own sent emails — your
+              greeting, tone, and who you tend to CC — to shape better email advice. It keeps only the
+              style (never the emails themselves), proposes what it notices for you to confirm, and
+              forgets it all if you disconnect Google.
+            </p>
+            <label className={styles.toggleRow}>
+              <input
+                type="checkbox"
+                checked={preferences?.learnFromSentMail ?? false}
+                disabled={!preferences}
+                onChange={() => void toggleSentMailLearning()}
+              />
+              <span>
+                {preferences?.learnFromSentMail
+                  ? 'On — learning style from your sent mail'
+                  : 'Off — your sent mail is never read'}
+              </span>
+            </label>
           </div>
 
           <div className={styles.card}>

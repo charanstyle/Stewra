@@ -3,7 +3,8 @@ import type { ISODateString, UUID } from '../common/base';
 /**
  * Resource kinds the audit log can describe. `memory` is included now (even though memory
  * features ship post-M1/M2) so memory reads/writes log through THIS same append-only table —
- * we never build a second access/audit path (see memory-and-learning.md §5/§6).
+ * we never build a second access/audit path (see memory-and-learning.md §5/§6). `process_profile`
+ * covers the user's process/style rules (how they like work done) for the same reason.
  */
 export type AuditResourceType =
   | 'auth'
@@ -11,17 +12,24 @@ export type AuditResourceType =
   | 'calendar'
   | 'gmail'
   | 'money'
-  | 'memory';
+  | 'memory'
+  | 'process_profile';
 
 /**
  * Actions the audit log records. `read` covers brokered data access; `insight` covers an
- * agent-produced insight; `propose` covers a model-proposed (never silently written) memory;
- * `connect`/`disconnect` cover a user adding or revoking a sanctioned source; `verify` covers the
- * user proving ownership of their email.
+ * agent-produced insight; `feedback` covers the user rating an insight; `learn` covers a memory
+ * saved or edited from that feedback (user-authored, auto-saved with full visibility — never silent
+ * about it); `forget` covers a real deletion of a memory (per-item or forget-on-disconnect), so
+ * removals are as visible as writes; `propose` covers a model-proposed (never silently written)
+ * memory; `connect`/`disconnect` cover a user adding or revoking a sanctioned source; `verify`
+ * covers the user proving ownership of email.
  */
 export type AuditAction =
   | 'read'
   | 'insight'
+  | 'feedback'
+  | 'learn'
+  | 'forget'
   | 'propose'
   | 'connect'
   | 'disconnect'

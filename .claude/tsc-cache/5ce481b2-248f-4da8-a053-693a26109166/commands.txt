@@ -1,2 +1,0 @@
-website:build:cd /home/robinstyle/projects/Stewra/website && npm run build
-website:tsc:cd /home/robinstyle/projects/Stewra/website && npx tsc --noEmit

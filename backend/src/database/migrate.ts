@@ -8,6 +8,11 @@ import * as m003 from './migrations/003_connections';
 import * as m004 from './migrations/004_vault_secrets';
 import * as m005 from './migrations/005_user_preferences';
 import * as m006 from './migrations/006_email_verification';
+import * as m007 from './migrations/007_agent_insights';
+import * as m008 from './migrations/008_insight_feedback';
+import * as m009 from './migrations/009_agent_memory';
+import * as m010 from './migrations/010_process_memory';
+import * as m011 from './migrations/011_sent_mail_optin';
 import { logger } from '../utils/logger';
 
 interface Migration {
@@ -23,6 +28,11 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '004_vault_secrets', up: m004.up },
   { name: '005_user_preferences', up: m005.up },
   { name: '006_email_verification', up: m006.up },
+  { name: '007_agent_insights', up: m007.up },
+  { name: '008_insight_feedback', up: m008.up },
+  { name: '009_agent_memory', up: m009.up },
+  { name: '010_process_memory', up: m010.up },
+  { name: '011_sent_mail_optin', up: m011.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

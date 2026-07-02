@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import * as Sentry from '@sentry/node';
 import type {
   StartCalendarConnectionResponse,
   ListConnectionsResponse,
@@ -15,7 +16,10 @@ import {
   verifyCalendarState,
   exchangeCodeForRefreshToken,
   fetchAccountEmail,
+  revokeRefreshToken,
 } from '../services/googleOAuthService';
+import { memoryService } from '../services/memoryService';
+import { processMemoryService } from '../services/processMemoryService';
 import { parse } from '../utils/validate';
 import { NotFoundError } from '../utils/errors';
 
@@ -58,8 +62,19 @@ class ConnectionController extends BaseController {
 
       const refreshToken = await exchangeCodeForRefreshToken(code);
       const accountEmail = await fetchAccountEmail(refreshToken);
+
+      // Reconnecting the same account replaces its token — capture the handle it's about to
+      // supersede so we can purge the old ciphertext from the vault after the upsert succeeds.
+      const priorVaultRef = await connectionRepository.vaultRefForAccount(
+        userId,
+        'google',
+        accountEmail,
+      );
       const vaultRef = await vault.put(refreshToken);
       await connectionRepository.upsert(userId, 'google', accountEmail, vaultRef);
+      if (priorVaultRef !== undefined && priorVaultRef !== vaultRef) {
+        await vault.delete(priorVaultRef);
+      }
 
       await auditWriter.write({
         userId,
@@ -73,8 +88,10 @@ class ConnectionController extends BaseController {
 
       res.redirect(302, `${config.web.appUrl}/activity?connected=google`);
     } catch (error) {
-      // A failed callback can't render JSON into a browser tab usefully — send them back with a flag.
-      this.handleError(error, res, 'ConnectionController.googleCallback');
+      // A failed callback can't render JSON into a browser tab usefully — capture it for triage and
+      // send the browser back to the app with an error flag the UI can surface plainly.
+      Sentry.captureException(error);
+      res.redirect(302, `${config.web.appUrl}/activity?connected=error`);
     }
   }
 
@@ -106,6 +123,19 @@ class ConnectionController extends BaseController {
         throw new NotFoundError('Connection not found');
       }
 
+      // A one-tap disconnect must sever access everywhere, not just flip a local flag. Revoke the
+      // token at Google, then delete the ciphertext from the vault so no dead credential lingers at
+      // rest. Both are best-effort — a token Google already dropped, or an already-purged secret,
+      // must not block the user's revoke — but we record whether Google acknowledged it.
+      let revokedAtGoogle = false;
+      try {
+        const refreshToken = await vault.get(existing.vaultRef);
+        revokedAtGoogle = await revokeRefreshToken(refreshToken);
+        await vault.delete(existing.vaultRef);
+      } catch (error) {
+        Sentry.captureException(error);
+      }
+
       const connection = await connectionRepository.setStatus(id, 'revoked');
 
       await auditWriter.write({
@@ -115,8 +145,16 @@ class ConnectionController extends BaseController {
         resourceId: id,
         summary: `Disconnected Google account ${existing.accountEmail}`,
         success: true,
-        metadata: { accountEmail: existing.accountEmail },
+        metadata: { accountEmail: existing.accountEmail, revokedAtGoogle },
       });
+
+      // Forget-on-disconnect: purge learnings derived from a source the user just revoked, so nothing
+      // built from it lingers. Scoped to kinds this provider no longer authorizes (a second Google
+      // account keeps its calendar/gmail learnings). Its own 'forget' audit rows are written inside.
+      // Both the task-scoped exemplars and the generalized process/style rules are reconciled; the
+      // latter also purges any vaulted contact behind an `identifying` rule.
+      await memoryService.forgetForDisconnectedProvider(userId, existing.provider);
+      await processMemoryService.forgetForDisconnectedProvider(userId, existing.provider);
 
       const body: ConnectionResponse = { connection };
       this.handleSuccess(res, body, 200);

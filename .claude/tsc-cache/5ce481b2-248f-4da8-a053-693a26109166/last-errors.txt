@@ -1,4 +1,0 @@
-
-
-=== Errors in backend ===
-src/database/migrate.ts(9,1): error TS6133: 'm005' is declared but its value is never read.

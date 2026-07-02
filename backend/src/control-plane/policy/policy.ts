@@ -8,7 +8,7 @@ export interface PolicyDecision {
 }
 
 /** Maps a resource kind to the connection provider that authorizes reading it. */
-const KIND_TO_PROVIDER: Readonly<Record<ResourceKind, string>> = {
+export const KIND_TO_PROVIDER: Readonly<Record<ResourceKind, string>> = {
   calendar: 'google',
   gmail: 'google',
   money: 'aggregator',

@@ -81,6 +81,26 @@ export class ConnectionRepository {
     return this.toRow(row);
   }
 
+  /**
+   * The vault handle currently held for one (user, provider, account), if any. Read just before an
+   * upsert so the caller can delete the superseded secret when reconnecting the same account —
+   * otherwise the old encrypted token would be orphaned in the vault forever.
+   */
+  async vaultRefForAccount(
+    userId: string,
+    provider: ConnectionProvider,
+    accountEmail: string,
+  ): Promise<string | undefined> {
+    const row = await db
+      .selectFrom('connections')
+      .select('vault_ref')
+      .where('user_id', '=', userId)
+      .where('provider', '=', provider)
+      .where('account_email', '=', accountEmail)
+      .executeTakeFirst();
+    return row?.vault_ref;
+  }
+
   /** Public-facing list for the trust/control surfaces (no vault handle). */
   async listForUser(userId: string): Promise<ReadonlyArray<Connection>> {
     const rows = await db

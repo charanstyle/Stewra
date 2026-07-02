@@ -5,6 +5,18 @@ export type { UUID, ISODateString, ApiSuccess, ApiError, ApiResponse, Paginated 
 export type { User, UserRole } from './models/user';
 export type { Connection, ConnectionProvider, ConnectionStatus } from './models/connection';
 export type { UserPreferences } from './models/preferences';
+export type { Rating, InsightFeedback } from './models/feedback';
+export { RATINGS, RATING_REWARD, POSITIVE_RATINGS } from './models/feedback';
+export type { AgentMemory, MemorySource } from './models/memory';
+export type {
+  ProcessRule,
+  ProcessDomain,
+  ProcessDimension,
+  ProcessTier,
+  ProcessRuleStatus,
+  ProcessRuleSource,
+} from './models/processRule';
+export { KIND_TO_PROCESS_DOMAIN } from './models/processRule';
 
 // API contracts
 export type {
@@ -24,7 +36,29 @@ export type {
   ListConnectionsResponse,
 } from './api/connections';
 export type { GenerateInsightRequest, GenerateInsightResponse } from './api/insights';
-export { GMAIL_LOOKBACK_MIN_DAYS, GMAIL_LOOKBACK_MAX_DAYS } from './api/insights';
+export type { SubmitFeedbackRequest, SubmitFeedbackResponse } from './api/feedback';
+export type {
+  ListMemoriesRequest,
+  ListMemoriesResponse,
+  UpdateMemoryRequest,
+  UpdateMemoryResponse,
+  DeleteMemoryResponse,
+} from './api/memory';
+export type {
+  ListProcessRulesRequest,
+  ListProcessRulesResponse,
+  CreateProcessRuleRequest,
+  CreateProcessRuleResponse,
+  UpdateProcessRuleRequest,
+  UpdateProcessRuleResponse,
+  DeleteProcessRuleResponse,
+} from './api/processRules';
+export {
+  GMAIL_LOOKBACK_MIN_DAYS,
+  GMAIL_LOOKBACK_MAX_DAYS,
+  CALENDAR_LOOKAHEAD_MIN_DAYS,
+  CALENDAR_LOOKAHEAD_MAX_DAYS,
+} from './api/insights';
 export type {
   VerifyEmailRequest,
   VerifyEmailResponse,

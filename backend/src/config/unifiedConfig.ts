@@ -1,6 +1,24 @@
 import { config as loadEnv } from 'dotenv';
 import { z } from 'zod';
-import { GMAIL_LOOKBACK_MIN_DAYS, GMAIL_LOOKBACK_MAX_DAYS } from '@stewra/shared-types';
+import {
+  GMAIL_LOOKBACK_MIN_DAYS,
+  GMAIL_LOOKBACK_MAX_DAYS,
+  CALENDAR_LOOKAHEAD_MIN_DAYS,
+  CALENDAR_LOOKAHEAD_MAX_DAYS,
+} from '@stewra/shared-types';
+
+/** The narrowest read-only scopes that let Stewra advise — the safe default when GOOGLE_SCOPES is
+ * unset. Never write/send access. Overridable per deploy, but never widened silently in code. */
+const DEFAULT_GOOGLE_SCOPES = [
+  'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/gmail.readonly',
+].join(',');
+
+/** Plain-language consent shown to the user — NOT a raw scope list (build-plan principle 6). The
+ * default deploy copy; overridable via GOOGLE_CONSENT_PROMPT for localization/wording changes. */
+const DEFAULT_GOOGLE_CONSENT_PROMPT =
+  'Allow Stewra to read your Google Calendar and Gmail? It only reads — to spot conflicts, bills, ' +
+  'and things worth your attention. It never sends, replies, deletes, or changes anything.';
 
 // Load backend/.env once, here. This is the ONE place process.env is read directly;
 // everything else imports `config` from this module.
@@ -33,6 +51,31 @@ const EnvSchema = z.object({
     .int()
     .min(GMAIL_LOOKBACK_MIN_DAYS)
     .max(GMAIL_LOOKBACK_MAX_DAYS),
+  // How many days AHEAD the calendar is scanned for conflicts/free time. The counterpart to the
+  // Gmail lookback default; bounded by the shared contract limits, overridable per deploy.
+  GOOGLE_CALENDAR_LOOKAHEAD_DAYS: z.coerce
+    .number()
+    .int()
+    .min(CALENDAR_LOOKAHEAD_MIN_DAYS)
+    .max(CALENDAR_LOOKAHEAD_MAX_DAYS)
+    .default(7),
+  // Upper bounds on how many raw records are pulled before minimizing to facts. Caps API cost and
+  // payload size; not user-facing. Sane defaults, overridable per deploy — never magic numbers.
+  GOOGLE_MAX_EVENTS: z.coerce.number().int().min(1).max(500).default(50),
+  GOOGLE_MAX_EMAILS: z.coerce.number().int().min(1).max(200).default(20),
+  // The Sent-mail style observer's knobs (only runs after the user opts in). How many recent Sent
+  // messages to sample per pass, how far back to look, and — for a style pattern to become a proposed
+  // rule — the minimum number of sampled messages backing it and the minimum share of samples it must
+  // hold. High thresholds keep proposals high-precision (§3). Sane defaults, overridable per deploy.
+  SENT_MAIL_MAX_SAMPLES: z.coerce.number().int().min(1).max(200).default(40),
+  SENT_MAIL_LOOKBACK_DAYS: z.coerce.number().int().min(1).max(365).default(90),
+  SENT_MAIL_MIN_SUPPORT: z.coerce.number().int().min(1).max(200).default(5),
+  SENT_MAIL_MIN_SHARE: z.coerce.number().min(0.5).max(1).default(0.6),
+  // Comma-separated OAuth scopes. Defaults to the two read-only scopes; overridable per deploy but
+  // deliberately explicit so widening access is a visible, auditable config change — never in code.
+  GOOGLE_SCOPES: z.string().min(1).default(DEFAULT_GOOGLE_SCOPES),
+  // Plain-language consent copy shown before redirecting to Google. Overridable for wording/locale.
+  GOOGLE_CONSENT_PROMPT: z.string().min(1).default(DEFAULT_GOOGLE_CONSENT_PROMPT),
   // Outbound mail (Mailu mailbox), used for the email-verification code. Required: a new account
   // can't be verified without it, so we fail loud rather than silently skip verification.
   SMTP_HOST: z.string().min(1, 'SMTP_HOST is required'),
@@ -48,6 +91,19 @@ const EnvSchema = z.object({
   EMAIL_VERIFICATION_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
   EMAIL_VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
   EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
+  // The learning loop's recall knobs: how many past-success exemplars to inject into a new task's
+  // prompt, and the minimum full-text relevance (ts_rank) a memory must clear to be recalled. Sane
+  // defaults, overridable per deploy — never magic numbers in code.
+  MEMORY_RECALL_LIMIT: z.coerce.number().int().min(1).max(10).default(3),
+  MEMORY_RECALL_MIN_RANK: z.coerce.number().min(0).max(1).default(0.01),
+  // How many active process/style rules to inject into the model's system message when shaping a
+  // task in a domain (the "how this user likes it done" profile). Bounded so the profile can't
+  // balloon the prompt. Sane default, overridable per deploy — never a magic number in code.
+  PROCESS_MEMORY_RECALL_LIMIT: z.coerce.number().int().min(1).max(50).default(12),
+  // How far a rule's confidence moves per reinforcement event (a positive rating nudges the recalled
+  // rules up by this, a negative one decays them by it), clamped to 0..100 in the repo. Reward accrues
+  // by the raw signed RATING_REWARD scalar separately. Sane default, overridable — never magic in code.
+  PROCESS_MEMORY_CONFIDENCE_STEP: z.coerce.number().int().min(1).max(50).default(5),
   // The user picks the model provider. 'claude_cli' (default) shells out to the locally installed
   // `claude` CLI in print mode, using the user's existing Claude Code subscription — no API key.
   // The rest are API providers: 'anthropic' uses @anthropic-ai/sdk; 'openai', 'gemini', and 'grok'
@@ -140,10 +196,30 @@ export const config = {
     clientId: env.GOOGLE_CLIENT_ID,
     clientSecret: env.GOOGLE_CLIENT_SECRET,
     redirectUri: env.GOOGLE_REDIRECT_URI,
+    // Split the comma-separated env into a trimmed, non-empty scope list once, here.
+    scopes: env.GOOGLE_SCOPES.split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+    consentPrompt: env.GOOGLE_CONSENT_PROMPT,
+    maxEvents: env.GOOGLE_MAX_EVENTS,
+    maxEmails: env.GOOGLE_MAX_EMAILS,
   },
   gmail: {
     // Default lookback window (days); a per-insight request may override within the shared bounds.
     lookbackDays: env.GMAIL_LOOKBACK_DAYS,
+  },
+  sentMailObserver: {
+    // Sampling + evidence thresholds for the opt-in Sent-mail style observer. `maxSamples`/
+    // `lookbackDays` bound the read; `minSupport`/`minShare` gate when a pattern is confident enough
+    // to surface as a PROPOSED rule (never auto-applied).
+    maxSamples: env.SENT_MAIL_MAX_SAMPLES,
+    lookbackDays: env.SENT_MAIL_LOOKBACK_DAYS,
+    minSupport: env.SENT_MAIL_MIN_SUPPORT,
+    minShare: env.SENT_MAIL_MIN_SHARE,
+  },
+  calendar: {
+    // How many days ahead to scan for conflicts and free time.
+    lookaheadDays: env.GOOGLE_CALENDAR_LOOKAHEAD_DAYS,
   },
   email: {
     host: env.SMTP_HOST,
@@ -157,6 +233,17 @@ export const config = {
     ttlMinutes: env.EMAIL_VERIFICATION_TTL_MINUTES,
     maxAttempts: env.EMAIL_VERIFICATION_MAX_ATTEMPTS,
     resendCooldownSeconds: env.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS,
+  },
+  memory: {
+    // Max past-success exemplars injected into a new task's prompt, and the min ts_rank to recall.
+    recallLimit: env.MEMORY_RECALL_LIMIT,
+    recallMinRank: env.MEMORY_RECALL_MIN_RANK,
+  },
+  processMemory: {
+    // Max active process/style rules injected into a task's system message (the style profile).
+    recallLimit: env.PROCESS_MEMORY_RECALL_LIMIT,
+    // How much a reinforcement (rated feedback) moves a recalled rule's confidence up/down.
+    confidenceStep: env.PROCESS_MEMORY_CONFIDENCE_STEP,
   },
   model: {
     provider: env.MODEL_PROVIDER,

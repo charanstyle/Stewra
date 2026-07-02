@@ -1,10 +1,14 @@
 import type { ResourceKind } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { connectionRepository } from '../repositories/connectionRepository';
 import { vault } from '../control-plane/vault/vault';
+import { auditWriter } from '../control-plane/audit/auditWriter';
 import { preferencesService } from './preferencesService';
+import { processMemoryService } from './processMemoryService';
 import { extractCalendarFacts } from './calendarFacts';
 import { extractGmailFacts } from './gmailFacts';
-import { fetchUpcomingEvents, fetchRecentEmails } from './googleOAuthService';
+import { fetchUpcomingEvents, fetchRecentEmails, isGoogleAuthError } from './googleOAuthService';
+import type { ConnectionRow } from '../repositories/connectionRepository';
 
 /**
  * Fetches MINIMIZED DERIVED FACTS for a connected source, server-side, using a token read from the
@@ -39,18 +43,64 @@ export class ConnectionService {
       kind === 'gmail' ? await preferencesService.gmailLookbackDays(userId) : 0;
 
     for (const connection of connections) {
-      const refreshToken = await vault.get(connection.vaultRef);
-      const accountFacts =
-        kind === 'calendar'
-          ? extractCalendarFacts(await fetchUpcomingEvents(refreshToken), now)
-          : extractGmailFacts(await fetchRecentEmails(refreshToken, gmailLookbackDays), now);
+      let accountFacts: ReadonlyArray<string>;
+      try {
+        const refreshToken = await vault.get(connection.vaultRef);
+        accountFacts =
+          kind === 'calendar'
+            ? extractCalendarFacts(await fetchUpcomingEvents(refreshToken), now)
+            : extractGmailFacts(await fetchRecentEmails(refreshToken, gmailLookbackDays), now);
+      } catch (error) {
+        // One account failing must not sink the others — gather partial facts and move on. A lost
+        // grant (revoked/expired token) is terminal, so we flip the connection to `revoked` and
+        // audit it; a transient failure (rate limit, network) is just captured and skipped.
+        await this.handleFetchError(connection, kind, error);
+        continue;
+      }
 
       for (const fact of accountFacts) {
         facts.push(labelByAccount ? `[${connection.accountEmail}] ${fact}` : fact);
       }
     }
 
+    // Opportunistically let the experiential style observer learn from the user's Sent mail on the
+    // Gmail cadence. Self-gated by the user's opt-in (no-op when off) and fully best-effort: it never
+    // adds to, blocks, or fails the derived facts the caller actually asked for.
+    if (kind === 'gmail') {
+      try {
+        await processMemoryService.observeFromSentMail(userId);
+      } catch (error) {
+        Sentry.captureException(error);
+      }
+    }
+
     return facts;
+  }
+
+  /**
+   * React to a per-account fetch failure. Terminal auth failures revoke the connection (so the UI
+   * shows it needs reconnecting) and are audited; everything else is reported to Sentry and left
+   * active to retry next time. Never rethrows — the caller wants partial facts, not a hard failure.
+   */
+  private async handleFetchError(
+    connection: ConnectionRow,
+    kind: 'calendar' | 'gmail',
+    error: unknown,
+  ): Promise<void> {
+    Sentry.captureException(error);
+    if (!isGoogleAuthError(error)) {
+      return;
+    }
+    await connectionRepository.setStatus(connection.id, 'revoked');
+    await auditWriter.write({
+      userId: connection.userId,
+      action: 'disconnect',
+      resourceType: kind,
+      resourceId: connection.id,
+      summary: `Lost access to Google account ${connection.accountEmail} — please reconnect`,
+      success: false,
+      metadata: { accountEmail: connection.accountEmail, reason: 'token_revoked_or_expired' },
+    });
   }
 }
 

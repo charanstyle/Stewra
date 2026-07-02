@@ -9,4 +9,10 @@ export interface UserPreferences {
    * client — when the user hasn't chosen one, this is the backend's configured default.
    */
   readonly gmailLookbackDays: number;
+  /**
+   * Whether Stewra may learn the user's writing style from their OWN Sent mail (the experiential
+   * style observer). A NEW data use, so it defaults to `false` and only the user can turn it on. When
+   * off, no Sent mail is read and no `observed` style rules are proposed.
+   */
+  readonly learnFromSentMail: boolean;
 }

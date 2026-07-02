@@ -11,6 +11,9 @@ import { config } from '../../config/unifiedConfig';
 export interface IVault {
   put(secret: string): Promise<string>;
   get(ref: string): Promise<string>;
+  /** Permanently remove a stored secret. Used when a token is superseded (reconnect) or revoked
+   * (disconnect) — we do not keep dead credentials at rest. A missing ref is a no-op. */
+  delete(ref: string): Promise<void>;
 }
 
 const ALGORITHM = 'aes-256-gcm';
@@ -66,6 +69,10 @@ export class EnvVault implements IVault {
       decipher.final(),
     ]);
     return plaintext.toString('utf8');
+  }
+
+  async delete(ref: string): Promise<void> {
+    await db.deleteFrom('vault_secrets').where('id', '=', ref).execute();
   }
 }
 

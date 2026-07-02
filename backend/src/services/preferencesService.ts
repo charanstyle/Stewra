@@ -19,6 +19,8 @@ export class PreferencesService {
     const stored = await userPreferencesRepository.findForUser(userId);
     return {
       gmailLookbackDays: stored?.gmailLookbackDays ?? config.gmail.lookbackDays,
+      // The Sent-mail observer is off until the user turns it on — no row (or no opt-in) means off.
+      learnFromSentMail: stored?.learnFromSentMail ?? false,
     };
   }
 
@@ -28,13 +30,19 @@ export class PreferencesService {
     return prefs.gmailLookbackDays;
   }
 
+  /** Whether the user has opted the Sent-mail style observer in — the gate the observer checks. */
+  async learnFromSentMail(userId: string): Promise<boolean> {
+    const prefs = await this.getForUser(userId);
+    return prefs.learnFromSentMail;
+  }
+
   /**
    * Apply a partial update. Validates each provided field against the shared bounds, persists it,
    * and returns the full resolved preferences. Omitted fields are left unchanged.
    */
   async update(
     userId: string,
-    patch: { gmailLookbackDays?: number | undefined },
+    patch: { gmailLookbackDays?: number | undefined; learnFromSentMail?: boolean | undefined },
   ): Promise<UserPreferences> {
     if (patch.gmailLookbackDays !== undefined) {
       const days = patch.gmailLookbackDays;
@@ -51,6 +59,16 @@ export class PreferencesService {
         ]);
       }
       await userPreferencesRepository.upsertGmailLookbackDays(userId, days);
+    }
+    if (patch.learnFromSentMail !== undefined) {
+      // On first write the row needs a concrete lookback (NOT NULL, no DB default) — supply the
+      // effective one so flipping the opt-in never depends on a lookback having been set first.
+      const lookbackForInsert = await this.gmailLookbackDays(userId);
+      await userPreferencesRepository.upsertLearnFromSentMail(
+        userId,
+        patch.learnFromSentMail,
+        lookbackForInsert,
+      );
     }
     return this.getForUser(userId);
   }

@@ -22,12 +22,12 @@ class InsightController extends BaseController {
         throw new Error('generate() requires requireAuth middleware');
       }
       const { kind, purpose } = parse(generateSchema, req.body);
-      const insight = await insightService.generateAndRecord(
+      const { insight, insightId } = await insightService.generateAndRecord(
         userId,
         kind,
         purpose ?? DEFAULT_PURPOSE,
       );
-      const body: GenerateInsightResponse = { insight };
+      const body: GenerateInsightResponse = { insight, insightId };
       this.handleSuccess(res, body, 200);
     } catch (error) {
       this.handleError(error, res, 'InsightController.generate');

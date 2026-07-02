@@ -11,6 +11,8 @@ export interface GetPreferencesResponse {
  */
 export interface UpdatePreferencesRequest {
   readonly gmailLookbackDays?: number;
+  /** Turn the Sent-mail style observer on or off (explicit opt-in; defaults off server-side). */
+  readonly learnFromSentMail?: boolean;
 }
 
 export interface UpdatePreferencesResponse {
