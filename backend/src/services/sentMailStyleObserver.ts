@@ -15,13 +15,25 @@ import type { ProcessDimension, ProcessTier } from '@stewra/shared-types';
 /** The opener a Sent email uses, classified from its snippet. `none` = no recognizable greeting. */
 export type SalutationKind = 'hi' | 'hey' | 'hello' | 'dear' | 'greetings' | 'none';
 
+/** A coarse length band for one email, derived from its snippet — never the raw character count. */
+export type LengthBucket = 'short' | 'medium' | 'long';
+
+/** The coarse time-of-day an email was SENT, reduced from its Date header (the sender's local hour). */
+export type HourBucket = 'morning' | 'afternoon' | 'evening' | 'night';
+
 /** One Sent email reduced to style features only — no subject, body, or recipient identity. */
 export interface SentMailSample {
   readonly salutation: SalutationKind;
   /** A warm/informal marker was present near the opening (exclamation, "hope you", "thanks", …). */
   readonly warmOpen: boolean;
+  /** An emoji appeared in the opening — an informal-register signal, kept distinct from `warmOpen`. */
+  readonly emojiOpen: boolean;
   /** How many addresses were CC'd (a count only — never who). */
   readonly ccCount: number;
+  /** A coarse length band (short/medium/long) from the snippet — a proxy, not the exact length. */
+  readonly lengthBucket: LengthBucket;
+  /** The sender's local time-of-day the email was sent, or null when the Date header is unreadable. */
+  readonly hourBucket: HourBucket | null;
 }
 
 /**
@@ -94,8 +106,73 @@ const RECIPIENT_GENERIC_RULE = 'You often CC an additional person on emails.';
 const RECIPIENT_INTERNAL_RULE = 'You habitually CC a colleague on your own team.';
 const RECIPIENT_EXTERNAL_RULE = 'You habitually CC a specific external contact.';
 
+/** Canonical phrasing for each length band the observer will surface (medium is never proposed). */
+const LENGTH_RULE: Record<Exclude<LengthBucket, 'medium'>, string> = {
+  short: 'You keep emails short and to the point.',
+  long: 'You tend to write longer, detailed emails.',
+};
+
+/** Canonical phrasing for each send-time habit. Never states an exact time — only the coarse band. */
+const TIMING_RULE: Record<HourBucket, string> = {
+  morning: 'You usually send email in the morning.',
+  afternoon: 'You usually send email in the afternoon.',
+  evening: 'You usually send email in the evening.',
+  night: 'You often send email late at night.',
+};
+
 /** How far into the snippet the warmth scan looks — the opening, not the whole (bounded) prefix. */
 const WARM_SCAN_CHARS = 60;
+
+/**
+ * Snippet-length band edges (characters). The snippet is Gmail's bounded body PREFIX, so this is a
+ * coarse proxy for how much the user writes up front — deliberately conservative: `medium` is the
+ * grey zone the observer never proposes on. Not user-facing config; classifier constants like
+ * `WARM_SCAN_CHARS`.
+ */
+const SHORT_SNIPPET_CHARS = 80;
+const LONG_SNIPPET_CHARS = 160;
+
+/** Any emoji (an Extended_Pictographic code point) — the informal-register marker for `emojiOpen`. */
+const EMOJI_RE = /\p{Extended_Pictographic}/u;
+
+/** Band a snippet's trimmed length into short/medium/long. Pure; the raw length never leaves here. */
+function lengthBucketOf(snippet: string): LengthBucket {
+  const len = snippet.trim().length;
+  if (len <= SHORT_SNIPPET_CHARS) {
+    return 'short';
+  }
+  if (len >= LONG_SNIPPET_CHARS) {
+    return 'long';
+  }
+  return 'medium';
+}
+
+/**
+ * Reduce an RFC-2822 `Date` header to the sender's local time-of-day band. The header's time field is
+ * already the sender's WALL-CLOCK time (the trailing offset merely names its zone), so the leading
+ * `HH:MM` token is taken as-is — no timezone conversion, which would wrongly re-anchor it to the
+ * server's zone. Returns null when no time token is present. Pure and exported for unit testing.
+ */
+export function hourBucketFromHeader(dateHeader: string): HourBucket | null {
+  const match = /(\d{1,2}):(\d{2})/.exec(dateHeader);
+  if (!match) {
+    return null;
+  }
+  const hour = Number(match[1]);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+    return null;
+  }
+  if (hour >= 5 && hour <= 11) {
+    return 'morning';
+  }
+  if (hour >= 12 && hour <= 16) {
+    return 'afternoon';
+  }
+  if (hour >= 17 && hour <= 21) {
+    return 'evening';
+  }
+  return 'night';
+}
 
 /**
  * Reduce one Sent email — given only a bounded body prefix (`snippet`) and a CC count — to its
@@ -103,7 +180,12 @@ const WARM_SCAN_CHARS = 60;
  * `SentMailSample` (enum + flag + count) leaves this boundary. Pure, so it is unit-testable and can
  * never accidentally retain content.
  */
-export function classifySentMessage(input: { snippet: string; ccCount: number }): SentMailSample {
+export function classifySentMessage(input: {
+  snippet: string;
+  ccCount: number;
+  /** The raw `Date` header, reduced HERE to an `hourBucket` and discarded — never carried onward. */
+  dateHeader?: string;
+}): SentMailSample {
   const snippet = input.snippet ?? '';
   const opener = snippet.slice(0, WARM_SCAN_CHARS);
 
@@ -116,9 +198,12 @@ export function classifySentMessage(input: { snippet: string; ccCount: number })
   }
 
   const warmOpen = WARM_MARKERS.some((re) => re.test(opener));
+  const emojiOpen = EMOJI_RE.test(opener);
   const ccCount = Number.isFinite(input.ccCount) && input.ccCount > 0 ? Math.trunc(input.ccCount) : 0;
+  const lengthBucket = lengthBucketOf(snippet);
+  const hourBucket = input.dateHeader ? hourBucketFromHeader(input.dateHeader) : null;
 
-  return { salutation, warmOpen, ccCount };
+  return { salutation, warmOpen, emojiOpen, ccCount, lengthBucket, hourBucket };
 }
 
 /** True when `count` out of `total` clears both the absolute (`minSupport`) and relative (`minShare`) bars. */
@@ -186,17 +271,82 @@ export function observeSentMailStyle(
     });
   }
 
-  // Tone: a warm/informal opening as the dominant register.
+  // Tone: a warm/informal opening as the dominant register. Emoji is a facet of the SAME tone axis —
+  // folded in here (never a second `tone` candidate) so it can't collide on the (domain, tone) axis
+  // that `capture` upserts on: if warmth dominates, an also-dominant emoji habit just enriches the
+  // phrasing; if only emoji dominates, it stands alone as the tone signal.
   const warmCount = samples.filter((s) => s.warmOpen).length;
+  const emojiCount = samples.filter((s) => s.emojiOpen).length;
   if (meetsThreshold(warmCount, total, thresholds)) {
+    const alsoEmoji = meetsThreshold(emojiCount, total, thresholds);
     candidates.push({
       dimension: 'tone',
-      rule: 'Your emails tend to open warm and friendly.',
+      rule: alsoEmoji
+        ? 'Your emails tend to open warm and friendly, often with emoji.'
+        : 'Your emails tend to open warm and friendly.',
       tier: 'style',
       subjectRole: null,
       needsVault: false,
       supportCount: warmCount,
       confidence: shareConfidence(warmCount, total),
+    });
+  } else if (meetsThreshold(emojiCount, total, thresholds)) {
+    candidates.push({
+      dimension: 'tone',
+      rule: 'You often use emoji in your emails.',
+      tier: 'style',
+      subjectRole: null,
+      needsVault: false,
+      supportCount: emojiCount,
+      confidence: shareConfidence(emojiCount, total),
+    });
+  }
+
+  // Length: only the decisive ends (short/long) — a "medium" habit isn't actionable, so it stays
+  // quiet. `meetsThreshold` needs a >= minShare majority, so short and long can't both qualify.
+  const lengthCounts: Record<LengthBucket, number> = { short: 0, medium: 0, long: 0 };
+  for (const s of samples) {
+    lengthCounts[s.lengthBucket] += 1;
+  }
+  for (const band of ['short', 'long'] as const) {
+    if (meetsThreshold(lengthCounts[band], total, thresholds)) {
+      candidates.push({
+        dimension: 'length',
+        rule: LENGTH_RULE[band],
+        tier: 'style',
+        subjectRole: null,
+        needsVault: false,
+        supportCount: lengthCounts[band],
+        confidence: shareConfidence(lengthCounts[band], total),
+      });
+    }
+  }
+
+  // Timing: the send-time band that dominates the whole sample. Emails whose Date header didn't
+  // parse (null bucket) count toward `total` but no band — they can only dilute, never mislead.
+  const timingCounts = new Map<HourBucket, number>();
+  for (const s of samples) {
+    if (s.hourBucket) {
+      timingCounts.set(s.hourBucket, (timingCounts.get(s.hourBucket) ?? 0) + 1);
+    }
+  }
+  let topBucket: HourBucket | null = null;
+  let topBucketCount = 0;
+  for (const [bucket, count] of timingCounts) {
+    if (count > topBucketCount) {
+      topBucket = bucket;
+      topBucketCount = count;
+    }
+  }
+  if (topBucket && meetsThreshold(topBucketCount, total, thresholds)) {
+    candidates.push({
+      dimension: 'timing',
+      rule: TIMING_RULE[topBucket],
+      tier: 'style',
+      subjectRole: null,
+      needsVault: false,
+      supportCount: topBucketCount,
+      confidence: shareConfidence(topBucketCount, total),
     });
   }
 

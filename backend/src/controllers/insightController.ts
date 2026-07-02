@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import type { GenerateInsightResponse } from '@stewra/shared-types';
+import type { GenerateInsightResponse, InsightEngagementResponse } from '@stewra/shared-types';
 import { BaseController } from './baseController';
 import { insightService } from '../services/insightService';
 import { parse } from '../utils/validate';
@@ -8,6 +8,11 @@ import { parse } from '../utils/validate';
 const generateSchema = z.object({
   kind: z.enum(['calendar', 'gmail', 'money', 'memory']),
   purpose: z.string().min(1).max(200).optional(),
+});
+
+// Path param for the engagement endpoints — the insight the impression/dismissal attaches to.
+const engagementParamsSchema = z.object({
+  insightId: z.string().uuid(),
 });
 
 // The audit label when the user doesn't supply a purpose — plain language, no jargon.
@@ -31,6 +36,36 @@ class InsightController extends BaseController {
       this.handleSuccess(res, body, 200);
     } catch (error) {
       this.handleError(error, res, 'InsightController.generate');
+    }
+  }
+
+  /** POST /insights/:insightId/seen — record that an insight was surfaced (passive impression). */
+  async markSeen(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId;
+      if (userId === undefined) {
+        throw new Error('markSeen() requires requireAuth middleware');
+      }
+      const { insightId } = parse(engagementParamsSchema, req.params);
+      const body: InsightEngagementResponse = await insightService.markSeen(userId, insightId);
+      this.handleSuccess(res, body, 200);
+    } catch (error) {
+      this.handleError(error, res, 'InsightController.markSeen');
+    }
+  }
+
+  /** POST /insights/:insightId/dismissed — record the user dismissing an insight without rating it. */
+  async markDismissed(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId;
+      if (userId === undefined) {
+        throw new Error('markDismissed() requires requireAuth middleware');
+      }
+      const { insightId } = parse(engagementParamsSchema, req.params);
+      const body: InsightEngagementResponse = await insightService.markDismissed(userId, insightId);
+      this.handleSuccess(res, body, 200);
+    } catch (error) {
+      this.handleError(error, res, 'InsightController.markDismissed');
     }
   }
 }

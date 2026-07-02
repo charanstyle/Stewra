@@ -85,6 +85,10 @@ export interface AgentInsightsTable {
   model_id: string;
   /** jsonb array of derived-fact strings, or null. Reserved; not populated yet. */
   facts_used: ColumnType<ReadonlyArray<string> | null, string | null, string | null>;
+  /** When the insight was first surfaced to the user (first-write-wins impression). Null until seen. */
+  seen_at: ColumnType<Date | null, Date | null, Date | null>;
+  /** When the user dismissed the insight without rating it. Null until dismissed. */
+  dismissed_at: ColumnType<Date | null, Date | null, Date | null>;
   created_at: CreatedAt;
 }
 

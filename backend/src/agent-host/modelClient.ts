@@ -1,8 +1,9 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import type { IModelClient, ModelMessage } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig';
+import { chooseModelProvider } from './modelProvider';
 
 /** A short advisory insight never needs many tokens; bound the API call. */
 const MAX_OUTPUT_TOKENS = 1024;
@@ -147,9 +148,30 @@ export class LocalDeterministicModelClient implements IModelClient {
   }
 }
 
+/**
+ * Is the local `claude` CLI actually RUNNABLE on this host? Not just present on PATH — we run
+ * `claude --version` (fast, no auth, no token cost) and treat any failure (missing binary, non-zero
+ * exit, hang past the timeout) as "unavailable". Probed ONCE at host build time; the result decides
+ * the provider for the process lifetime. Kept separate + injectable so `chooseModelProvider` stays a
+ * pure, unit-testable decision.
+ */
+export function isClaudeCliAvailable(binary: string): boolean {
+  try {
+    execFileSync(binary, ['--version'], { stdio: 'ignore', timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function buildModelClient(): IModelClient {
-  const { provider, claudeCodePath, modelId, apiKey, baseUrl } = config.model;
-  switch (provider) {
+  const { provider, preferClaudeCli, claudeCodePath, modelId, apiKey, baseUrl } = config.model;
+  const effective = chooseModelProvider({
+    preferClaudeCli,
+    cliAvailable: isClaudeCliAvailable(claudeCodePath),
+    fallbackProvider: provider,
+  });
+  switch (effective) {
     case 'anthropic':
       return new AnthropicModelClient(apiKey, modelId);
     case 'openai':

@@ -4,6 +4,7 @@ import { isSilentClobber, reinforcementDeltas } from '../services/processMemoryS
 import { extractProcessRuleCandidates } from '../utils/processRuleExtraction';
 import {
   classifySentMessage,
+  hourBucketFromHeader,
   observeSentMailStyle,
   type SentMailSample,
 } from '../services/sentMailStyleObserver';
@@ -111,7 +112,14 @@ describe('extractProcessRuleCandidates (deterministic feedback → rule candidat
 describe('classifySentMessage (raw snippet → minimized features, text discarded)', () => {
   it('classifies the leading greeting and never returns the raw snippet', () => {
     const sample = classifySentMessage({ snippet: 'Hi Dana, hope you are well —', ccCount: 2 });
-    expect(sample).toEqual({ salutation: 'hi', warmOpen: true, ccCount: 2 });
+    expect(sample).toEqual({
+      salutation: 'hi',
+      warmOpen: true,
+      emojiOpen: false,
+      ccCount: 2,
+      lengthBucket: 'short',
+      hourBucket: null,
+    });
     // The returned object carries only enum/flag/count — no field holds the original text.
     expect(Object.values(sample)).not.toContain('Hi Dana, hope you are well —');
   });
@@ -135,6 +143,44 @@ describe('classifySentMessage (raw snippet → minimized features, text discarde
     );
     expect(classifySentMessage({ snippet: 'Hi', ccCount: -3 }).ccCount).toBe(0);
   });
+
+  it('bands the snippet length into short/medium/long', () => {
+    expect(classifySentMessage({ snippet: 'Sounds good, thanks!', ccCount: 0 }).lengthBucket).toBe(
+      'short',
+    );
+    expect(classifySentMessage({ snippet: 'x'.repeat(120), ccCount: 0 }).lengthBucket).toBe('medium');
+    expect(classifySentMessage({ snippet: 'x'.repeat(200), ccCount: 0 }).lengthBucket).toBe('long');
+  });
+
+  it('detects an emoji in the opening, distinct from a warmth marker', () => {
+    const withEmoji = classifySentMessage({ snippet: 'Hi team 🎉 quick update', ccCount: 0 });
+    expect(withEmoji.emojiOpen).toBe(true);
+    // A plain-text warm opener is warm but carries no emoji — the two flags are independent.
+    const warmNoEmoji = classifySentMessage({ snippet: 'Hi — thanks so much!', ccCount: 0 });
+    expect(warmNoEmoji.emojiOpen).toBe(false);
+    expect(warmNoEmoji.warmOpen).toBe(true);
+  });
+
+  it('reduces the Date header to the sender-local send band, without a null-header crashing', () => {
+    // The header time is the sender's wall clock; the leading HH is taken as-is (no TZ re-anchoring).
+    expect(classifySentMessage({ snippet: 'Hi', ccCount: 0, dateHeader: 'Wed, 02 Jul 2025 08:15:00 -0700' }).hourBucket).toBe('morning');
+    expect(classifySentMessage({ snippet: 'Hi', ccCount: 0 }).hourBucket).toBeNull();
+  });
+});
+
+describe('hourBucketFromHeader (RFC-2822 Date → coarse send band, sender-local)', () => {
+  it('maps each part of the day and ignores the timezone offset', () => {
+    expect(hourBucketFromHeader('Wed, 02 Jul 2025 06:00:00 -0700')).toBe('morning');
+    expect(hourBucketFromHeader('Wed, 02 Jul 2025 14:30:00 +0000')).toBe('afternoon');
+    expect(hourBucketFromHeader('Wed, 02 Jul 2025 19:05:00 +0530')).toBe('evening');
+    expect(hourBucketFromHeader('Wed, 02 Jul 2025 23:59:00 -0400')).toBe('night');
+    expect(hourBucketFromHeader('Wed, 02 Jul 2025 02:00:00 +0100')).toBe('night');
+  });
+
+  it('returns null when there is no readable time token', () => {
+    expect(hourBucketFromHeader('not a date')).toBeNull();
+    expect(hourBucketFromHeader('')).toBeNull();
+  });
 });
 
 describe('observeSentMailStyle (only proposes a rule when a pattern dominates the sample)', () => {
@@ -142,7 +188,10 @@ describe('observeSentMailStyle (only proposes a rule when a pattern dominates th
   const sample = (over: Partial<SentMailSample>): SentMailSample => ({
     salutation: 'none',
     warmOpen: false,
+    emojiOpen: false,
     ccCount: 0,
+    lengthBucket: 'medium',
+    hourBucket: null,
     ...over,
   });
 
@@ -185,6 +234,67 @@ describe('observeSentMailStyle (only proposes a rule when a pattern dominates th
       needsVault: false,
     });
   });
+
+  it('proposes a length rule only for a dominant decisive band, never for medium', () => {
+    const short = observeSentMailStyle(
+      Array.from({ length: 5 }, () => sample({ lengthBucket: 'short' })),
+      thresholds,
+    );
+    expect(short.find((c) => c.dimension === 'length')).toMatchObject({
+      rule: 'You keep emails short and to the point.',
+      supportCount: 5,
+    });
+    // A sample dominated by "medium" is unremarkable — the observer stays quiet on length.
+    const medium = observeSentMailStyle(
+      Array.from({ length: 5 }, () => sample({ lengthBucket: 'medium' })),
+      thresholds,
+    );
+    expect(medium.some((c) => c.dimension === 'length')).toBe(false);
+  });
+
+  it('emits a single tone rule for emoji, and enriches (not duplicates) it when warmth also dominates', () => {
+    // Emoji alone → one tone candidate about emoji.
+    const emojiOnly = observeSentMailStyle(
+      Array.from({ length: 5 }, () => sample({ emojiOpen: true })),
+      thresholds,
+    );
+    const emojiTone = emojiOnly.filter((c) => c.dimension === 'tone');
+    expect(emojiTone).toHaveLength(1);
+    expect(emojiTone[0]?.rule).toMatch(/emoji/);
+
+    // Warmth + emoji both dominant → still ONE tone candidate (no axis collision), phrasing enriched.
+    const both = observeSentMailStyle(
+      Array.from({ length: 5 }, () => sample({ warmOpen: true, emojiOpen: true })),
+      thresholds,
+    );
+    const bothTone = both.filter((c) => c.dimension === 'tone');
+    expect(bothTone).toHaveLength(1);
+    expect(bothTone[0]?.rule).toMatch(/warm.*emoji/);
+  });
+
+  it('proposes a timing rule when one send-band dominates, discounting unreadable dates', () => {
+    const samples = [
+      ...Array.from({ length: 4 }, () => sample({ hourBucket: 'morning' })),
+      sample({ hourBucket: null }), // unparseable Date → dilutes but never mis-attributes
+    ];
+    const out = observeSentMailStyle(samples, thresholds);
+    expect(out.find((c) => c.dimension === 'timing')).toMatchObject({
+      rule: 'You usually send email in the morning.',
+      tier: 'style',
+      supportCount: 4,
+    });
+  });
+
+  it('stays quiet on timing when no single band reaches the majority share', () => {
+    const samples = [
+      ...Array.from({ length: 2 }, () => sample({ hourBucket: 'morning' })),
+      ...Array.from({ length: 2 }, () => sample({ hourBucket: 'evening' })),
+      sample({ hourBucket: 'night' }),
+    ];
+    expect(observeSentMailStyle(samples, thresholds).some((c) => c.dimension === 'timing')).toBe(
+      false,
+    );
+  });
 });
 
 /**
@@ -195,7 +305,14 @@ describe('observeSentMailStyle (only proposes a rule when a pattern dominates th
  */
 describe('observeSentMailStyle recipient resolution (role abstraction + vault fallback)', () => {
   const thresholds = { minSupport: 3, minShare: 0.6 };
-  const cc = (ccCount: number): SentMailSample => ({ salutation: 'none', warmOpen: false, ccCount });
+  const cc = (ccCount: number): SentMailSample => ({
+    salutation: 'none',
+    warmOpen: false,
+    emojiOpen: false,
+    ccCount,
+    lengthBucket: 'medium',
+    hourBucket: null,
+  });
 
   it('abstracts a recurring same-domain contact to an internal_colleague role, no vault', () => {
     const samples = Array.from({ length: 5 }, () => cc(1));

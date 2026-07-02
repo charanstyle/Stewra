@@ -11,6 +11,10 @@ export interface EmailSummary {
   /** The sender's display string (e.g. "Acme Billing <billing@acme.com>"). */
   readonly from: string;
   readonly unread: boolean;
+  /** Gmail marked this as important (the IMPORTANT label) — a minimized prioritization signal. */
+  readonly important: boolean;
+  /** The user starred this (the STARRED label) — a minimized "flagged for action" signal. */
+  readonly starred: boolean;
   /** ISO timestamp the email was received. */
   readonly date: string;
 }
@@ -41,6 +45,21 @@ export function extractGmailFacts(emails: ReadonlyArray<EmailSummary>, _now: Dat
   const unread = emails.filter((e) => e.unread);
   if (unread.length > 0) {
     facts.push(`You have ${unread.length} unread email${unread.length === 1 ? '' : 's'}`);
+  }
+
+  // Prioritization: how the user's own triage (Gmail's IMPORTANT, the user's STAR) intersects with
+  // what's still unread — the "what needs attention first" signal, derived from labels already fetched.
+  const importantUnread = unread.filter((e) => e.important).length;
+  if (importantUnread > 0) {
+    facts.push(
+      `${importantUnread} important email${importantUnread === 1 ? ' is' : 's are'} still unread`,
+    );
+  }
+  const starred = emails.filter((e) => e.starred).length;
+  if (starred > 0) {
+    facts.push(
+      `You have ${starred} starred email${starred === 1 ? '' : 's'} awaiting action`,
+    );
   }
 
   const billSenders = new Set<string>();

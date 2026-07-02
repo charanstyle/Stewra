@@ -13,4 +13,18 @@ router.post('/', requireAuth, (req, res, next) => {
   void insightController.generate(req, res);
 });
 
+// Record that an insight was surfaced to the user (passive impression) — first-write-wins, no reward.
+router.post('/:insightId/seen', requireAuth, (req, res, next) => {
+  void requireEmailVerification(req, res, next);
+}, (req, res) => {
+  void insightController.markSeen(req, res);
+});
+
+// Record the user dismissing an insight without rating it — the implicit "not useful" signal.
+router.post('/:insightId/dismissed', requireAuth, (req, res, next) => {
+  void requireEmailVerification(req, res, next);
+}, (req, res) => {
+  void insightController.markDismissed(req, res);
+});
+
 export default router;

@@ -110,6 +110,28 @@ export function reinforcementDeltas(rewardScore: number, confidenceStep: number)
 }
 
 /**
+ * The counter movement for an IMPLICIT signal — the user dismissing an insight without rating it. A
+ * deliberately WEAK negative (kept pure/testable like `reinforcementDeltas`): it accrues the small
+ * negative `reward` and nudges confidence down by only HALF the explicit step (min 1), and never
+ * counts as a supporting observation. So a single dismiss gently discounts the rules that shaped the
+ * unwanted advice without tanking them, and an explicit rating (which moves by the full step) always
+ * dominates. Returns zeroed deltas when `reward` is 0 (the implicit signal is disabled by config).
+ */
+export function implicitReinforcementDeltas(
+  reward: number,
+  confidenceStep: number,
+): ReinforcementDeltas {
+  if (reward === 0) {
+    return { rewardDelta: 0, confidenceDelta: 0, supportDelta: 0 };
+  }
+  return {
+    rewardDelta: reward,
+    confidenceDelta: -Math.max(1, Math.round(confidenceStep / 2)),
+    supportDelta: 0,
+  };
+}
+
+/**
  * The user-owned process/style store — *how* the user likes work done, never the content. The control
  * plane (never the agent) writes it, mirroring `MemoryService`. Jobs:
  *  - `capture`: land a candidate rule from one of the sources (stated / feedback / observed), obeying
@@ -495,6 +517,43 @@ export class ProcessMemoryService {
       rewardScore,
       confidenceStep,
     );
+    return processMemoryRepository.reinforceActiveForDomain(
+      userId,
+      domain,
+      recallLimit,
+      rewardDelta,
+      confidenceDelta,
+      supportDelta,
+    );
+  }
+
+  /**
+   * The implicit-engagement counterpart of `reinforceForFeedback`: when the user dismisses an insight
+   * WITHOUT rating it, apply a weak negative to exactly the active rules recall would have injected
+   * for that domain — the passive "this wasn't useful" signal. Same recall-scoped target and same
+   * pure counter movement (never clobbers a confirmed rule, §3), but weaker than an explicit verdict
+   * (`implicitReinforcementDeltas`). A no-op for kinds with no style domain, and — because a 0 reward
+   * yields zero deltas — a no-op when the implicit signal is disabled by config. The caller only
+   * invokes this when no explicit feedback exists, so the two signals never double-count. Returns how
+   * many rules were touched.
+   */
+  async reinforceForImplicitSignal(
+    userId: string,
+    insightKind: ResourceKind,
+    reward: number,
+  ): Promise<number> {
+    const domain = KIND_TO_PROCESS_DOMAIN[insightKind];
+    if (!domain) {
+      return 0;
+    }
+    const { recallLimit, confidenceStep } = config.processMemory;
+    const { rewardDelta, confidenceDelta, supportDelta } = implicitReinforcementDeltas(
+      reward,
+      confidenceStep,
+    );
+    if (rewardDelta === 0 && confidenceDelta === 0) {
+      return 0;
+    }
     return processMemoryRepository.reinforceActiveForDomain(
       userId,
       domain,

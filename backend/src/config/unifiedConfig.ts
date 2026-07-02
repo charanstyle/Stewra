@@ -104,12 +104,25 @@ const EnvSchema = z.object({
   // rules up by this, a negative one decays them by it), clamped to 0..100 in the repo. Reward accrues
   // by the raw signed RATING_REWARD scalar separately. Sane default, overridable — never magic in code.
   PROCESS_MEMORY_CONFIDENCE_STEP: z.coerce.number().int().min(1).max(50).default(5),
-  // The user picks the model provider. 'claude_cli' (default) shells out to the locally installed
-  // `claude` CLI in print mode, using the user's existing Claude Code subscription — no API key.
-  // The rest are API providers: 'anthropic' uses @anthropic-ai/sdk; 'openai', 'gemini', and 'grok'
-  // all speak the OpenAI-compatible Chat Completions API (one adapter, different base URL + key).
+  // The WEAK negative reward applied to the style rules that shaped an insight when the user dismisses
+  // it WITHOUT rating it (implicit engagement). Non-positive; deliberately small (half an explicit
+  // "poor" = -1) so a single dismiss nudges but never tanks a rule — an explicit rating still
+  // overrides. Set to 0 to disable the implicit signal and keep dismiss telemetry-only.
+  PROCESS_MEMORY_IMPLICIT_DISMISS_REWARD: z.coerce.number().min(-3).max(0).default(-0.5),
+  // The locally installed `claude` CLI (print mode) is ALWAYS preferred when it is actually runnable
+  // on this host — it uses the operator's existing Claude Code subscription, no API key, no per-token
+  // cost. Every other provider is a FALLBACK, used only when the CLI isn't available (e.g. inside the
+  // prod container, which has no `claude` binary). `MODEL_PREFER_CLAUDE_CLI=false` turns the
+  // auto-preference off so `MODEL_PROVIDER` is honoured verbatim (useful to exercise an API path on a
+  // machine that also has the CLI). The runtime availability probe lives in the host (`modelClient`),
+  // not here, so config stays a pure env parse.
+  MODEL_PREFER_CLAUDE_CLI: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
+  // The FALLBACK provider, used when the Claude CLI isn't available (or the preference is off).
+  // 'claude_cli' also names the CLI explicitly. 'anthropic' uses @anthropic-ai/sdk; 'openai',
+  // 'gemini', and 'grok' all speak the OpenAI-compatible Chat Completions API (one adapter, different
+  // base URL + key). Defaults to 'claude_cli' so a dev box with the CLI needs no other config.
   MODEL_PROVIDER: z
-    .enum(['claude_cli', 'anthropic', 'openai', 'gemini', 'grok'])
+    .enum(['claude_cli', 'openai', 'gemini', 'grok', 'anthropic'])
     .default('claude_cli'),
   // Path/name of the Claude Code binary (overridable for non-standard installs).
   CLAUDE_CODE_PATH: z.string().min(1).default('claude'),
@@ -150,7 +163,8 @@ const API_KEY_BY_PROVIDER: Record<string, string | undefined> = {
   grok: env.GROK_API_KEY,
 };
 
-// Fail loud, up front, when the chosen API provider is missing its key or model id.
+// Fail loud, up front, when the fallback API provider is missing its key or model id. (The CLI needs
+// neither; whether it's actually runnable is probed at host build time, not here.)
 if (env.MODEL_PROVIDER !== 'claude_cli') {
   if (!API_KEY_BY_PROVIDER[env.MODEL_PROVIDER]) {
     throw new Error(
@@ -244,9 +258,14 @@ export const config = {
     recallLimit: env.PROCESS_MEMORY_RECALL_LIMIT,
     // How much a reinforcement (rated feedback) moves a recalled rule's confidence up/down.
     confidenceStep: env.PROCESS_MEMORY_CONFIDENCE_STEP,
+    // Weak negative reward for a dismiss-without-rating (implicit engagement); 0 disables it.
+    implicitDismissReward: env.PROCESS_MEMORY_IMPLICIT_DISMISS_REWARD,
   },
   model: {
+    // The FALLBACK provider; the host prefers the Claude CLI over this whenever it's runnable.
     provider: env.MODEL_PROVIDER,
+    // Whether to auto-prefer the local Claude CLI when available (off → honour `provider` verbatim).
+    preferClaudeCli: env.MODEL_PREFER_CLAUDE_CLI,
     claudeCodePath: env.CLAUDE_CODE_PATH,
     // Empty string means "let the provider pick its own default" (only valid for claude_cli).
     modelId: env.MODEL_ID ?? '',

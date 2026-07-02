@@ -184,6 +184,8 @@ export async function fetchRecentEmails(
       subject: headerValue(headers, 'Subject'),
       from: headerValue(headers, 'From'),
       unread: labelIds.includes('UNREAD'),
+      important: labelIds.includes('IMPORTANT'),
+      starred: labelIds.includes('STARRED'),
       date: headerValue(headers, 'Date'),
     });
   }
@@ -268,12 +270,20 @@ export async function fetchSentMailSamples(
       userId: 'me',
       id: ref.id,
       format: 'metadata',
-      metadataHeaders: ['Cc'],
+      metadataHeaders: ['Cc', 'Date'],
     });
     const headers = message.data.payload?.headers ?? [];
     const snippet = message.data.snippet ?? '';
     const ccAddresses = parseAddresses(headerValue(headers, 'Cc'));
-    samples.push(classifySentMessage({ snippet, ccCount: ccAddresses.length }));
+    // The Date header is reduced to a coarse send-time band INSIDE classifySentMessage and discarded —
+    // the exact timestamp never leaves this function, exactly like the snippet text.
+    samples.push(
+      classifySentMessage({
+        snippet,
+        ccCount: ccAddresses.length,
+        dateHeader: headerValue(headers, 'Date'),
+      }),
+    );
     // Count DISTINCT CC addresses per message so one email CC'ing a contact twice can't inflate it.
     for (const addr of new Set(ccAddresses)) {
       ccCounts.set(addr, (ccCounts.get(addr) ?? 0) + 1);

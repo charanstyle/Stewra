@@ -22,7 +22,9 @@ export type AuditResourceType =
  * about it); `forget` covers a real deletion of a memory (per-item or forget-on-disconnect), so
  * removals are as visible as writes; `propose` covers a model-proposed (never silently written)
  * memory; `connect`/`disconnect` cover a user adding or revoking a sanctioned source; `verify`
- * covers the user proving ownership of email.
+ * covers the user proving ownership of email; `view` covers an insight being surfaced to the user
+ * (a passive impression), and `dismiss` covers the user closing an insight without rating it — the
+ * implicit-engagement signal, so a shown-and-ignored insight is no longer invisible to the record.
  */
 export type AuditAction =
   | 'read'
@@ -34,6 +36,8 @@ export type AuditAction =
   | 'connect'
   | 'disconnect'
   | 'verify'
+  | 'view'
+  | 'dismiss'
   | 'auth.register'
   | 'auth.login'
   | 'auth.refresh';

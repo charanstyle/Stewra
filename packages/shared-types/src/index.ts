@@ -35,7 +35,11 @@ export type {
   ConnectionResponse,
   ListConnectionsResponse,
 } from './api/connections';
-export type { GenerateInsightRequest, GenerateInsightResponse } from './api/insights';
+export type {
+  GenerateInsightRequest,
+  GenerateInsightResponse,
+  InsightEngagementResponse,
+} from './api/insights';
 export type { SubmitFeedbackRequest, SubmitFeedbackResponse } from './api/feedback';
 export type {
   ListMemoriesRequest,

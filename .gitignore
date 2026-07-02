@@ -16,3 +16,4 @@ coverage/
 # Transient per-session Claude tooling state (copied skills keyed by session id) — not project source.
 .claude/hooks/.session-skills/
 .apptest
+.claude/tsc-cache/

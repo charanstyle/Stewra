@@ -60,6 +60,15 @@ export default function ActivityPage(): React.JSX.Element {
     void refresh();
   }, [refresh]);
 
+  // Impression beacon: as soon as a fresh insight renders, tell the backend it was seen. Best-effort
+  // telemetry — a failed beacon must never surface an error over the insight the user asked for.
+  useEffect(() => {
+    if (insightId === null) {
+      return;
+    }
+    void api.markInsightSeen(insightId).catch(() => undefined);
+  }, [insightId]);
+
   const startConnect = useCallback(async (): Promise<void> => {
     setError(null);
     try {
@@ -146,6 +155,23 @@ export default function ActivityPage(): React.JSX.Element {
     }
   }, [preferences]);
 
+  const dismissInsight = useCallback(async (): Promise<void> => {
+    const id = insightId;
+    // Clear locally first so the card closes instantly; the beacon is a weak implicit-negative
+    // signal the backend only applies when the insight was seen and never explicitly rated.
+    setInsight(null);
+    setInsightId(null);
+    if (id === null) {
+      return;
+    }
+    try {
+      await api.markInsightDismissed(id);
+      await refresh();
+    } catch {
+      // Dismiss telemetry is best-effort; the card is already gone locally.
+    }
+  }, [insightId, refresh]);
+
   const dismissConnected = useCallback((): void => {
     searchParams.delete('connected');
     setSearchParams(searchParams, { replace: true });
@@ -192,7 +218,20 @@ export default function ActivityPage(): React.JSX.Element {
         </div>
       )}
       {error && <div className={styles.error}>{error}</div>}
-      {insight && <div className={styles.insight}>💡 {insight}</div>}
+      {insight && (
+        <div className={styles.insight}>
+          <span className={styles.insightText}>💡 {insight}</span>
+          <button
+            type="button"
+            className={styles.insightDismiss}
+            aria-label="Dismiss insight"
+            title="Dismiss"
+            onClick={() => void dismissInsight()}
+          >
+            ✕
+          </button>
+        </div>
+      )}
       {insightId !== null && <FeedbackControl key={insightId} insightId={insightId} />}
 
       <section className={styles.grid}>

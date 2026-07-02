@@ -71,6 +71,21 @@ export class InsightFeedbackRepository {
       .returning(COLUMNS)
       .executeTakeFirstOrThrow();
   }
+
+  /**
+   * Whether the user has already left an explicit verdict on this insight. The implicit-engagement
+   * path uses it to avoid double-counting: a dismiss only decays the rules when the user hasn't
+   * rated the insight, so an explicit rating always wins over the weaker passive signal.
+   */
+  async existsForInsight(userId: string, insightId: string): Promise<boolean> {
+    const row = await db
+      .selectFrom('insight_feedback')
+      .select('id')
+      .where('user_id', '=', userId)
+      .where('insight_id', '=', insightId)
+      .executeTakeFirst();
+    return row !== undefined;
+  }
 }
 
 export const insightFeedbackRepository = new InsightFeedbackRepository();

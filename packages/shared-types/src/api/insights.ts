@@ -1,4 +1,4 @@
-import type { UUID } from '../common/base';
+import type { ISODateString, UUID } from '../common/base';
 import type { AgentInsight, ResourceKind } from '../broker/contract';
 
 /** Inclusive bounds on the Gmail lookback window (in days). Single source of truth shared by the
@@ -32,4 +32,17 @@ export interface GenerateInsightResponse {
    * (POST /insights/:insightId/feedback). The control plane assigns it when it records the insight.
    */
   readonly insightId: UUID;
+}
+
+/**
+ * Acknowledgement for the implicit-engagement endpoints (POST /insights/:insightId/seen and
+ * /insights/:insightId/dismissed). Both take an empty body — the insight id travels in the path —
+ * and return the resulting engagement timestamps so the client can reconcile local state. `seenAt`
+ * is set once (first-write-wins impression); `dismissedAt` is set when the user closes the insight
+ * without rating it. Either may be null when that event hasn't happened yet.
+ */
+export interface InsightEngagementResponse {
+  readonly insightId: UUID;
+  readonly seenAt: ISODateString | null;
+  readonly dismissedAt: ISODateString | null;
 }

@@ -12,6 +12,7 @@ import type {
   StartCalendarConnectionResponse,
   GenerateInsightRequest,
   GenerateInsightResponse,
+  InsightEngagementResponse,
   GetPreferencesResponse,
   UpdatePreferencesRequest,
   UpdatePreferencesResponse,
@@ -140,6 +141,14 @@ export const api = {
     body: SubmitFeedbackRequest,
   ): Promise<SubmitFeedbackResponse> =>
     request(`/insights/${insightId}/feedback`, { method: 'POST', body }),
+
+  /** Impression beacon: record that an insight was shown. First-write-wins, no reward effect. */
+  markInsightSeen: (insightId: string): Promise<InsightEngagementResponse> =>
+    request(`/insights/${insightId}/seen`, { method: 'POST', body: {} }),
+
+  /** Fired when the user closes an insight without rating it — a weak implicit-negative signal. */
+  markInsightDismissed: (insightId: string): Promise<InsightEngagementResponse> =>
+    request(`/insights/${insightId}/dismissed`, { method: 'POST', body: {} }),
 
   listMemories: (params: ListMemoriesRequest = {}): Promise<ListMemoriesResponse> => {
     const query = new URLSearchParams();

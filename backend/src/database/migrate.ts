@@ -13,6 +13,7 @@ import * as m008 from './migrations/008_insight_feedback';
 import * as m009 from './migrations/009_agent_memory';
 import * as m010 from './migrations/010_process_memory';
 import * as m011 from './migrations/011_sent_mail_optin';
+import * as m012 from './migrations/012_insight_engagement';
 import { logger } from '../utils/logger';
 
 interface Migration {
@@ -33,6 +34,7 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '009_agent_memory', up: m009.up },
   { name: '010_process_memory', up: m010.up },
   { name: '011_sent_mail_optin', up: m011.up },
+  { name: '012_insight_engagement', up: m012.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {
