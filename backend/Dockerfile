@@ -58,9 +58,10 @@ FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 # Piper's bundled shared libraries live beside its binary; add that dir so the dynamic loader finds them
-# when the TTS service execs piper. libgomp1 is whisper.cpp's OpenMP runtime.
+# when the TTS service execs piper. libgomp1 is whisper.cpp's OpenMP runtime. ffmpeg normalizes uploaded
+# voice clips (Opus/webm/ogg/mp4/any-rate WAV) to the 16 kHz mono PCM WAV whisper.cpp requires.
 ENV LD_LIBRARY_PATH=/opt/voice/piper
-RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # The workspace at runtime: node_modules (with the @stewra/* symlinks into packages/), the built
@@ -78,6 +79,7 @@ COPY --from=build /app/backend/dist ./backend/dist
 # Baked STT/TTS tools + models. Point stewra.env at these (see .env.example):
 #   WHISPER_BIN=/opt/voice/bin/whisper-cli   WHISPER_MODEL=/opt/voice/models/ggml-base.en.bin
 #   PIPER_BIN=/opt/voice/piper/piper         PIPER_VOICE=/opt/voice/piper-voices/en_US-amy-medium.onnx
+#   FFMPEG_BIN=/usr/bin/ffmpeg               (installed above via apt; normalizes clips for whisper)
 COPY --from=voice /voice /opt/voice
 
 # Matches the backend's default PORT (config.port). The host maps a loopback port to this.

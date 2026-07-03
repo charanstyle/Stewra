@@ -169,6 +169,9 @@ const EnvSchema = z.object({
   WHISPER_MODEL: z.string().min(1).optional(),
   PIPER_BIN: z.string().min(1).optional(),
   PIPER_VOICE: z.string().min(1).optional(),
+  // ffmpeg normalizes an uploaded clip (webm/opus, ogg, mp4, arbitrary-rate WAV) to the 16 kHz mono
+  // 16-bit PCM WAV that whisper.cpp requires. Without it, real browser recordings (Opus) never decode.
+  FFMPEG_BIN: z.string().min(1).optional(),
   // Where uploaded/synthesized media is written (a mounted volume in prod). Required when voice is on
   // (voice notes + TTS output land here); also used by any media upload. Served ONLY via the
   // authenticated GET /media/:id — never statically/publicly.
@@ -227,7 +230,7 @@ if (env.CALLS_ENABLED) {
 // without them, and we never want a 500 mid-conversation from an unset path.
 if (env.VOICE_ENABLED) {
   const missing = (
-    ['WHISPER_BIN', 'WHISPER_MODEL', 'PIPER_BIN', 'PIPER_VOICE', 'UPLOADS_DIR'] as const
+    ['WHISPER_BIN', 'WHISPER_MODEL', 'PIPER_BIN', 'PIPER_VOICE', 'FFMPEG_BIN', 'UPLOADS_DIR'] as const
   ).filter((k) => !env[k]);
   if (missing.length > 0) {
     throw new Error(`VOICE_ENABLED=true requires: ${missing.join(', ')}`);
@@ -366,6 +369,7 @@ export const config = {
     whisperModel: env.WHISPER_MODEL ?? '',
     piperBin: env.PIPER_BIN ?? '',
     piperVoice: env.PIPER_VOICE ?? '',
+    ffmpegBin: env.FFMPEG_BIN ?? '',
   },
   uploads: {
     // Mounted volume for uploaded/synthesized media; served only via authenticated GET /media/:id.

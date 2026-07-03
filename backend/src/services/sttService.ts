@@ -6,44 +6,66 @@ import { logger } from '../utils/logger';
 /**
  * Speech-to-text via a locally installed whisper.cpp binary, invoked with `execFile` (args array, NO
  * shell) exactly like the Claude CLI model client — an uploaded audio path can never be interpreted as
- * shell. Paths come from config (`WHISPER_BIN`/`WHISPER_MODEL`), never hardcoded. whisper.cpp writes the
- * transcript to `<outBase>.txt`; we read it, then clean it up. Fail-loud: a non-zero exit or missing
- * output rejects (the control plane turns that into a 5xx rather than a silent empty transcript).
+ * shell. Paths come from config (`WHISPER_BIN`/`WHISPER_MODEL`/`FFMPEG_BIN`), never hardcoded. whisper.cpp
+ * writes the transcript to `<outBase>.txt`; we read it, then clean it up. Fail-loud: a non-zero exit or
+ * missing output rejects (the control plane turns that into a 5xx rather than a silent empty transcript).
  *
- * NOTE: whisper.cpp decodes 16-bit PCM WAV. Callers must upload/convert to that format; a bad format
- * surfaces here as a loud transcription failure rather than a wrong answer.
+ * whisper.cpp only decodes 16 kHz mono 16-bit PCM WAV, but clients record Opus (webm/ogg) or send WAVs at
+ * other sample rates. So every clip is first normalized with ffmpeg to that exact format; whisper then
+ * reads the normalized copy, never the raw upload.
  */
 export class SttService {
   private readonly binary: string;
   private readonly model: string;
+  private readonly ffmpeg: string;
 
-  constructor(binary: string, model: string) {
+  constructor(binary: string, model: string, ffmpeg: string) {
     this.binary = binary;
     this.model = model;
+    this.ffmpeg = ffmpeg;
   }
 
-  /** Transcribe the audio file at `audioPath` (absolute) and return the plain-text transcript. */
-  async transcribe(audioPath: string): Promise<string> {
-    const outBase = `${audioPath}.whisper`;
-    const outTxt = `${outBase}.txt`;
-    // `-otxt -of <base>` writes `<base>.txt`; `-nt` drops timestamps from any stdout it also prints.
-    const args = ['-m', this.model, '-f', audioPath, '-otxt', '-of', outBase, '-nt'];
-
-    await new Promise<void>((resolve, reject) => {
-      execFile(this.binary, args, { maxBuffer: 8 * 1024 * 1024 }, (error) => {
+  /** Run a binary with args (no shell); reject on non-zero exit, surfacing stderr for diagnosis. */
+  private run(bin: string, args: readonly string[]): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      execFile(bin, args, { maxBuffer: 8 * 1024 * 1024 }, (error, _stdout, stderr) => {
         if (error) {
-          reject(error);
+          reject(new Error(`${bin} failed: ${error.message}${stderr ? ` — ${stderr}` : ''}`));
           return;
         }
         resolve();
       });
     });
+  }
 
+  /** Transcribe the audio file at `audioPath` (absolute) and return the plain-text transcript. */
+  async transcribe(audioPath: string): Promise<string> {
+    // 1. Normalize any container/codec/rate → 16 kHz mono s16 WAV that whisper.cpp can decode.
+    const wav16 = `${audioPath}.16k.wav`;
+    await this.run(this.ffmpeg, [
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-y',
+      '-i', audioPath,
+      '-ar', '16000',
+      '-ac', '1',
+      '-c:a', 'pcm_s16le',
+      wav16,
+    ]);
+
+    // 2. Transcribe the normalized WAV. `-otxt -of <base>` writes `<base>.txt`; `-nt` drops timestamps.
+    const outBase = `${audioPath}.whisper`;
+    const outTxt = `${outBase}.txt`;
     try {
+      await this.run(this.binary, ['-m', this.model, '-f', wav16, '-otxt', '-of', outBase, '-nt']);
       const transcript = await readFile(outTxt, 'utf8');
       return transcript.trim();
     } finally {
-      // Best-effort cleanup of the sidecar transcript file; a failure here must not mask a good result.
+      // Best-effort cleanup of the normalized WAV + sidecar transcript; a failure here never masks a
+      // good result (or the real error on the failure path).
+      await unlink(wav16).catch((err: unknown) => {
+        logger.warn('stt normalized-wav cleanup failed', { wav16, err: String(err) });
+      });
       await unlink(outTxt).catch((err: unknown) => {
         logger.warn('stt transcript cleanup failed', { outTxt, err: String(err) });
       });
@@ -51,4 +73,8 @@ export class SttService {
   }
 }
 
-export const sttService = new SttService(config.voice.whisperBin, config.voice.whisperModel);
+export const sttService = new SttService(
+  config.voice.whisperBin,
+  config.voice.whisperModel,
+  config.voice.ffmpegBin,
+);
