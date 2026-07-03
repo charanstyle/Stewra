@@ -185,6 +185,7 @@ export type {
   StewraThinkingEvent,
   StewraReplyEvent,
   StewraReplyChunkEvent,
+  StewraErrorEvent,
 } from './realtime/payloads';
 
 // Audit

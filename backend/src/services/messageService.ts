@@ -24,20 +24,24 @@ export interface VoiceTurnResult {
  * (emit to the conversation room) is the controller's job after this returns.
  */
 class MessageService {
-  /** Send a text message to a conversation the caller is an active participant of. */
+  /**
+   * Send a text message to a conversation the caller is an active participant of. Returns the stored
+   * message plus the conversation, so the controller can tell a Stewra-AI thread (which owes an
+   * assistant reply) from a human one and fan out accordingly.
+   */
   async sendText(
     userId: string,
     conversationId: string,
     content: string,
     replyToId: string | null,
-  ): Promise<Message> {
-    await conversationService.assertParticipant(userId, conversationId);
+  ): Promise<{ message: Message; conversation: Conversation }> {
+    const { conversation } = await conversationService.assertParticipant(userId, conversationId);
     const trimmed = content.trim();
     if (trimmed.length === 0) throw new ValidationError('Message content cannot be empty');
     if (trimmed.length > MAX_CONTENT_LENGTH) {
       throw new ValidationError(`Message content exceeds ${MAX_CONTENT_LENGTH} characters`);
     }
-    return messageRepository.create({
+    const message = await messageRepository.create({
       conversationId,
       senderId: userId,
       senderKind: MessageRepository.SENDER_USER,
@@ -45,6 +49,20 @@ class MessageService {
       content: trimmed,
       replyToId,
     });
+    return { message, conversation };
+  }
+
+  /**
+   * Produce Stewra's reply to a just-persisted user text turn in the user's Stewra-AI conversation
+   * (advice-only converse → text + optional TTS). Thin pass-through to the control-plane orchestrator;
+   * the caller (controller) owns fan-out and runs this off the request path so the POST stays fast.
+   */
+  async generateStewraReply(
+    userId: string,
+    conversation: Conversation,
+    userMessage: Message,
+  ): Promise<Message> {
+    return stewraConversationService.generateReply(userId, conversation, userMessage);
   }
 
   /**

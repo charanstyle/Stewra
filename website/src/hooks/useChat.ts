@@ -14,6 +14,10 @@ interface UseChatResult {
   readonly error: string | null;
   /** User ids currently typing in this conversation (excludes the caller). */
   readonly typingUserIds: ReadonlyArray<UUID>;
+  /** Stewra-AI thread only: the assistant is composing a reply (drives a "thinking…" indicator). */
+  readonly stewraThinking: boolean;
+  /** Stewra-AI thread only: the last assistant turn failed to generate (retryable notice). */
+  readonly stewraError: string | null;
   sendText: (content: string) => Promise<void>;
   /** Notify the room the caller started/stopped typing (debounced by the caller). */
   setTyping: (isTyping: boolean) => void;
@@ -32,6 +36,8 @@ export function useChat(conversationId: UUID | null): UseChatResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [typing, setTyping] = useState<ReadonlyArray<TypingUser>>([]);
+  const [stewraThinking, setStewraThinking] = useState(false);
+  const [stewraError, setStewraError] = useState<string | null>(null);
   const seenIds = useRef<Set<UUID>>(new Set());
 
   const upsert = useCallback((incoming: ReadonlyArray<Message>): void => {
@@ -87,7 +93,21 @@ export function useChat(conversationId: UUID | null): UseChatResult {
     };
     const onReply = (event: { message: Message }): void => {
       if (event.message.conversationId === conversationId) {
+        setStewraThinking(false);
+        setStewraError(null);
         upsert([event.message]);
+      }
+    };
+    const onStewraThinking = (event: { conversationId: UUID }): void => {
+      if (event.conversationId === conversationId) {
+        setStewraError(null);
+        setStewraThinking(true);
+      }
+    };
+    const onStewraError = (event: { conversationId: UUID; message: string }): void => {
+      if (event.conversationId === conversationId) {
+        setStewraThinking(false);
+        setStewraError(event.message);
       }
     };
     const onTyping = (event: { conversationId: UUID; userId: UUID; isTyping: boolean }): void => {
@@ -102,11 +122,15 @@ export function useChat(conversationId: UUID | null): UseChatResult {
 
     socket.on(SERVER_EVENTS.CHAT_MESSAGE, onMessage);
     socket.on(SERVER_EVENTS.STEWRA_REPLY, onReply);
+    socket.on(SERVER_EVENTS.STEWRA_THINKING, onStewraThinking);
+    socket.on(SERVER_EVENTS.STEWRA_ERROR, onStewraError);
     socket.on(SERVER_EVENTS.CHAT_TYPING, onTyping);
     return () => {
       socket.emit(CLIENT_EVENTS.CHAT_LEAVE, { conversationId }, () => undefined);
       socket.off(SERVER_EVENTS.CHAT_MESSAGE, onMessage);
       socket.off(SERVER_EVENTS.STEWRA_REPLY, onReply);
+      socket.off(SERVER_EVENTS.STEWRA_THINKING, onStewraThinking);
+      socket.off(SERVER_EVENTS.STEWRA_ERROR, onStewraError);
       socket.off(SERVER_EVENTS.CHAT_TYPING, onTyping);
     };
   }, [socket, conversationId, upsert]);
@@ -145,6 +169,8 @@ export function useChat(conversationId: UUID | null): UseChatResult {
     loading,
     error,
     typingUserIds: typing.map((t) => t.userId),
+    stewraThinking,
+    stewraError,
     sendText,
     setTyping: emitTyping,
     appendMessages: upsert,

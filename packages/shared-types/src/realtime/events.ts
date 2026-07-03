@@ -49,6 +49,8 @@ export const SERVER_EVENTS = {
   // stewra-voice
   STEWRA_THINKING: 'stewra:thinking',
   STEWRA_REPLY: 'stewra:reply',
+  /** The assistant turn failed to generate — clears the thinking indicator, shows a retryable notice. */
+  STEWRA_ERROR: 'stewra:error',
   /** Reserved for a future streaming upgrade (Anthropic SDK path); unused in the non-streaming v1. */
   STEWRA_REPLY_CHUNK: 'stewra:reply-chunk',
 } as const;

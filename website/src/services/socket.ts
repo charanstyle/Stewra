@@ -29,6 +29,7 @@ import type {
   CallErrorEvent,
   StewraThinkingEvent,
   StewraReplyEvent,
+  StewraErrorEvent,
   ISODateString,
   CallSession,
 } from '@stewra/shared-types';
@@ -85,6 +86,7 @@ interface ServerToClientEvents {
   [SERVER_EVENTS.CALL_ERROR]: (event: CallErrorEvent) => void;
   [SERVER_EVENTS.STEWRA_THINKING]: (event: StewraThinkingEvent) => void;
   [SERVER_EVENTS.STEWRA_REPLY]: (event: StewraReplyEvent) => void;
+  [SERVER_EVENTS.STEWRA_ERROR]: (event: StewraErrorEvent) => void;
 }
 
 export type StewraSocket = Socket<ServerToClientEvents, ClientToServerEvents>;

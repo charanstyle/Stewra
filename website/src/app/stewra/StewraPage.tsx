@@ -42,7 +42,8 @@ export default function StewraPage(): React.JSX.Element {
   const recorderRef = useRef<VoiceRecorder | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { messages, loading, error, sendText, appendMessages } = useChat(conversationId);
+  const { messages, loading, error, sendText, appendMessages, stewraThinking, stewraError } =
+    useChat(conversationId);
 
   // Provision (or fetch) the singleton Stewra-AI conversation on mount.
   useEffect(() => {
@@ -128,10 +129,13 @@ export default function StewraPage(): React.JSX.Element {
         {messages.map((m) => (
           <Turn key={m.id} message={m} />
         ))}
-        {thinking && <div className={styles.thinking}>Stewra is thinking…</div>}
+        {(thinking || stewraThinking) && (
+          <div className={styles.thinking}>Stewra is thinking…</div>
+        )}
       </div>
 
       {voiceError && <div className={styles.error}>{voiceError}</div>}
+      {stewraError && <div className={styles.error}>{stewraError}</div>}
 
       <div className={styles.controls}>
         <button

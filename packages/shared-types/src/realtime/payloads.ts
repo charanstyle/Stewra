@@ -129,3 +129,8 @@ export interface StewraReplyChunkEvent {
   readonly conversationId: UUID;
   readonly delta: string;
 }
+/** The assistant turn could not be produced (model/TTS failure); clears "thinking" and shows a notice. */
+export interface StewraErrorEvent {
+  readonly conversationId: UUID;
+  readonly message: string;
+}

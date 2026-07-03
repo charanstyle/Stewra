@@ -29,4 +29,5 @@ export type {
   StewraThinkingEvent,
   StewraReplyEvent,
   StewraReplyChunkEvent,
+  StewraErrorEvent,
 } from './payloads';
