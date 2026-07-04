@@ -15,6 +15,9 @@ config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
 ];
-config.resolver.disableHierarchicalLookup = true;
+// Keep hierarchical (walk-up) lookup ENABLED. Some react-native transitive deps
+// (e.g. @react-native/virtualized-lists) are not hoisted to a listed root and
+// stay nested under react-native/node_modules; disabling hierarchical lookup
+// would restrict resolution to nodeModulesPaths only and fail to find them.
 
 module.exports = config;

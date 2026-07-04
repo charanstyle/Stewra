@@ -16,7 +16,7 @@
  *   both    ◀── CALL_REMOTE_ICE_CANDIDATE → addRemoteCandidate (until connected)
  *   either  hangup()/decline() → CALL_END/CALL_DECLINE → both teardown
  */
-import type { MediaStream } from 'react-native-webrtc';
+import type { MediaStream } from '@livekit/react-native-webrtc';
 import { CLIENT_EVENTS, SERVER_EVENTS } from '@stewra/shared-types';
 import type { CallEndReason, CallKind } from '@stewra/shared-types';
 import { api } from '../api';
@@ -327,7 +327,14 @@ class CallService {
     }
 
     socket.on(SERVER_EVENTS.CALL_INCOMING, (data) => {
-      // Already busy → tell the caller; backend also enforces this.
+      // This exact call was already adopted out-of-band (a VoIP/FCM push beat
+      // the socket on a cold start) — the socket event is just catching up, so
+      // don't decline our own in-flight call.
+      if (this.active && this.active.callId === data.callId) {
+        return;
+      }
+      // A different call while already busy → tell the caller; backend also
+      // enforces this.
       if (this.active) {
         socket.emit(CLIENT_EVENTS.CALL_DECLINE, { callId: data.callId });
         return;

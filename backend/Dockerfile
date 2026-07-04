@@ -64,6 +64,18 @@ ENV LD_LIBRARY_PATH=/opt/voice/piper
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+# ── Claude Code CLI (the preferred, unmetered model provider) ────────────────────────────────────────
+# The talk-to-Stewra agent runs on the operator's Claude Code SUBSCRIPTION via the `claude` CLI in print
+# mode (see backend/src/agent-host/modelClient.ts) — no API key, no per-token cost. Install it globally so
+# `claude` lands on PATH (/usr/local/bin); MODEL_PREFER_CLAUDE_CLI (default true) then auto-selects it once
+# the `claude --version` probe passes. Runtime auth is a long-lived token from `claude setup-token`, passed
+# as CLAUDE_CODE_OAUTH_TOKEN via stewra.env — NEVER baked into the image. DISABLE_AUTOUPDATER stops the CLI
+# from mutating its global install at runtime; HOME (/root) stays writable for its per-invocation config.
+ARG CLAUDE_CODE_VERSION=latest
+ENV DISABLE_AUTOUPDATER=1
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+    && claude --version
+
 # The workspace at runtime: node_modules (with the @stewra/* symlinks into packages/), the built
 # package dists those symlinks resolve to, and the compiled API. tsx is not used in prod — the
 # entrypoint and migrations run from compiled JS.

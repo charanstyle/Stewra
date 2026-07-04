@@ -1,23 +1,65 @@
 /**
  * webrtcService — the low-level WebRTC engine for a single 1:1 call. Owns exactly
- * one RTCPeerConnection, the local capture stream, and the in-call audio session
- * (react-native-incall-manager). It produces/consumes the strict signaling shapes
- * from @stewra/shared-types (RtcSessionDescription / RtcIceCandidate); callService
- * relays those over the socket. The engine itself never touches the socket.
+ * one RTCPeerConnection and the local capture stream. It produces/consumes the
+ * strict signaling shapes from @stewra/shared-types (RtcSessionDescription /
+ * RtcIceCandidate); callService relays those over the socket. The engine itself
+ * never touches the socket.
+ *
+ * The in-call audio session is NOT managed here: `expo-callkit-telecom` owns it
+ * (CallKit/Core-Telecom activate the audio session when the call is reported and
+ * coordinate the LiveKit fork's RTCAudioSession). Speaker/earpiece routing is a
+ * thin passthrough to `setAudioSessionPortOverride`. Media uses LiveKit's WebRTC
+ * fork (`@livekit/react-native-webrtc`), which is API-identical to mainline
+ * react-native-webrtc and is the engine expo-callkit-telecom coordinates with.
  *
  * Calls force-relay through Stewra's TURN (iceTransportPolicy 'relay', no public
  * STUN) so connectivity and observability run through infrastructure we control.
- * Ported from TrueTalk's frontend/src/services/call/webrtcService.ts.
  */
-import InCallManager from 'react-native-incall-manager';
+import { setAudioSessionPortOverride } from 'expo-callkit-telecom';
 import {
   RTCPeerConnection,
   RTCSessionDescription,
   RTCIceCandidate,
-  MediaStream,
+  type MediaStream,
   mediaDevices,
-} from 'react-native-webrtc';
+} from '@livekit/react-native-webrtc';
 import type { CallKind, IceServerConfig, RtcSessionDescription, RtcIceCandidate } from '@stewra/shared-types';
+
+/**
+ * A local camera track on the LiveKit WebRTC fork exposes `_switchCamera()` for
+ * flipping front/back (same as mainline react-native-webrtc), but the exported
+ * MediaStreamTrack type doesn't declare it. Narrow to just that capability.
+ */
+interface SwitchableVideoTrack {
+  _switchCamera: () => void;
+}
+
+function canSwitchCamera(track: object): track is SwitchableVideoTrack {
+  return '_switchCamera' in track && typeof track._switchCamera === 'function';
+}
+
+/**
+ * The LiveKit WebRTC fork types RTCPeerConnection's `on*` handler events as a
+ * generic `Event<string>`, so the carried fields (`candidate`, `streams`) aren't
+ * on the static type. Narrow to the shapes we read, without an `as` cast.
+ */
+interface IceCandidateEventLike {
+  readonly candidate: {
+    readonly candidate: string;
+    readonly sdpMid: string | null;
+    readonly sdpMLineIndex: number | null;
+  } | null;
+}
+function isIceCandidateEvent(event: object): event is IceCandidateEventLike {
+  return 'candidate' in event;
+}
+
+interface TrackEventLike {
+  readonly streams: ReadonlyArray<MediaStream>;
+}
+function isTrackEvent(event: object): event is TrackEventLike {
+  return 'streams' in event;
+}
 
 type LocalIceHandler = (candidate: RtcIceCandidate) => void;
 type RemoteStreamHandler = (stream: MediaStream) => void;
@@ -65,19 +107,14 @@ class WebrtcService {
     this.onConnectionState = handler;
   }
 
-  /** Acquire mic (+camera for video) and start the in-call audio session. */
+  /** Acquire mic (+camera for video). The audio session is owned by CallKit/
+   *  Core-Telecom (expo-callkit-telecom), activated when the call is reported. */
   async startLocalMedia(kind: CallKind): Promise<MediaStream> {
     const stream = await mediaDevices.getUserMedia({
       audio: true,
       video: kind === 'video' ? { facingMode: 'user' } : false,
     });
     this.localStream = stream;
-
-    // Hand the native audio session over to call mode. Video defaults to the
-    // loudspeaker, voice to the earpiece.
-    InCallManager.start({ media: kind === 'video' ? 'video' : 'audio', auto: true });
-    InCallManager.setForceSpeakerphoneOn(kind === 'video');
-
     return stream;
   }
 
@@ -98,6 +135,9 @@ class WebrtcService {
     });
 
     pc.onicecandidate = (event) => {
+      if (!isIceCandidateEvent(event)) {
+        return;
+      }
       const candidate = event.candidate;
       if (candidate && this.onLocalIce) {
         this.onLocalIce({
@@ -109,6 +149,9 @@ class WebrtcService {
     };
 
     pc.ontrack = (event) => {
+      if (!isTrackEvent(event)) {
+        return;
+      }
       const [stream] = event.streams;
       if (stream) {
         this.remoteStream = stream;
@@ -232,13 +275,15 @@ class WebrtcService {
       return;
     }
     const [videoTrack] = stream.getVideoTracks();
-    if (videoTrack && typeof videoTrack._switchCamera === 'function') {
+    if (videoTrack && canSwitchCamera(videoTrack)) {
       videoTrack._switchCamera();
     }
   }
 
+  /** Route call audio to the loudspeaker (true) or earpiece (false). CallKit/
+   *  Core-Telecom own the audio session; this overrides its output port. */
   setSpeaker(on: boolean): void {
-    InCallManager.setForceSpeakerphoneOn(on);
+    setAudioSessionPortOverride(on);
   }
 
   getLocalStream(): MediaStream | null {
@@ -264,9 +309,8 @@ class WebrtcService {
     this.remoteStream = null;
     this.pendingRemoteCandidates = [];
     this.hasRemoteDescription = false;
-
-    InCallManager.setForceSpeakerphoneOn(false);
-    InCallManager.stop();
+    // The audio session is torn down by expo-callkit-telecom when the call is
+    // ended (endCall / reportCallEnded), so there is nothing to stop here.
   }
 }
 

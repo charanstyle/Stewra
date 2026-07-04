@@ -6,6 +6,10 @@ dist/
 !.env.example
 # Production runtime secrets that live beside the deployed app on the host — NEVER commit these.
 stewra.env
+# Firebase client config for the RN Android app — tied to a specific Firebase project,
+# injected via the GOOGLE_SERVICES_JSON env var (see frontend/app.config.ts). Keep it local.
+google-services.json
+**/google-services.json
 .mailcredentials
 **/.mailcredentials
 .DS_Store
@@ -17,3 +21,12 @@ coverage/
 .claude/hooks/.session-skills/
 .apptest
 .claude/tsc-cache/
+
+# Expo native project — regenerated from app.config.ts + config plugins on every `expo prebuild`.
+# We NEVER hand-edit it or track it: all native config flows through plugins/*.cjs and app.config.ts,
+# so the tree stays in sync across machines by regenerating, not by committing generated Gradle output.
+/frontend/android/
+/frontend/ios/
+# Expo local cache + per-machine dev-client device registry.
+.expo/
+**/.expo/

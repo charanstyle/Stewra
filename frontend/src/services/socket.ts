@@ -24,9 +24,10 @@ import type {
   CallErrorEvent,
   StewraThinkingEvent,
   StewraReplyEvent,
+  StewraErrorEvent,
   CallSession,
 } from '@stewra/shared-types';
-import { CLIENT_EVENTS, SERVER_EVENTS } from '@stewra/shared-types';
+import type { CLIENT_EVENTS, SERVER_EVENTS } from '@stewra/shared-types';
 import { config } from './config';
 import { readTokens } from './tokenStore';
 
@@ -61,6 +62,7 @@ interface ServerToClientEvents {
   [SERVER_EVENTS.CALL_ERROR]: (event: CallErrorEvent) => void;
   [SERVER_EVENTS.STEWRA_THINKING]: (event: StewraThinkingEvent) => void;
   [SERVER_EVENTS.STEWRA_REPLY]: (event: StewraReplyEvent) => void;
+  [SERVER_EVENTS.STEWRA_ERROR]: (event: StewraErrorEvent) => void;
 }
 
 /** Client → server event payload/ack map, one entry per `CLIENT_EVENTS` value. */

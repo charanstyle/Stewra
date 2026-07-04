@@ -1,8 +1,13 @@
+import palette from './palette.json';
+
 /**
- * Stewra's single source of truth for color literals. The color-literal-enforcer
- * hook blocks any hex/named/rgb literal in a StyleSheet color property outside of
- * this file, so every screen/component must reference `theme.colors.*` instead of
- * hardcoding a value.
+ * Stewra's single source of truth for color literals lives in `./palette.json`. The
+ * color-literal-enforcer hook blocks any hex/named/rgb literal in a StyleSheet color
+ * property outside of this file, so every screen/component must reference
+ * `theme.colors.*` instead of hardcoding a value. The raw values live in JSON (not
+ * inline here) so `app.config.ts` — evaluated by Expo's plain-Node config loader,
+ * which cannot resolve nested `.ts` imports at prebuild time — can import the exact
+ * same palette (`.json` is natively resolvable) without duplicating any literal.
  */
 export interface ThemeColors {
   readonly background: string;
@@ -27,28 +32,7 @@ export interface ThemeColors {
   readonly offline: string;
 }
 
-export const colors: ThemeColors = {
-  background: '#0B0F14',
-  surface: '#141B22',
-  surfaceAlt: '#1C2530',
-  border: '#26313D',
-  textPrimary: '#F5F7FA',
-  textSecondary: '#9AA7B4',
-  textInverse: '#0B0F14',
-  primary: '#3D8BFD',
-  primaryPressed: '#2E6FD1',
-  onPrimary: '#FFFFFF',
-  success: '#31C48D',
-  danger: '#E5484D',
-  dangerPressed: '#C13A3E',
-  warning: '#F5A524',
-  bubbleOutgoing: '#215D8F',
-  bubbleIncoming: '#1C2530',
-  overlay: 'rgba(11, 15, 20, 0.72)',
-  shadow: '#000',
-  online: '#31C48D',
-  offline: '#5C6773',
-} as const;
+export const colors: ThemeColors = palette;
 
 export const theme = {
   colors,

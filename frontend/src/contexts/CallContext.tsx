@@ -1,11 +1,9 @@
 import React, { createContext, useContext, useEffect, useRef } from 'react';
-import type { IncomingCallInfo } from '../services/call/callService';
 import { callService } from '../services/call/callService';
+import type { CallStatus } from '../services/call/callService';
 import { voipCallService } from '../services/call/voipCallService';
-import { adoptPendingAndroidCall, registerAndroidCallPushToken } from '../services/call/androidPushToken';
 import { navigationRef } from '../navigation/RootNavigator';
 import { useAuth } from './AuthContext';
-import IncomingCallModal from '../components/IncomingCallModal';
 
 interface CallContextValue {
   readonly hasActiveOrIncomingCall: boolean;
@@ -13,15 +11,23 @@ interface CallContextValue {
 
 const CallContext = createContext<CallContextValue | null>(null);
 
+function isBusyStatus(status: CallStatus): boolean {
+  return status !== 'idle' && status !== 'ended';
+}
+
 /**
- * Mounts once the user is authenticated. Wires callService's socket listeners,
- * initializes CallKit/PushKit on iOS, and renders the global incoming-call modal
- * (independent of whatever screen is currently focused). Accepting a call
- * navigates to the full-screen Call screen.
+ * Mounts once the user is authenticated. Wires callService's socket listeners and
+ * initializes the native call layer (expo-callkit-telecom via voipCallService),
+ * which owns the incoming/outgoing call UI, the audio session, and VoIP push.
+ *
+ * The incoming-call *ringer* is the OS's now (CallKit / Core-Telecom), not a JS
+ * modal — so this provider no longer renders one. Its remaining UI job is to
+ * carry the callee into the full-screen Call screen once their call is answered
+ * from the native UI (the caller navigates itself from ConversationScreen).
  */
 export function CallProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
   const { user } = useAuth();
-  const [incoming, setIncoming] = React.useState<IncomingCallInfo | null>(null);
+  const [busy, setBusy] = React.useState(false);
   const initializedRef = useRef(false);
 
   useEffect(() => {
@@ -31,56 +37,37 @@ export function CallProvider({ children }: { children: React.ReactNode }): React
     initializedRef.current = true;
     callService.ensureSignalingListeners();
     void voipCallService.initialize();
-    void registerAndroidCallPushToken();
-    adoptPendingAndroidCall();
-
-    const pending = callService.consumePendingIncoming();
-    if (pending) {
-      setIncoming(pending);
-    }
   }, [user]);
 
   useEffect(() => {
-    const offIncoming = callService.on('incoming', (info) => {
-      setIncoming(info);
+    const offStatus = callService.on('status', (status) => {
+      setBusy(isBusyStatus(status));
+      // When the callee accepts from the native call UI, callService moves to
+      // 'connecting'. Bring them to the Call screen if they aren't already there
+      // (the caller is already on it, so the route guard prevents a double push).
+      if (status !== 'connecting') {
+        return;
+      }
+      const active = callService.getActiveCall();
+      if (!active || active.isCaller || !navigationRef.isReady()) {
+        return;
+      }
+      if (navigationRef.getCurrentRoute()?.name === 'Call') {
+        return;
+      }
+      navigationRef.navigate('Call', {
+        conversationId: active.conversationId,
+        callKind: active.callKind,
+        direction: 'incoming',
+        peerName: active.peer.displayName,
+      });
     });
-    const offEnded = callService.on('ended', () => {
-      setIncoming(null);
-    });
-    return () => {
-      offIncoming();
-      offEnded();
-    };
+    return offStatus;
   }, []);
 
-  const handleAccept = (): void => {
-    if (!incoming) {
-      return;
-    }
-    const { conversationId, callKind, peer } = incoming;
-    setIncoming(null);
-    void callService.acceptIncoming();
-    if (navigationRef.isReady()) {
-      navigationRef.navigate('Call', {
-        conversationId,
-        callKind,
-        direction: 'incoming',
-        peerName: peer.displayName,
-      });
-    }
-  };
-
-  const handleDecline = (): void => {
-    callService.declineIncoming('declined');
-    setIncoming(null);
-  };
-
   return (
-    <CallContext.Provider value={{ hasActiveOrIncomingCall: incoming !== null }}>
+    <CallContext.Provider value={{ hasActiveOrIncomingCall: busy }}>
       {children}
-      {incoming ? (
-        <IncomingCallModal info={incoming} onAccept={handleAccept} onDecline={handleDecline} />
-      ) : null}
     </CallContext.Provider>
   );
 }

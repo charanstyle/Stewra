@@ -1,0 +1,22 @@
+{
+  "background": "#0B0F14",
+  "surface": "#141B22",
+  "surfaceAlt": "#1C2530",
+  "border": "#26313D",
+  "textPrimary": "#F5F7FA",
+  "textSecondary": "#9AA7B4",
+  "textInverse": "#0B0F14",
+  "primary": "#3D8BFD",
+  "primaryPressed": "#2E6FD1",
+  "onPrimary": "#FFFFFF",
+  "success": "#31C48D",
+  "danger": "#E5484D",
+  "dangerPressed": "#C13A3E",
+  "warning": "#F5A524",
+  "bubbleOutgoing": "#215D8F",
+  "bubbleIncoming": "#1C2530",
+  "overlay": "rgba(11, 15, 20, 0.72)",
+  "shadow": "#000",
+  "online": "#31C48D",
+  "offline": "#5C6773"
+}

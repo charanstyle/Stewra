@@ -74,8 +74,16 @@ export default function ConversationScreen({ route, navigation }: Props): React.
   const [messages, setMessages] = useState<ReadonlyArray<Message>>([]);
   const [draft, setDraft] = useState('');
   const [peerTyping, setPeerTyping] = useState(false);
+  const [stewraThinking, setStewraThinking] = useState(false);
   const listRef = useRef<FlatList<Message> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Append a message unless one with the same id is already present. The backend echoes our own
+   *  send back over `chat:message`, and delivery is at-least-once, so a blind append double-renders
+   *  the same id (React "same key" warning). Dedup by id keeps the list a set. */
+  const upsertMessage = useCallback((incoming: Message): void => {
+    setMessages((prev) => (prev.some((m) => m.id === incoming.id) ? prev : [...prev, incoming]));
+  }, []);
 
   const isStewra = messages.length > 0 && messages[0]?.senderKind === 'assistant';
 
@@ -104,7 +112,7 @@ export default function ConversationScreen({ route, navigation }: Props): React.
         if (event.message.conversationId !== conversationId) {
           return;
         }
-        setMessages((prev) => [...prev, event.message]);
+        upsertMessage(event.message);
       };
       const onTyping = (event: { conversationId: string; userId: string; isTyping: boolean }): void => {
         if (event.conversationId !== conversationId || event.userId === user?.id) {
@@ -112,20 +120,48 @@ export default function ConversationScreen({ route, navigation }: Props): React.
         }
         setPeerTyping(event.isTyping);
       };
+      // Stewra-AI text turns: the assistant reply arrives over `stewra:reply` (not `chat:message`),
+      // preceded by a `stewra:thinking` ping and, on model/TTS failure, a `stewra:error`. Without
+      // these subscriptions a text reply is generated server-side but never rendered live.
+      const onStewraThinking = (event: { conversationId: string }): void => {
+        if (event.conversationId !== conversationId) {
+          return;
+        }
+        setStewraThinking(true);
+      };
+      const onStewraReply = (event: { message: Message }): void => {
+        if (event.message.conversationId !== conversationId) {
+          return;
+        }
+        setStewraThinking(false);
+        upsertMessage(event.message);
+      };
+      const onStewraError = (event: { conversationId: string }): void => {
+        if (event.conversationId !== conversationId) {
+          return;
+        }
+        setStewraThinking(false);
+      };
 
       socket.on(SERVER_EVENTS.CHAT_MESSAGE, onMessage);
       socket.on(SERVER_EVENTS.CHAT_TYPING, onTyping);
+      socket.on(SERVER_EVENTS.STEWRA_THINKING, onStewraThinking);
+      socket.on(SERVER_EVENTS.STEWRA_REPLY, onStewraReply);
+      socket.on(SERVER_EVENTS.STEWRA_ERROR, onStewraError);
 
       return (): void => {
         socket.emit(CLIENT_EVENTS.CHAT_LEAVE, { conversationId });
         socket.off(SERVER_EVENTS.CHAT_MESSAGE, onMessage);
         socket.off(SERVER_EVENTS.CHAT_TYPING, onTyping);
+        socket.off(SERVER_EVENTS.STEWRA_THINKING, onStewraThinking);
+        socket.off(SERVER_EVENTS.STEWRA_REPLY, onStewraReply);
+        socket.off(SERVER_EVENTS.STEWRA_ERROR, onStewraError);
       };
     });
     return () => {
       unsubscribed = true;
     };
-  }, [conversationId, user?.id]);
+  }, [conversationId, user?.id, upsertMessage]);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -158,7 +194,7 @@ export default function ConversationScreen({ route, navigation }: Props): React.
     }
     setDraft('');
     const res = await api.sendMessage({ conversationId, type: 'text', content });
-    setMessages((prev) => [...prev, res.message]);
+    upsertMessage(res.message);
   };
 
   const handleCall = async (callKind: 'audio' | 'video'): Promise<void> => {
@@ -247,6 +283,7 @@ export default function ConversationScreen({ route, navigation }: Props): React.
           windowSize={8}
         />
         {peerTyping ? <Text style={styles.typing}>Typing…</Text> : null}
+        {stewraThinking ? <Text style={styles.typing}>Stewra is thinking…</Text> : null}
         <View style={styles.composer}>
           <TextInput
             style={styles.composerInput}

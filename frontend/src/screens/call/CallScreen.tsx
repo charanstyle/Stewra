@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { RTCView, type MediaStream } from 'react-native-webrtc';
+import { RTCView, type MediaStream } from '@livekit/react-native-webrtc';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/types';
 import { callService } from '../../services/call/callService';
