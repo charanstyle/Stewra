@@ -51,11 +51,20 @@ export class ClaudeCliModelClient implements IModelClient {
       args.push('--append-system-prompt', system);
     }
 
+    // Run the CLI on the operator's Claude Code SUBSCRIPTION (OAuth creds in $HOME/.claude), never a
+    // metered API key. The `claude` CLI prefers ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN over the stored
+    // subscription when either is present in its environment — an ambient key (e.g. one kept in the env
+    // for the AnthropicModelClient fallback) would silently flip this path to per-token billing. Strip
+    // both from the child's env so the subscription is always what's used.
+    const { ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, ...childEnv } = process.env;
+    void ANTHROPIC_API_KEY;
+    void ANTHROPIC_AUTH_TOKEN;
+
     const stdout = await new Promise<string>((resolve, reject) => {
       const child = execFile(
         this.binary,
         args,
-        { maxBuffer: 1024 * 1024 },
+        { maxBuffer: 1024 * 1024, env: childEnv },
         (error, out) => {
           if (error) {
             reject(error);
