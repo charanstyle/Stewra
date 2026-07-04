@@ -16,3 +16,11 @@ dist
 **/*.tsbuildinfo
 .claude
 scratchpad
+# Prod-only Claude Code subscription creds + CLI runtime state, bind-mounted at deploy time into the
+# backend at /root/.claude (see docker-compose.prod.yml). It is a bearer credential and per-run CLI
+# scratch — never a build input, and must not be tarred into the image context (the CLI also writes
+# root-owned dirs here that would break the non-root build client).
+claude-home
+frontend/android
+frontend/ios
+**/.expo
