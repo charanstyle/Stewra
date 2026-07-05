@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 
 /**
  * Ensure the runtime notification permission is granted.
@@ -9,28 +9,23 @@ import { PermissionsAndroid, Platform } from 'react-native';
  * the callee never rings. `POST_NOTIFICATIONS` is declared in the manifest (app.config.ts); this asks
  * for the runtime grant so we don't rely on a manual `adb shell pm grant`.
  *
- * Uses core React Native `PermissionsAndroid` (no extra native module) so it works in the existing
- * dev-client build. On Android < 13 the permission is install-time (no dialog) and on iOS it's a no-op
- * for self-managed CallKit calls, so both are treated as granted.
+ * Uses expo-notifications: `getPermissionsAsync` already reports granted on Android < 13 (install-time)
+ * and on iOS self-managed CallKit calls, so both are treated as granted without a dialog. Never throws —
+ * a denial degrades the incoming ring but must not break call-layer init.
  *
- * Returns whether notifications are permitted. Never throws — a denial degrades the incoming ring but
- * must not break call-layer init.
+ * Returns whether notifications are permitted.
  */
 export async function ensureNotificationPermission(): Promise<boolean> {
-  if (Platform.OS !== 'android') {
-    return true;
-  }
-  // POST_NOTIFICATIONS only became a runtime permission in API 33; earlier versions grant it at install.
-  if (typeof Platform.Version === 'number' && Platform.Version < 33) {
-    return true;
-  }
   try {
-    const permission = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
-    if (await PermissionsAndroid.check(permission)) {
+    const current = await Notifications.getPermissionsAsync();
+    if (current.granted) {
       return true;
     }
-    const result = await PermissionsAndroid.request(permission);
-    return result === PermissionsAndroid.RESULTS.GRANTED;
+    if (!current.canAskAgain) {
+      return false;
+    }
+    const requested = await Notifications.requestPermissionsAsync();
+    return requested.granted;
   } catch {
     return false;
   }
