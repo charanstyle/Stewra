@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -10,12 +11,19 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  AudioModule,
+  RecordingPresets,
+  setAudioModeAsync,
+  useAudioRecorder,
+} from 'expo-audio';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { Message } from '@stewra/shared-types';
 import { CLIENT_EVENTS, SERVER_EVENTS } from '@stewra/shared-types';
 import type { RootStackParamList } from '../../navigation/types';
 import { useAuth } from '../../contexts/AuthContext';
-import { api } from '../../services/api';
+import { api, ApiError } from '../../services/api';
+import { sendVoiceTurn } from '../../services/stewraVoice';
 import { connectSocket, getSocket } from '../../services/socket';
 import { callService } from '../../services/call/callService';
 import { theme } from '../../theme/colors';
@@ -77,8 +85,11 @@ export default function ConversationScreen({ route, navigation }: Props): React.
   const [draft, setDraft] = useState('');
   const [peerTyping, setPeerTyping] = useState(false);
   const [stewraThinking, setStewraThinking] = useState(false);
+  const [voiceState, setVoiceState] = useState<'idle' | 'recording' | 'uploading'>('idle');
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const listRef = useRef<FlatList<Message> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   /** Append a message unless one with the same id is already present. The backend echoes our own
    *  send back over `chat:message`, and delivery is at-least-once, so a blind append double-renders
@@ -199,6 +210,49 @@ export default function ConversationScreen({ route, navigation }: Props): React.
     upsertMessage(res.message);
   };
 
+  /** Begin a hold-to-talk recording, requesting the mic grant on first use. */
+  const handleVoicePressIn = useCallback(async (): Promise<void> => {
+    setVoiceError(null);
+    try {
+      const permission = await AudioModule.requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        setVoiceError('Microphone access is required to send a voice message.');
+        return;
+      }
+      await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setVoiceState('recording');
+    } catch {
+      setVoiceError('Could not start recording.');
+      setVoiceState('idle');
+    }
+  }, [recorder]);
+
+  /** Stop the recording and upload it as a transcribed voice note for this conversation. */
+  const handleVoicePressOut = useCallback(async (): Promise<void> => {
+    if (voiceState !== 'recording') {
+      return;
+    }
+    setVoiceState('uploading');
+    try {
+      await recorder.stop();
+      const uri = recorder.uri;
+      if (!uri) {
+        throw new Error('No recording captured');
+      }
+      const res = await sendVoiceTurn(conversationId, uri);
+      // The server also fans the voice turn out over `chat:message`; upsert dedups by id.
+      upsertMessage(res.userMessage);
+    } catch (error) {
+      setVoiceError(
+        error instanceof ApiError ? error.message : 'Could not send your voice message.',
+      );
+    } finally {
+      setVoiceState('idle');
+    }
+  }, [voiceState, conversationId, recorder, upsertMessage]);
+
   const handleCall = async (callKind: 'audio' | 'video'): Promise<void> => {
     const others = messages.find((message) => message.senderId && message.senderId !== user?.id);
     const peerId = others?.senderId ?? '';
@@ -286,6 +340,10 @@ export default function ConversationScreen({ route, navigation }: Props): React.
         />
         {peerTyping ? <Text style={styles.typing}>Typing…</Text> : null}
         {stewraThinking ? <Text style={styles.typing}>Stewra is thinking…</Text> : null}
+        {voiceState === 'recording' ? (
+          <Text style={styles.typing}>Recording… release to send</Text>
+        ) : null}
+        {voiceError ? <Text style={styles.voiceError}>{voiceError}</Text> : null}
         <View style={styles.composer}>
           <TextInput
             style={styles.composerInput}
@@ -295,17 +353,34 @@ export default function ConversationScreen({ route, navigation }: Props): React.
             onChangeText={handleChangeDraft}
             multiline
           />
-          <Pressable
-            accessibilityRole="button"
-            disabled={draft.trim().length === 0}
-            onPress={() => void handleSend()}
-            style={({ pressed }) => [
-              styles.sendButton,
-              (pressed || draft.trim().length === 0) && styles.pressed,
-            ]}
-          >
-            <Text style={styles.sendButtonLabel}>Send</Text>
-          </Pressable>
+          {draft.trim().length > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => void handleSend()}
+              style={({ pressed }) => [styles.sendButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.sendButtonLabel}>Send</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Hold to record a voice message"
+              disabled={voiceState === 'uploading'}
+              onPressIn={() => void handleVoicePressIn()}
+              onPressOut={() => void handleVoicePressOut()}
+              style={({ pressed }) => [
+                styles.micButton,
+                (pressed || voiceState === 'recording') && styles.micButtonActive,
+                voiceState === 'uploading' && styles.pressed,
+              ]}
+            >
+              {voiceState === 'uploading' ? (
+                <ActivityIndicator size="small" color={theme.colors.onPrimary} />
+              ) : (
+                <MicIcon size={20} color={theme.colors.onPrimary} />
+              )}
+            </Pressable>
+          )}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -386,6 +461,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.md,
     paddingBottom: 4,
   },
+  voiceError: {
+    color: theme.colors.danger,
+    fontSize: 12,
+    paddingHorizontal: theme.spacing.md,
+    paddingBottom: 4,
+  },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -410,6 +491,17 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.pill,
     paddingHorizontal: theme.spacing.md,
     paddingVertical: theme.spacing.sm,
+  },
+  micButton: {
+    width: 44,
+    height: 44,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micButtonActive: {
+    backgroundColor: theme.colors.primaryPressed,
   },
   pressed: {
     opacity: 0.7,
