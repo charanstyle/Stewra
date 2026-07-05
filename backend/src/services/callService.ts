@@ -6,11 +6,14 @@ import type {
   Message,
   RegisterCallPushTokenRequest,
 } from '@stewra/shared-types';
+import { randomUUID } from 'node:crypto';
 import { callSessionRepository } from '../repositories/callSessionRepository';
 import { callPushTokenRepository } from '../repositories/callPushTokenRepository';
 import { messageRepository, MessageRepository } from '../repositories/messageRepository';
+import { userRepository } from '../repositories/userRepository';
 import { conversationService } from './conversationService';
 import { contactService } from './contactService';
+import { fcmPushService } from './fcmPushService';
 import { ForbiddenError, ValidationError } from '../utils/errors';
 
 const HISTORY_LIMIT = 100;
@@ -94,6 +97,33 @@ class CallService {
   /** The caller's recent calls (newest-first) for the call-history screen. */
   async history(userId: string): Promise<CallSession[]> {
     return callSessionRepository.listForUser(userId, HISTORY_LIMIT);
+  }
+
+  /**
+   * Fire a background-ring push to the callee's registered Android devices so a locked / backgrounded /
+   * killed phone rings full-screen (Core-Telecom) — the socket `CALL_INCOMING` only reaches a live app.
+   * Best-effort: no-op when FCM is unconfigured or the callee has no Android token, and it never throws
+   * into the signaling path. The `serverCallId` matches the socket call id so the native layer dedupes a
+   * device that receives both. (iOS APNs/VoIP push is a separate credential and not wired yet.)
+   */
+  async sendIncomingCallPush(session: CallSession, calleeId: string): Promise<void> {
+    if (!fcmPushService.enabled) return;
+    const tokens = await callPushTokenRepository.listForUser(calleeId);
+    const fcmTokens: string[] = [];
+    for (const t of tokens) {
+      if (t.platform === 'android' && t.fcmToken !== null) fcmTokens.push(t.fcmToken);
+    }
+    if (fcmTokens.length === 0) return;
+    const caller = await userRepository.findById(session.initiatedBy);
+    const displayName = caller?.display_name;
+    await fcmPushService.sendIncomingCall(fcmTokens, {
+      eventId: randomUUID(),
+      serverCallId: session.id,
+      hasVideo: session.callType === 'video',
+      startedAt: new Date().toISOString(),
+      caller: { id: session.initiatedBy, ...(displayName ? { displayName } : {}) },
+      metadata: { conversationId: session.conversationId, callKind: session.callType },
+    });
   }
 
   /** Register (or refresh) this device's background-ring token. */

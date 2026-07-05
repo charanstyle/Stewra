@@ -139,6 +139,11 @@ export class CallSignalingHandler extends BaseSocketHandler {
       callType: payload.callType,
     };
     this.io.to(userRoom(calleeId)).emit(SERVER_EVENTS.CALL_INCOMING, incoming);
+    // Also ring the callee's Android devices via FCM so a locked / backgrounded / killed phone rings
+    // full-screen (the socket emit above only reaches a live app). Fire-and-forget; deduped natively.
+    void callService.sendIncomingCallPush(session, calleeId).catch((error: unknown) =>
+      Sentry.captureException(error),
+    );
     logger.info('call initiated', { callId: session.id, callerId: this.userId, calleeId });
     this.reply(ack, { ok: true, call: session });
   }
