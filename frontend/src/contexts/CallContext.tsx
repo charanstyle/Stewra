@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useRef } from 'react';
 import { callService } from '../services/call/callService';
 import type { CallStatus } from '../services/call/callService';
 import { voipCallService } from '../services/call/voipCallService';
+import { ensureNotificationPermission } from '../services/notifications';
 import { navigationRef } from '../navigation/RootNavigator';
 import { useAuth } from './AuthContext';
 
@@ -35,6 +36,9 @@ export function CallProvider({ children }: { children: React.ReactNode }): React
       return;
     }
     initializedRef.current = true;
+    // Ask for POST_NOTIFICATIONS up front — on Android 13+ an incoming call can't ring without it
+    // (Core-Telecom needs to post the CallStyle notification). Fire-and-forget: init proceeds regardless.
+    void ensureNotificationPermission();
     callService.ensureSignalingListeners();
     void voipCallService.initialize();
   }, [user]);
