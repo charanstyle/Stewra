@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type {
-  ContactInvite,
+  ContactInviteWithUsers,
   ContactWithUser,
   PublicUser,
 } from '@stewra/shared-types';
@@ -16,8 +16,8 @@ function describeError(err: unknown): string {
 export default function ContactsPage(): React.JSX.Element {
   const navigate = useNavigate();
   const [contacts, setContacts] = useState<ReadonlyArray<ContactWithUser>>([]);
-  const [received, setReceived] = useState<ReadonlyArray<ContactInvite>>([]);
-  const [sent, setSent] = useState<ReadonlyArray<ContactInvite>>([]);
+  const [received, setReceived] = useState<ReadonlyArray<ContactInviteWithUsers>>([]);
+  const [sent, setSent] = useState<ReadonlyArray<ContactInviteWithUsers>>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<ReadonlyArray<PublicUser>>([]);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -172,20 +172,23 @@ export default function ContactsPage(): React.JSX.Element {
             <h2 className={styles.cardTitle}>Invites for you</h2>
             <ul className={styles.list}>
               {received.map((inv) => (
-                <li key={inv.id} className={styles.listRow}>
-                  <span>{inv.inviteeEmail}</span>
+                <li key={inv.invite.id} className={styles.listRow}>
+                  <span>
+                    <strong>{inv.inviter.displayName}</strong> invited you{' '}
+                    <em className={styles.muted}>{inv.inviter.email}</em>
+                  </span>
                   <span className={styles.actions}>
                     <button
                       type="button"
                       className={styles.primary}
-                      onClick={() => void respond(inv.id, 'accept')}
+                      onClick={() => void respond(inv.invite.id, 'accept')}
                     >
                       Accept
                     </button>
                     <button
                       type="button"
                       className={styles.ghost}
-                      onClick={() => void respond(inv.id, 'decline')}
+                      onClick={() => void respond(inv.invite.id, 'decline')}
                     >
                       Decline
                     </button>
@@ -238,9 +241,18 @@ export default function ContactsPage(): React.JSX.Element {
             <h2 className={styles.cardTitle}>Invites you sent</h2>
             <ul className={styles.list}>
               {sent.map((inv) => (
-                <li key={inv.id} className={styles.listRow}>
-                  <span>{inv.inviteeEmail}</span>
-                  <em className={styles.muted}>{inv.status}</em>
+                <li key={inv.invite.id} className={styles.listRow}>
+                  <span>
+                    {inv.invitee ? (
+                      <>
+                        <strong>{inv.invitee.displayName}</strong>{' '}
+                        <em className={styles.muted}>{inv.invitee.email}</em>
+                      </>
+                    ) : (
+                      inv.invite.inviteeEmail
+                    )}
+                  </span>
+                  <em className={styles.muted}>{inv.invite.status}</em>
                 </li>
               ))}
             </ul>

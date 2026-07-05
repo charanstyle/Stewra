@@ -54,3 +54,15 @@ export interface ContactWithUser {
   readonly contact: Contact;
   readonly user: PublicUser;
 }
+
+/**
+ * A contact invite joined with both parties' public profiles, for rendering invite lists. `inviter`
+ * is always present (the sender is a real user); `invitee` is null when the invited email has no
+ * Stewra account yet. Rendering received invites off `inviter` is what lets a recipient see WHO
+ * invited them rather than their own address.
+ */
+export interface ContactInviteWithUsers {
+  readonly invite: ContactInvite;
+  readonly inviter: PublicUser;
+  readonly invitee: PublicUser | null;
+}

@@ -1,5 +1,10 @@
 import type { UUID } from '../common/base';
-import type { ContactInvite, ContactWithUser, PublicUser } from '../models/contact';
+import type {
+  ContactInvite,
+  ContactInviteWithUsers,
+  ContactWithUser,
+  PublicUser,
+} from '../models/contact';
 
 /** Search Stewra users by email or display name (to add as a contact). */
 export interface SearchUsersRequest {
@@ -22,10 +27,13 @@ export interface SendInviteResponse {
   readonly invite: ContactInvite;
 }
 
-/** Invites the caller sent and invites addressed to the caller's account. */
+/**
+ * Invites the caller sent and invites addressed to the caller's account, each joined with both
+ * parties' public profiles so the UI can name the inviter/invitee instead of showing a raw email.
+ */
 export interface ListInvitesResponse {
-  readonly sent: ReadonlyArray<ContactInvite>;
-  readonly received: ReadonlyArray<ContactInvite>;
+  readonly sent: ReadonlyArray<ContactInviteWithUsers>;
+  readonly received: ReadonlyArray<ContactInviteWithUsers>;
 }
 
 /** Accept or decline a pending invite addressed to the caller. Accept creates reciprocal contacts. */

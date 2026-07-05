@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type {
   ContactInvite,
+  ContactInviteWithUsers,
   ContactWithUser,
   PublicUser,
 } from '@stewra/shared-types';
@@ -99,13 +100,41 @@ class ContactService {
     return invite;
   }
 
-  /** Invites the caller sent and invites addressed to the caller's account. */
-  async listInvites(userId: string): Promise<{ sent: ContactInvite[]; received: ContactInvite[] }> {
+  /**
+   * Invites the caller sent and invites addressed to the caller's account, each hydrated with the
+   * inviter's (and, when resolved, the invitee's) public profile so the client can name the other
+   * party rather than echo a raw email — a received invite should read "<inviter> invited you".
+   */
+  async listInvites(
+    userId: string,
+  ): Promise<{ sent: ContactInviteWithUsers[]; received: ContactInviteWithUsers[] }> {
     const [sent, received] = await Promise.all([
       contactRepository.listSent(userId),
       contactRepository.listReceived(userId),
     ]);
-    return { sent, received };
+
+    // Batch-resolve every party we need across both directions in a single lookup.
+    const ids = new Set<string>();
+    for (const inv of [...sent, ...received]) {
+      ids.add(inv.inviterId);
+      if (inv.inviteeUserId) ids.add(inv.inviteeUserId);
+    }
+    const users = await userRepository.findPublicByIds([...ids]);
+    const byId = new Map(users.map((u) => [u.id, u]));
+
+    // The inviter is always a real user; drop any invite whose inviter vanished (shouldn't happen).
+    const hydrate = (inv: ContactInvite): ContactInviteWithUsers | null => {
+      const inviter = byId.get(inv.inviterId);
+      if (inviter === undefined) return null;
+      const invitee = inv.inviteeUserId ? byId.get(inv.inviteeUserId) ?? null : null;
+      return { invite: inv, inviter, invitee };
+    };
+    const keep = (x: ContactInviteWithUsers | null): x is ContactInviteWithUsers => x !== null;
+
+    return {
+      sent: sent.map(hydrate).filter(keep),
+      received: received.map(hydrate).filter(keep),
+    };
   }
 
   /**

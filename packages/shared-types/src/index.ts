@@ -24,6 +24,7 @@ export type {
   InviteStatus,
   PublicUser,
   ContactWithUser,
+  ContactInviteWithUsers,
 } from './models/contact';
 export { CONTACT_STATUSES, INVITE_STATUSES } from './models/contact';
 export type {

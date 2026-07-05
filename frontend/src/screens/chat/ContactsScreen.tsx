@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { ContactInvite, PublicUser } from '@stewra/shared-types';
+import type { ContactInviteWithUsers, PublicUser } from '@stewra/shared-types';
 import type { RootStackParamList } from '../../navigation/types';
 import { useContacts } from '../../contexts/ContactsContext';
 import { api, ApiError } from '../../services/api';
@@ -14,12 +14,12 @@ export default function ContactsScreen({ navigation }: Props): React.JSX.Element
   const { contacts, loading, refresh } = useContacts();
   const [query, setQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ReadonlyArray<PublicUser>>([]);
-  const [received, setReceived] = useState<ReadonlyArray<ContactInvite>>([]);
+  const [received, setReceived] = useState<ReadonlyArray<ContactInviteWithUsers>>([]);
   const [message, setMessage] = useState<string | null>(null);
 
   const loadInvites = useCallback(async (): Promise<void> => {
     const res = await api.listInvites();
-    setReceived(res.received.filter((invite) => invite.status === 'pending'));
+    setReceived(res.received.filter((entry) => entry.invite.status === 'pending'));
   }, []);
 
   useEffect(() => {
@@ -94,20 +94,23 @@ export default function ContactsScreen({ navigation }: Props): React.JSX.Element
       {received.length > 0 ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Pending invites</Text>
-          {received.map((invite) => (
-            <View key={invite.id} style={styles.row}>
-              <Text style={styles.rowTitle}>{invite.inviteeEmail}</Text>
+          {received.map((entry) => (
+            <View key={entry.invite.id} style={styles.row}>
+              <View style={styles.inviteFrom}>
+                <Text style={styles.rowTitle}>{entry.inviter.displayName} invited you</Text>
+                <Text style={styles.rowSubtitle}>{entry.inviter.email}</Text>
+              </View>
               <View style={styles.inviteActions}>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => void handleRespond(invite.id, 'decline')}
+                  onPress={() => void handleRespond(entry.invite.id, 'decline')}
                   style={({ pressed }) => [styles.smallButton, styles.declineButton, pressed && styles.pressed]}
                 >
                   <Text style={styles.smallButtonLabel}>Decline</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => void handleRespond(invite.id, 'accept')}
+                  onPress={() => void handleRespond(entry.invite.id, 'accept')}
                   style={({ pressed }) => [styles.smallButton, pressed && styles.pressed]}
                 >
                   <Text style={styles.smallButtonLabel}>Accept</Text>
@@ -198,6 +201,10 @@ const styles = StyleSheet.create({
   rowSubtitle: {
     color: theme.colors.textSecondary,
     fontSize: 13,
+  },
+  inviteFrom: {
+    flex: 1,
+    marginRight: theme.spacing.sm,
   },
   inviteActions: {
     flexDirection: 'row',
