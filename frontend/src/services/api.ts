@@ -11,6 +11,10 @@ import type {
   VerifyEmailRequest,
   VerifyEmailResponse,
   ResendVerificationResponse,
+  RequestPasswordResetRequest,
+  RequestPasswordResetResponse,
+  ConfirmPasswordResetRequest,
+  ConfirmPasswordResetResponse,
   SearchUsersRequest,
   SearchUsersResponse,
   ListContactsResponse,
@@ -181,6 +185,16 @@ export const api = {
 
   resendVerification: (): Promise<ResendVerificationResponse> =>
     request('/email-verification/resend', { method: 'POST', body: {} }),
+
+  requestPasswordReset: (
+    body: RequestPasswordResetRequest,
+  ): Promise<RequestPasswordResetResponse> =>
+    request('/auth/password-reset/request', { method: 'POST', body, auth: false }),
+
+  confirmPasswordReset: (
+    body: ConfirmPasswordResetRequest,
+  ): Promise<ConfirmPasswordResetResponse> =>
+    request('/auth/password-reset/confirm', { method: 'POST', body, auth: false }),
 
   searchUsers: (params: SearchUsersRequest): Promise<SearchUsersResponse> =>
     request(`/contacts/search?query=${encodeURIComponent(params.query)}`),

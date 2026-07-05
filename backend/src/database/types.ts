@@ -203,6 +203,23 @@ export interface EmailVerificationCodesTable {
   created_at: CreatedAt;
 }
 
+/** Password-reset codes: same shape as verification codes, separate table (see migration 022). */
+export interface PasswordResetCodesTable {
+  id: Generated<string>;
+  user_id: string;
+  /** The numeric code the user must enter to reset their password. */
+  code: string;
+  /** Address the code was emailed to (snapshot at issue time). */
+  email: string;
+  /** Set on insert, read back; never updated. */
+  expires_at: ColumnType<Date, Date, never>;
+  /** DB default false; flipped true once the code is consumed. */
+  used: ColumnType<boolean, boolean | undefined, boolean>;
+  /** DB default 0; incremented on each failed entry until the lockout cap. */
+  attempts: ColumnType<number, number | undefined, number>;
+  created_at: CreatedAt;
+}
+
 /** jsonb bag for message/call structured context. Never raw records or secrets. */
 export type JsonMetadata = Record<string, string | number | boolean | null>;
 
@@ -354,6 +371,7 @@ export interface Database {
   migrations: MigrationsTable;
   vault_secrets: VaultSecretsTable;
   email_verification_codes: EmailVerificationCodesTable;
+  password_reset_codes: PasswordResetCodesTable;
   agent_insights: AgentInsightsTable;
   insight_feedback: InsightFeedbackTable;
   agent_memory: AgentMemoryTable;

@@ -45,6 +45,28 @@ class EmailService {
     logger.info(`Verification code emailed to ${to}`);
   }
 
+  /** Email a password-reset code. Same voice/shape as the verification code; distinct wording + subject. */
+  async sendPasswordResetCode(to: string, code: string, ttlMinutes: number): Promise<void> {
+    const subject = 'Your Stewra password reset code';
+    const text =
+      `Your Stewra password reset code is ${code}.\n\n` +
+      `Enter it on the reset screen along with your new password. It expires in ${ttlMinutes} minutes.\n\n` +
+      `If you didn't ask to reset your Stewra password, you can safely ignore this email — your ` +
+      `password stays unchanged until this code is used.`;
+    const html =
+      `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;color:#1a1a2e">` +
+      `<h1 style="font-size:20px;margin:0 0 4px">Stewra</h1>` +
+      `<p style="color:#555;margin:0 0 24px">A careful advisor that only reads — and never acts without you.</p>` +
+      `<p style="margin:0 0 8px">Your password reset code is:</p>` +
+      `<p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:0 0 16px">${code}</p>` +
+      `<p style="color:#555;margin:0 0 24px">Enter it on the reset screen with your new password. It expires in ${ttlMinutes} minutes.</p>` +
+      `<p style="color:#888;font-size:13px;margin:0">If you didn't ask to reset your password, you can safely ignore this email — nothing changes until this code is used.</p>` +
+      `</div>`;
+
+    await this.getTransporter().sendMail({ from: config.email.from, to, subject, text, html });
+    logger.info(`Password reset code emailed to ${to}`);
+  }
+
   /**
    * Email a contact invitation. `inviterName` is the sender's display name; `inviteUrl` is the link the
    * invitee follows to accept (it carries the opaque server token). Fails loudly like the code email.

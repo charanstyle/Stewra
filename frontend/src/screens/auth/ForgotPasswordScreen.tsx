@@ -12,17 +12,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/types';
-import { useAuth } from '../../contexts/AuthContext';
-import { ApiError } from '../../services/api';
+import { api, ApiError } from '../../services/api';
 import { theme } from '../../theme/colors';
-import PasswordInput from '../../components/PasswordInput';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'ForgotPassword'>;
 
-export default function LoginScreen({ navigation }: Props): React.JSX.Element {
-  const { login } = useAuth();
+export default function ForgotPasswordScreen({ navigation }: Props): React.JSX.Element {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -30,9 +26,12 @@ export default function LoginScreen({ navigation }: Props): React.JSX.Element {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email.trim(), password);
+      // The response is deliberately generic (it never says whether the email is registered), so we
+      // always move on to the reset screen where the user enters the code we may have sent.
+      await api.requestPasswordReset({ email: email.trim() });
+      navigation.navigate('ResetPassword', { email: email.trim() });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not sign in. Try again.');
+      setError(err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
     } finally {
       setSubmitting(false);
     }
@@ -45,8 +44,10 @@ export default function LoginScreen({ navigation }: Props): React.JSX.Element {
         style={styles.flex}
       >
         <View style={styles.content}>
-          <Text style={styles.title}>Stewra</Text>
-          <Text style={styles.subtitle}>Sign in to continue</Text>
+          <Text style={styles.title}>Reset password</Text>
+          <Text style={styles.subtitle}>
+            Enter your account email and we&apos;ll send you a 6-digit code to reset your password.
+          </Text>
 
           <TextInput
             style={styles.input}
@@ -58,41 +59,28 @@ export default function LoginScreen({ navigation }: Props): React.JSX.Element {
             value={email}
             onChangeText={setEmail}
           />
-          <PasswordInput
-            placeholder="Password"
-            autoComplete="password"
-            value={password}
-            onChangeText={setPassword}
-          />
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <Pressable
             accessibilityRole="button"
-            disabled={submitting || !email || !password}
+            disabled={submitting || email.length === 0}
             onPress={() => void handleSubmit()}
             style={({ pressed }) => [
               styles.primaryButton,
               (pressed || submitting) && styles.pressed,
-              (!email || !password) && styles.disabled,
+              email.length === 0 && styles.disabled,
             ]}
           >
             {submitting ? (
               <ActivityIndicator color={theme.colors.onPrimary} />
             ) : (
-              <Text style={styles.primaryButtonLabel}>Sign in</Text>
+              <Text style={styles.primaryButtonLabel}>Send reset code</Text>
             )}
           </Pressable>
 
-          <Pressable
-            onPress={() => navigation.navigate('ForgotPassword')}
-            style={styles.linkButton}
-          >
-            <Text style={styles.linkText}>Forgot password?</Text>
-          </Pressable>
-
-          <Pressable onPress={() => navigation.navigate('Register')} style={styles.linkButton}>
-            <Text style={styles.linkText}>Need an account? Create one</Text>
+          <Pressable onPress={() => navigation.navigate('Login')} style={styles.linkButton}>
+            <Text style={styles.linkText}>Back to sign in</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -114,13 +102,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
   },
   title: {
-    fontSize: 34,
+    fontSize: 26,
     fontWeight: '700',
     color: theme.colors.textPrimary,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 15,
     color: theme.colors.textSecondary,
     textAlign: 'center',
     marginTop: theme.spacing.xs,

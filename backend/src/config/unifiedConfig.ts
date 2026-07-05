@@ -91,6 +91,10 @@ const EnvSchema = z.object({
   EMAIL_VERIFICATION_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
   EMAIL_VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
   EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
+  // Password-reset policy knobs — same shape and defaults as verification, separately tunable.
+  PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
+  PASSWORD_RESET_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+  PASSWORD_RESET_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
   // The learning loop's recall knobs: how many past-success exemplars to inject into a new task's
   // prompt, and the minimum full-text relevance (ts_rank) a memory must clear to be recalled. Sane
   // defaults, overridable per deploy — never magic numbers in code.
@@ -308,6 +312,11 @@ export const config = {
     ttlMinutes: env.EMAIL_VERIFICATION_TTL_MINUTES,
     maxAttempts: env.EMAIL_VERIFICATION_MAX_ATTEMPTS,
     resendCooldownSeconds: env.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS,
+  },
+  passwordReset: {
+    ttlMinutes: env.PASSWORD_RESET_TTL_MINUTES,
+    maxAttempts: env.PASSWORD_RESET_MAX_ATTEMPTS,
+    resendCooldownSeconds: env.PASSWORD_RESET_RESEND_COOLDOWN_SECONDS,
   },
   memory: {
     // Max past-success exemplars injected into a new task's prompt, and the min ts_rank to recall.

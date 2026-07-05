@@ -9,6 +9,8 @@ import { theme } from '../theme/colors';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import VerifyEmailScreen from '../screens/auth/VerifyEmailScreen';
+import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
+import ResetPasswordScreen from '../screens/auth/ResetPasswordScreen';
 import ChatListScreen from '../screens/chat/ChatListScreen';
 import ConversationScreen from '../screens/chat/ConversationScreen';
 import ContactsScreen from '../screens/chat/ContactsScreen';
@@ -52,6 +54,16 @@ export default function RootNavigator(): React.JSX.Element {
               name="VerifyEmail"
               component={VerifyEmailScreen}
               options={{ title: 'Verify email' }}
+            />
+            <Stack.Screen
+              name="ForgotPassword"
+              component={ForgotPasswordScreen}
+              options={{ title: 'Reset password' }}
+            />
+            <Stack.Screen
+              name="ResetPassword"
+              component={ResetPasswordScreen}
+              options={{ title: 'Reset password' }}
             />
           </>
         ) : (

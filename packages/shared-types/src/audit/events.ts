@@ -44,7 +44,8 @@ export type AuditAction =
   | 'call'
   | 'auth.register'
   | 'auth.login'
-  | 'auth.refresh';
+  | 'auth.refresh'
+  | 'auth.password_reset';
 
 /** An append-only audit record. Rendered to the user as the plain-language activity feed. */
 export interface AuditEvent {

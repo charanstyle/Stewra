@@ -23,6 +23,7 @@ import * as m018 from './migrations/018_call_sessions';
 import * as m019 from './migrations/019_call_push_tokens';
 import * as m020 from './migrations/020_stewra_ai_conversation';
 import * as m021 from './migrations/021_media_assets';
+import * as m022 from './migrations/022_password_reset_codes';
 import { logger } from '../utils/logger';
 
 interface Migration {
@@ -53,6 +54,7 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '019_call_push_tokens', up: m019.up },
   { name: '020_stewra_ai_conversation', up: m020.up },
   { name: '021_media_assets', up: m021.up },
+  { name: '022_password_reset_codes', up: m022.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

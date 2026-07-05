@@ -11,6 +11,8 @@ export interface RootStackParamList {
   Login: undefined;
   Register: undefined;
   VerifyEmail: undefined;
+  ForgotPassword: undefined;
+  ResetPassword: { readonly email: string };
   ChatList: undefined;
   Conversation: { readonly conversationId: string; readonly title: string };
   Contacts: undefined;

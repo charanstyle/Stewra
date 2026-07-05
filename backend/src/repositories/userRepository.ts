@@ -77,6 +77,15 @@ export class UserRepository {
     return db.selectFrom('users').select(COLUMNS).where('id', '=', id).executeTakeFirst();
   }
 
+  /** Replace the user's password hash (used by the password-reset flow). */
+  async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
+    await db
+      .updateTable('users')
+      .set({ password_hash: passwordHash, updated_at: new Date() })
+      .where('id', '=', id)
+      .execute();
+  }
+
   /** Mark the user's email as verified. Idempotent — re-verifying a verified user is a no-op. */
   async setEmailVerified(id: string): Promise<void> {
     await db

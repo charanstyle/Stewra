@@ -108,6 +108,16 @@ export type {
 } from './api/emailVerification';
 export { EMAIL_VERIFICATION_CODE_LENGTH } from './api/emailVerification';
 export type {
+  RequestPasswordResetRequest,
+  RequestPasswordResetResponse,
+  ConfirmPasswordResetRequest,
+  ConfirmPasswordResetResponse,
+} from './api/passwordReset';
+export {
+  PASSWORD_RESET_CODE_LENGTH,
+  PASSWORD_RESET_MIN_PASSWORD_LENGTH,
+} from './api/passwordReset';
+export type {
   GetPreferencesResponse,
   UpdatePreferencesRequest,
   UpdatePreferencesResponse,

@@ -13,6 +13,13 @@ router.post('/login', (req, res) => {
 router.post('/refresh', (req, res) => {
   void authController.refresh(req, res);
 });
+// Password reset for logged-out users: request a code, then confirm code + new password. Both public.
+router.post('/password-reset/request', (req, res) => {
+  void authController.requestPasswordReset(req, res);
+});
+router.post('/password-reset/confirm', (req, res) => {
+  void authController.confirmPasswordReset(req, res);
+});
 router.get('/me', requireAuth, (req, res) => {
   void authController.me(req, res);
 });

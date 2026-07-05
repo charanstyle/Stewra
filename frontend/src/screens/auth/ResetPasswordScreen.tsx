@@ -11,76 +11,93 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import {
+  PASSWORD_RESET_CODE_LENGTH,
+  PASSWORD_RESET_MIN_PASSWORD_LENGTH,
+} from '@stewra/shared-types';
 import type { RootStackParamList } from '../../navigation/types';
-import { useAuth } from '../../contexts/AuthContext';
-import { ApiError } from '../../services/api';
+import { api, ApiError } from '../../services/api';
 import { theme } from '../../theme/colors';
 import PasswordInput from '../../components/PasswordInput';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'ResetPassword'>;
 
-export default function RegisterScreen({ navigation }: Props): React.JSX.Element {
-  const { register } = useAuth();
-  const [displayName, setDisplayName] = useState('');
-  const [email, setEmail] = useState('');
+export default function ResetPasswordScreen({ navigation, route }: Props): React.JSX.Element {
+  const { email } = route.params;
+  const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
 
   const passwordsMatch = password === confirmPassword;
   const showMismatch = confirmPassword.length > 0 && !passwordsMatch;
+  const canSubmit =
+    code.length === PASSWORD_RESET_CODE_LENGTH &&
+    password.length >= PASSWORD_RESET_MIN_PASSWORD_LENGTH &&
+    passwordsMatch;
 
   const handleSubmit = async (): Promise<void> => {
     setError(null);
+    setInfo(null);
     setSubmitting(true);
     try {
-      const requiresVerification = await register(email.trim(), password, displayName.trim());
-      if (requiresVerification) {
-        navigation.replace('VerifyEmail');
-      }
+      await api.confirmPasswordReset({ email, code, newPassword: password });
+      // Reset succeeded — send them back to sign in with the new password.
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not create your account. Try again.');
+      setError(err instanceof ApiError ? err.message : 'Could not reset your password. Try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const canSubmit =
-    displayName.trim().length > 0 && email.length > 0 && password.length >= 8 && passwordsMatch;
+  const handleResend = async (): Promise<void> => {
+    setError(null);
+    setInfo(null);
+    setResending(true);
+    try {
+      await api.requestPasswordReset({ email });
+      setInfo('If that email has an account, a new code is on its way.');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not resend the code.');
+    } finally {
+      setResending(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.flex}
+      >
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <Text style={styles.title}>Create your account</Text>
+          <Text style={styles.title}>Enter your code</Text>
+          <Text style={styles.subtitle}>
+            We sent a {PASSWORD_RESET_CODE_LENGTH}-digit code to {email}. Enter it below with your new
+            password.
+          </Text>
 
           <TextInput
-            style={styles.input}
-            placeholder="Display name"
+            style={styles.codeInput}
+            placeholder="000000"
             placeholderTextColor={theme.colors.textSecondary}
-            autoComplete="name"
-            value={displayName}
-            onChangeText={setDisplayName}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            placeholderTextColor={theme.colors.textSecondary}
-            autoCapitalize="none"
-            autoComplete="email"
-            keyboardType="email-address"
-            value={email}
-            onChangeText={setEmail}
+            keyboardType="number-pad"
+            maxLength={PASSWORD_RESET_CODE_LENGTH}
+            value={code}
+            onChangeText={setCode}
           />
           <PasswordInput
-            placeholder="Password (min. 8 characters)"
+            placeholder="New password (min. 8 characters)"
             autoComplete="password-new"
             value={password}
             onChangeText={setPassword}
           />
           <PasswordInput
-            placeholder="Confirm password"
+            placeholder="Confirm new password"
             autoComplete="password-new"
             value={confirmPassword}
             onChangeText={setConfirmPassword}
@@ -88,6 +105,7 @@ export default function RegisterScreen({ navigation }: Props): React.JSX.Element
 
           {showMismatch ? <Text style={styles.error}>Passwords don&apos;t match</Text> : null}
           {error ? <Text style={styles.error}>{error}</Text> : null}
+          {info ? <Text style={styles.info}>{info}</Text> : null}
 
           <Pressable
             accessibilityRole="button"
@@ -102,12 +120,16 @@ export default function RegisterScreen({ navigation }: Props): React.JSX.Element
             {submitting ? (
               <ActivityIndicator color={theme.colors.onPrimary} />
             ) : (
-              <Text style={styles.primaryButtonLabel}>Create account</Text>
+              <Text style={styles.primaryButtonLabel}>Reset password</Text>
             )}
           </Pressable>
 
+          <Pressable disabled={resending} onPress={() => void handleResend()} style={styles.linkButton}>
+            <Text style={styles.linkText}>{resending ? 'Sending…' : 'Resend code'}</Text>
+          </Pressable>
+
           <Pressable onPress={() => navigation.navigate('Login')} style={styles.linkButton}>
-            <Text style={styles.linkText}>Already have an account? Sign in</Text>
+            <Text style={styles.linkText}>Back to sign in</Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -130,26 +152,39 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.xl,
   },
   title: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '700',
     color: theme.colors.textPrimary,
     textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 15,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginTop: theme.spacing.xs,
     marginBottom: theme.spacing.xl,
   },
-  input: {
+  codeInput: {
     backgroundColor: theme.colors.surface,
     borderColor: theme.colors.border,
     borderWidth: 1,
     borderRadius: theme.radius.md,
-    paddingHorizontal: theme.spacing.md,
     paddingVertical: theme.spacing.md,
     color: theme.colors.textPrimary,
     marginBottom: theme.spacing.md,
-    fontSize: 16,
+    fontSize: 28,
+    letterSpacing: 8,
+    textAlign: 'center',
   },
   error: {
     color: theme.colors.danger,
     marginBottom: theme.spacing.md,
+    textAlign: 'center',
+  },
+  info: {
+    color: theme.colors.success,
+    marginBottom: theme.spacing.md,
+    textAlign: 'center',
   },
   primaryButton: {
     backgroundColor: theme.colors.primary,
