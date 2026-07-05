@@ -87,7 +87,7 @@ class CallService {
     if (before === undefined || this.isTerminal(before.status)) return null;
     const session = await callSessionRepository.close(callId, status, endReason, durationSec);
     if (session === undefined) return null;
-    const message = await this.writeSystemMarker(session, 'call_end');
+    const message = await this.writeSystemMarker(session, 'call_end', durationSec);
     return { session, message };
   }
 
@@ -110,10 +110,15 @@ class CallService {
     return status === 'declined' || status === 'ended' || status === 'failed' || status === 'missed';
   }
 
-  /** Persist a `call_start`/`call_end` system message attributed to the call's initiator. */
+  /**
+   * Persist a `call_start`/`call_end` system message attributed to the call's initiator. The call kind
+   * (`audio`/`video`) rides on `mediaType` and the answered duration on `mediaDurationSec` so every render
+   * site can say "Voice call ended (67s)" vs "Video call ended" without a separate call-type column.
+   */
   private async writeSystemMarker(
     session: CallSession,
     type: 'call_start' | 'call_end',
+    durationSec: number | null = null,
   ): Promise<Message> {
     return messageRepository.create({
       conversationId: session.conversationId,
@@ -121,6 +126,8 @@ class CallService {
       senderKind: MessageRepository.SENDER_USER,
       type,
       content: null,
+      mediaType: session.callType,
+      mediaDurationSec: durationSec,
     });
   }
 }

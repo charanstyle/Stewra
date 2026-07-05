@@ -37,11 +37,13 @@ function bubbleLabel(message: Message): string {
     case 'video':
       return 'Video';
     case 'call_start':
-      return 'Call started';
-    case 'call_end':
+      return message.mediaType === 'video' ? 'Video call started' : 'Voice call started';
+    case 'call_end': {
+      const kind = message.mediaType === 'video' ? 'Video call' : 'Voice call';
       return message.mediaDurationSec != null
-        ? `Call ended (${message.mediaDurationSec}s)`
-        : 'Call ended';
+        ? `${kind} ended (${message.mediaDurationSec}s)`
+        : `${kind} ended`;
+    }
     case 'system':
       return message.content ?? 'System message';
     default:

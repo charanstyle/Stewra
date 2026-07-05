@@ -103,9 +103,9 @@ function previewText(row: MessageRow): string {
     case 'voice':
       return row.transcript && row.transcript.length > 0 ? row.transcript : '🎤 Voice message';
     case 'call_start':
-      return '📞 Call started';
+      return row.media_type === 'video' ? '📹 Video call started' : '📞 Voice call started';
     case 'call_end':
-      return '📞 Call ended';
+      return row.media_type === 'video' ? '📹 Video call ended' : '📞 Voice call ended';
     default:
       return row.content ?? '';
   }

@@ -10,6 +10,20 @@ import { playMessageAudio } from '../../services/stewraVoice';
 import { PhoneIcon, VideoIcon, PlayIcon } from '../../components/icons/Icons';
 import styles from './ConversationPage.module.css';
 
+/** Human-facing text for a system marker — call markers distinguish voice vs video (and show duration). */
+function systemLabel(message: Message): string {
+  const kind = message.mediaType === 'video' ? 'Video call' : 'Voice call';
+  if (message.type === 'call_start') {
+    return `${kind} started`;
+  }
+  if (message.type === 'call_end') {
+    return message.mediaDurationSec != null
+      ? `${kind} ended (${message.mediaDurationSec}s)`
+      : `${kind} ended`;
+  }
+  return message.content ?? '—';
+}
+
 /** Renders one message bubble, aligned right when the caller authored it. */
 function MessageBubble({
   message,
@@ -21,7 +35,7 @@ function MessageBubble({
   const isSystem =
     message.type === 'call_start' || message.type === 'call_end' || message.type === 'system';
   if (isSystem) {
-    return <div className={styles.systemMsg}>{message.content ?? '—'}</div>;
+    return <div className={styles.systemMsg}>{systemLabel(message)}</div>;
   }
   return (
     <div className={mine ? styles.bubbleMine : styles.bubbleTheirs}>
