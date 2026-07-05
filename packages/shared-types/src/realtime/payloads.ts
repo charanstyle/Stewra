@@ -1,4 +1,5 @@
 import type { ISODateString, UUID } from '../common/base';
+import type { ContactInviteWithUsers, ContactWithUser } from '../models/contact';
 import type { PresenceStatus } from '../models/conversation';
 import type { Message, MessageReaction, ReadReceipt } from '../models/message';
 import type { CallEndReason, CallKind, RtcIceCandidate, RtcSessionDescription } from '../models/call';
@@ -18,6 +19,23 @@ export interface PresenceUpdateEvent {
   readonly userId: UUID;
   readonly status: PresenceStatus;
   readonly lastActiveAt: ISODateString;
+}
+
+// ── contacts: server → client (personal-room notifications) ───────────────────
+/**
+ * Pushed to the invitee's room the moment someone invites them, carrying the fully-hydrated invite so
+ * the client can show "<inviter> invited you" live and drop it into the pending list without a refetch.
+ */
+export interface ContactInviteReceivedEvent {
+  readonly invite: ContactInviteWithUsers;
+}
+/**
+ * Pushed to the inviter's room when their invitee accepts. Carries the new contact from the inviter's
+ * side (`contact.user` is the person who accepted), so the UI can say "<name> accepted — say hi" and add
+ * them to the contact list immediately.
+ */
+export interface ContactInviteAcceptedEvent {
+  readonly contact: ContactWithUser;
 }
 
 // ── chat: client → server (ephemeral) ─────────────────────────────────────────

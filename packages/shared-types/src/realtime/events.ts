@@ -31,6 +31,11 @@ export type ClientEvent = (typeof CLIENT_EVENTS)[keyof typeof CLIENT_EVENTS];
 export const SERVER_EVENTS = {
   // presence
   PRESENCE_UPDATE: 'presence:update',
+  // contacts (pushed to a user's personal room, not a conversation room)
+  /** Someone invited you — surfaces the pending invite live so you can accept without a manual refresh. */
+  CONTACT_INVITE_RECEIVED: 'contact:invite-received',
+  /** Your invite was accepted — you're now connected and can start chatting with that person. */
+  CONTACT_INVITE_ACCEPTED: 'contact:invite-accepted',
   // chat
   CHAT_MESSAGE: 'chat:message',
   CHAT_MESSAGE_DELIVERED: 'chat:message-delivered',

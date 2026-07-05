@@ -7,6 +7,8 @@ import {
 import type {
   PresenceSubscribePayload,
   PresenceUpdateEvent,
+  ContactInviteReceivedEvent,
+  ContactInviteAcceptedEvent,
   ChatJoinPayload,
   ChatTypingPayload,
   ChatMarkReadPayload,
@@ -71,6 +73,8 @@ interface ClientToServerEvents {
 /** Events the server emits to this client. */
 interface ServerToClientEvents {
   [SERVER_EVENTS.PRESENCE_UPDATE]: (event: PresenceUpdateEvent) => void;
+  [SERVER_EVENTS.CONTACT_INVITE_RECEIVED]: (event: ContactInviteReceivedEvent) => void;
+  [SERVER_EVENTS.CONTACT_INVITE_ACCEPTED]: (event: ContactInviteAcceptedEvent) => void;
   [SERVER_EVENTS.CHAT_MESSAGE]: (event: ChatMessageEvent) => void;
   [SERVER_EVENTS.CHAT_MESSAGE_DELIVERED]: (event: ChatDeliveredEvent) => void;
   [SERVER_EVENTS.CHAT_MESSAGE_READ]: (event: ChatReadEvent) => void;

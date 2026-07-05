@@ -1,17 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { ContactInviteWithUsers, PublicUser } from '@stewra/shared-types';
-import type { RootStackParamList } from '../../navigation/types';
+import type { MainTabParamList } from '../../navigation/types';
 import { useContacts } from '../../contexts/ContactsContext';
 import { api, ApiError } from '../../services/api';
 import { theme } from '../../theme/colors';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Contacts'>;
+type Props = BottomTabScreenProps<MainTabParamList, 'Contacts'>;
 
 export default function ContactsScreen({ navigation }: Props): React.JSX.Element {
-  const { contacts, loading, refresh } = useContacts();
+  const { contacts, loading, refresh, invitesRevision } = useContacts();
   const [query, setQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ReadonlyArray<PublicUser>>([]);
   const [received, setReceived] = useState<ReadonlyArray<ContactInviteWithUsers>>([]);
@@ -22,9 +22,10 @@ export default function ContactsScreen({ navigation }: Props): React.JSX.Element
     setReceived(res.received.filter((entry) => entry.invite.status === 'pending'));
   }, []);
 
+  // Reload on mount and whenever a new invite arrives over the socket (invitesRevision bumps).
   useEffect(() => {
     void loadInvites();
-  }, [loadInvites]);
+  }, [loadInvites, invitesRevision]);
 
   const handleSearch = async (text: string): Promise<void> => {
     setQuery(text);

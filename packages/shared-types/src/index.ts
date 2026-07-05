@@ -173,6 +173,8 @@ export type { ClientEvent, ServerEvent } from './realtime/events';
 export type {
   PresenceSubscribePayload,
   PresenceUpdateEvent,
+  ContactInviteReceivedEvent,
+  ContactInviteAcceptedEvent,
   ChatJoinPayload,
   ChatTypingPayload,
   ChatMarkReadPayload,

@@ -1,11 +1,28 @@
 import type { CallKind } from '@stewra/shared-types';
 
 /**
- * A single flat stack param list for the whole app. RootNavigator swaps which
- * screens are registered based on auth state (unauthenticated: Login/Register/
- * VerifyEmail; authenticated: everything else) rather than nesting two
- * navigators, which keeps navigation typing and the global `navigationRef`
- * (used by voipCallService to jump straight to Call on a CallKit answer) simple.
+ * The three primary destinations of the authenticated app, presented as a bottom
+ * tab bar. Conversation/Call are NOT tabs — they push over the tabs on the parent
+ * stack (see RootStackParamList). The `[key: string]` index signature mirrors the
+ * root stack's, so a tab screen can `navigation.navigate('Conversation', …)` up to
+ * the parent stack without threading composite navigator generics through every
+ * screen.
+ */
+export interface MainTabParamList {
+  Chats: undefined;
+  Contacts: undefined;
+  StewraVoice: undefined;
+  [key: string]: object | undefined;
+}
+
+/**
+ * The root stack for the whole app. RootNavigator swaps which screens are
+ * registered based on auth state (unauthenticated: Login/Register/VerifyEmail;
+ * authenticated: the MainTabs bottom-tab navigator plus the Conversation/Call
+ * screens that push over it). Keeping one flat stack (with MainTabs nested as a
+ * single screen) keeps the global `navigationRef` — used by voipCallService to
+ * jump straight to Call on a CallKit answer — simple: it still targets Call and
+ * Conversation directly.
  */
 export interface RootStackParamList {
   Login: undefined;
@@ -13,10 +30,8 @@ export interface RootStackParamList {
   VerifyEmail: undefined;
   ForgotPassword: undefined;
   ResetPassword: { readonly email: string };
-  ChatList: undefined;
+  MainTabs: undefined;
   Conversation: { readonly conversationId: string; readonly title: string };
-  Contacts: undefined;
-  StewraVoice: undefined;
   Call: {
     readonly conversationId: string;
     readonly callKind: CallKind;

@@ -1,0 +1,53 @@
+.wrap {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  width: min(420px, calc(100vw - 32px));
+}
+
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: var(--success);
+  color: #0b1b0d;
+  border: none;
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  cursor: default;
+  animation: drop 220ms ease-out;
+}
+
+.tappable {
+  cursor: pointer;
+}
+
+.tappable:hover {
+  filter: brightness(1.05);
+}
+
+.text {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.action {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+@keyframes drop {
+  from {
+    transform: translateY(-16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

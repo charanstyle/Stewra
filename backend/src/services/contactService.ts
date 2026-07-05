@@ -58,7 +58,10 @@ class ContactService {
    * sign up. Sends the invite email with the accept link. Rejects self-invites, existing contacts, and
    * duplicate pending invites.
    */
-  async invite(userId: string, inviteeEmailRaw: string): Promise<ContactInvite> {
+  async invite(
+    userId: string,
+    inviteeEmailRaw: string,
+  ): Promise<{ invite: ContactInvite; received: ContactInviteWithUsers | null }> {
     const inviteeEmail = inviteeEmailRaw.trim().toLowerCase();
     const inviter = await userRepository.findById(userId);
     if (inviter === undefined) throw new NotFoundError('Inviter not found');
@@ -97,7 +100,14 @@ class ContactService {
       logger.error('Contact invite email failed', { inviteId: invite.id });
     }
 
-    return invite;
+    // When the invitee already has an account, hand the controller a hydrated projection to push to
+    // their room ("<inviter> invited you"). Unresolved emails have no room to notify — they'll see it
+    // in their pending list once they sign up.
+    const received: ContactInviteWithUsers | null =
+      invitee !== undefined
+        ? { invite, inviter: toPublicUser(inviter), invitee: toPublicUser(invitee) }
+        : null;
+    return { invite, received };
   }
 
   /**
@@ -145,7 +155,14 @@ class ContactService {
     userId: string,
     inviteId: string,
     action: 'accept' | 'decline',
-  ): Promise<{ invite: ContactInvite; contact: ContactWithUser | null }> {
+  ): Promise<{
+    invite: ContactInvite;
+    /** The new contact from the accepter's side (`contact.user` is the inviter); null when declined. */
+    contact: ContactWithUser | null;
+    /** The new contact from the INVITER's side (`contact.user` is the accepter), for notifying the
+     * inviter's room that they can now chat; null when declined. */
+    inviterContact: ContactWithUser | null;
+  }> {
     const invite = await contactRepository.findInviteById(inviteId);
     if (invite === undefined) throw new NotFoundError('Invite not found');
     if (invite.inviteeUserId !== userId) {
@@ -157,18 +174,26 @@ class ContactService {
 
     if (action === 'decline') {
       const updated = await contactRepository.setInviteStatus(inviteId, 'declined');
-      return { invite: updated ?? invite, contact: null };
+      return { invite: updated ?? invite, contact: null, inviterContact: null };
     }
 
     await contactRepository.createReciprocal(invite.inviterId, userId);
     const updated = await contactRepository.setInviteStatus(inviteId, 'accepted');
-    const edge = await contactRepository.getEdge(userId, invite.inviterId);
-    const inviterUser = await userRepository.findById(invite.inviterId);
+    const [accepterEdge, inviterEdge, inviterUser, accepterUser] = await Promise.all([
+      contactRepository.getEdge(userId, invite.inviterId),
+      contactRepository.getEdge(invite.inviterId, userId),
+      userRepository.findById(invite.inviterId),
+      userRepository.findById(userId),
+    ]);
     const contact: ContactWithUser | null =
-      edge !== undefined && inviterUser !== undefined
-        ? { contact: edge, user: toPublicUser(inviterUser) }
+      accepterEdge !== undefined && inviterUser !== undefined
+        ? { contact: accepterEdge, user: toPublicUser(inviterUser) }
         : null;
-    return { invite: updated ?? invite, contact };
+    const inviterContact: ContactWithUser | null =
+      inviterEdge !== undefined && accepterUser !== undefined
+        ? { contact: inviterEdge, user: toPublicUser(accepterUser) }
+        : null;
+    return { invite: updated ?? invite, contact, inviterContact };
   }
 
   /** Block or unblock a contact (flips the caller→contact edge between active and blocked). */

@@ -3,6 +3,7 @@ import { AuthProvider, ProtectedRoute } from './hooks/useAuth';
 import { CallProvider } from './hooks/CallContext';
 import { IncomingCallModal } from './components/call/IncomingCallModal';
 import { CallScreen } from './components/call/CallScreen';
+import { ContactNotifier } from './components/ContactNotifier/ContactNotifier';
 import LoginPage from './app/login/LoginPage';
 import VerifyEmailPage from './app/verify/VerifyEmailPage';
 import ActivityPage from './app/activity/ActivityPage';
@@ -76,7 +77,8 @@ export default function App(): React.JSX.Element {
           />
           <Route path="*" element={<Navigate to="/activity" replace />} />
         </Routes>
-        {/* Call surfaces render above the router so they persist across navigation. */}
+        {/* Call surfaces + contact banners render above the router so they persist across navigation. */}
+        <ContactNotifier />
         <IncomingCallModal />
         <CallScreen />
       </CallProvider>

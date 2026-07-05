@@ -2,14 +2,18 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type {
   BlockContactResponse,
+  ContactInviteAcceptedEvent,
+  ContactInviteReceivedEvent,
   ListContactsResponse,
   ListInvitesResponse,
   RespondInviteResponse,
   SearchUsersResponse,
   SendInviteResponse,
 } from '@stewra/shared-types';
+import { SERVER_EVENTS } from '@stewra/shared-types';
 import { BaseController } from './baseController';
 import { contactService } from '../services/contactService';
+import { emitToUser } from '../websocket/emitter';
 import { parse } from '../utils/validate';
 
 const searchSchema = z.object({ query: z.string().min(1).max(200) });
@@ -53,7 +57,12 @@ class ContactsController extends BaseController {
   async invite(req: Request, res: Response): Promise<void> {
     try {
       const { inviteeEmail } = parse(inviteSchema, req.body);
-      const invite = await contactService.invite(this.userId(req), inviteeEmail);
+      const { invite, received } = await contactService.invite(this.userId(req), inviteeEmail);
+      // If the invitee already has an account, ring their room so the pending invite shows up live.
+      if (received !== null && received.invitee !== null) {
+        const event: ContactInviteReceivedEvent = { invite: received };
+        emitToUser(received.invitee.id, SERVER_EVENTS.CONTACT_INVITE_RECEIVED, event);
+      }
       const body: SendInviteResponse = { invite };
       this.handleSuccess(res, body, 201);
     } catch (error) {
@@ -77,7 +86,16 @@ class ContactsController extends BaseController {
     try {
       const { id } = parse(respondParamsSchema, req.params);
       const { action } = parse(respondBodySchema, req.body);
-      const { invite, contact } = await contactService.respondInvite(this.userId(req), id, action);
+      const { invite, contact, inviterContact } = await contactService.respondInvite(
+        this.userId(req),
+        id,
+        action,
+      );
+      // Tell the inviter their invite was accepted so they can start the conversation.
+      if (inviterContact !== null) {
+        const event: ContactInviteAcceptedEvent = { contact: inviterContact };
+        emitToUser(invite.inviterId, SERVER_EVENTS.CONTACT_INVITE_ACCEPTED, event);
+      }
       const body: RespondInviteResponse = { invite, contact };
       this.handleSuccess(res, body);
     } catch (error) {

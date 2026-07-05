@@ -11,10 +11,8 @@ import RegisterScreen from '../screens/auth/RegisterScreen';
 import VerifyEmailScreen from '../screens/auth/VerifyEmailScreen';
 import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import ResetPasswordScreen from '../screens/auth/ResetPasswordScreen';
-import ChatListScreen from '../screens/chat/ChatListScreen';
+import MainTabs from './MainTabs';
 import ConversationScreen from '../screens/chat/ConversationScreen';
-import ContactsScreen from '../screens/chat/ContactsScreen';
-import StewraVoiceScreen from '../screens/chat/StewraVoiceScreen';
 import CallScreen from '../screens/call/CallScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -68,17 +66,11 @@ export default function RootNavigator(): React.JSX.Element {
           </>
         ) : (
           <>
-            <Stack.Screen name="ChatList" component={ChatListScreen} options={{ title: 'Stewra' }} />
+            <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
             <Stack.Screen
               name="Conversation"
               component={ConversationScreen}
               options={conversationScreenOptions}
-            />
-            <Stack.Screen name="Contacts" component={ContactsScreen} options={{ title: 'Contacts' }} />
-            <Stack.Screen
-              name="StewraVoice"
-              component={StewraVoiceScreen}
-              options={{ title: 'Talk to Stewra' }}
             />
             <Stack.Screen
               name="Call"

@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { ConversationSummary } from '@stewra/shared-types';
-import type { RootStackParamList } from '../../navigation/types';
+import type { MainTabParamList } from '../../navigation/types';
 import { api } from '../../services/api';
 import { theme } from '../../theme/colors';
-import { ContactsIcon, MicIcon } from '../../components/icons/Icons';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'ChatList'>;
+type Props = BottomTabScreenProps<MainTabParamList, 'Chats'>;
 
 function titleFor(summary: ConversationSummary): string {
   if (summary.conversation.type === 'stewra_ai') {
@@ -87,24 +86,6 @@ export default function ChatListScreen({ navigation }: Props): React.JSX.Element
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <View style={styles.toolbar}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => navigation.navigate('Contacts')}
-          style={({ pressed }) => [styles.toolbarButton, pressed && styles.rowPressed]}
-        >
-          <ContactsIcon size={16} color={theme.colors.textPrimary} />
-          <Text style={styles.toolbarButtonLabel}>Contacts</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => navigation.navigate('StewraVoice')}
-          style={({ pressed }) => [styles.toolbarButton, pressed && styles.rowPressed]}
-        >
-          <MicIcon size={16} color={theme.colors.textPrimary} />
-          <Text style={styles.toolbarButtonLabel}>Talk to Stewra</Text>
-        </Pressable>
-      </View>
       {!loading && conversations.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>No conversations yet</Text>
@@ -128,26 +109,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,
-  },
-  toolbar: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-  },
-  toolbarButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-    backgroundColor: theme.colors.surfaceAlt,
-    borderRadius: theme.radius.pill,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.xs,
-  },
-  toolbarButtonLabel: {
-    color: theme.colors.textPrimary,
-    fontSize: 13,
-    fontWeight: '600',
   },
   row: {
     flexDirection: 'row',
