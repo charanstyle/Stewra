@@ -65,13 +65,13 @@ services:
     # stewra.env so mediaService writes here; the named volume survives image rebuilds/redeploys.
     volumes:
       - stewra_uploads:/data/uploads
-      # Claude Code SUBSCRIPTION credentials for the `claude` CLI model provider (MODEL_PROVIDER=claude_cli;
-      # the CLI is installed in backend/Dockerfile). The container runs as root (HOME=/root), so the CLI
-      # reads /root/.claude/.credentials.json. Mounted READ-WRITE on purpose: the CLI refreshes its OAuth
-      # access token in place via the stored refresh token, so a long-lived deploy keeps working. The host
-      # dir is provisioned at deploy time from the operator's own ~/.claude/.credentials.json and is NEVER
-      # committed (it holds a bearer credential).
-      - ./claude-home/.claude:/root/.claude
+    # The `claude` CLI model provider (MODEL_PROVIDER=claude_cli; CLI installed in backend/Dockerfile)
+    # authenticates via CLAUDE_CODE_OAUTH_TOKEN in stewra.env — a long-lived headless token from
+    # `claude setup-token`. NO credentials file is mounted: a mounted interactive-login .credentials.json
+    # self-destructs on a server (its short-lived access token auto-refreshes, the refresh token rotates
+    # and conflicts with the operator's own dev login, and the CLI rewrites the file to a dead state).
+    # The setup-token is purpose-built for automation (~1y, no refresh dance), so a fresh writable HOME
+    # (/root in the container layer) is all the CLI needs at runtime.
 
   website:
     build:
