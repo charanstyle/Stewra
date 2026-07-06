@@ -10,6 +10,7 @@ import {
 } from '@stewra/shared-types';
 import { useAuth } from '../../hooks/useAuth';
 import { api, ApiError } from '../../services/api';
+import { AppNav } from '../../components/AppNav/AppNav';
 import { FeedbackControl } from '../../components/FeedbackControl/FeedbackControl';
 import styles from './ActivityPage.module.css';
 
@@ -18,7 +19,7 @@ function describeError(err: unknown): string {
 }
 
 export default function ActivityPage(): React.JSX.Element {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -179,18 +180,7 @@ export default function ActivityPage(): React.JSX.Element {
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <h1 className={styles.brand}>Stewra</h1>
-        <div className={styles.headerRight}>
-          <span className={styles.who}>{user?.displayName}</span>
-          <button type="button" className={styles.ghost} onClick={() => navigate('/memory')}>
-            What I’ve learned
-          </button>
-          <button type="button" className={styles.ghost} onClick={logout}>
-            Sign out
-          </button>
-        </div>
-      </header>
+      <AppNav />
 
       {!emailVerified && (
         <div className={styles.verifyBanner} role="status">

@@ -28,6 +28,9 @@ export function AppNav(): React.JSX.Element {
           <NavLink to="/activity" className={linkClass}>
             Activity
           </NavLink>
+          <NavLink to="/memory" className={linkClass}>
+            What I’ve learned
+          </NavLink>
         </nav>
       </div>
       <div className={styles.right}>

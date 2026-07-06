@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import type {
   AgentMemory,
   ListMemoriesRequest,
@@ -8,6 +7,7 @@ import type {
   UpdateProcessRuleRequest,
 } from '@stewra/shared-types';
 import { api, ApiError } from '../../services/api';
+import { AppNav } from '../../components/AppNav/AppNav';
 import { MemoryCard } from './MemoryCard';
 import { ProcessRuleCard } from './ProcessRuleCard';
 import styles from './MemoryPage.module.css';
@@ -25,8 +25,6 @@ function describeError(err: unknown): string {
 }
 
 export default function MemoryPage(): React.JSX.Element {
-  const navigate = useNavigate();
-
   const [memories, setMemories] = useState<ReadonlyArray<AgentMemory>>([]);
   const [rules, setRules] = useState<ReadonlyArray<ProcessRule>>([]);
   const [search, setSearch] = useState('');
@@ -95,11 +93,9 @@ export default function MemoryPage(): React.JSX.Element {
 
   return (
     <div className={styles.page}>
+      <AppNav />
       <header className={styles.header}>
         <h1 className={styles.title}>What Stewra has learned about you</h1>
-        <button type="button" className={styles.ghost} onClick={() => navigate('/activity')}>
-          Back
-        </button>
       </header>
 
       <p className={styles.subtitle}>
