@@ -8,3 +8,5 @@ report/
 *.png
 full-report.md
 full-report.json
+today-report.md
+today-report.json
