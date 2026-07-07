@@ -156,7 +156,7 @@ async function main() {
       pass('nav', 'home page links to messaging', `chats=${chatsLink} talk=${talkLink} contacts=${contactsLink}`);
     }
     // custom header affordances that DO exist on home
-    const learned = await a.page.getByRole('button', { name: /What I.?ve learned/i }).isVisible().catch(() => false);
+    const learned = await a.page.getByRole('link', { name: /What I.?ve learned/i }).isVisible().catch(() => false);
     const signout = await a.page.getByRole('button', { name: 'Sign out' }).isVisible().catch(() => false);
     info('nav', 'home custom header buttons', `"What I've learned"=${learned}, "Sign out"=${signout}`);
   });
@@ -174,14 +174,14 @@ async function main() {
     pass('nav', 'AppNav links navigate correctly (Chats↔Stewra↔Contacts)', 'all clicks landed on expected routes');
   });
 
-  // 1e. "What I've learned" (/activity → /memory) and Back
+  // 1e. "What I've learned" (/activity → /memory) and back — both are AppNav links, not buttons
   await step('nav', 'Activity ↔ Memory navigation', async () => {
     await a.page.goto(`${WEB}/activity`, { waitUntil: 'domcontentloaded' });
-    await a.page.getByRole('button', { name: /What I.?ve learned/i }).click();
+    await a.page.getByRole('link', { name: /What I.?ve learned/i }).click();
     await a.page.waitForURL('**/memory', { timeout: 10000 });
-    await a.page.getByRole('button', { name: 'Back' }).click();
+    await a.page.getByRole('link', { name: 'Activity' }).click();   // AppNav has no "Back" button; return via the nav link
     await a.page.waitForURL('**/activity', { timeout: 10000 });
-    pass('nav', 'Activity "What I\'ve learned" → Memory → Back', 'round-trip works');
+    pass('nav', 'Activity "What I\'ve learned" → Memory → Activity', 'round-trip works');
   });
 
   // 1f. Unknown route → /activity
@@ -415,18 +415,25 @@ async function main() {
   await step('contacts', 'Block then Unblock a contact (state restored)', async () => {
     await a.page.goto(`${WEB}/contacts`, { waitUntil: 'domcontentloaded' });
     await a.page.getByRole('heading', { name: 'Your contacts' }).waitFor({ timeout: 12000 });
-    const blockBtn = a.page.getByRole('button', { name: 'Block' }).first();
-    if (await blockBtn.isVisible().catch(() => false)) {
-      await blockBtn.click();
-      const unblock = await a.page.getByRole('button', { name: 'Unblock' }).first().isVisible().catch(() => false);
-      if (unblock) {
-        pass('contacts', 'Block flips contact to blocked state', 'Unblock button appeared');
-        await a.page.getByRole('button', { name: 'Unblock' }).first().click();   // RESTORE original state
-        await settle(a.page, 800);
-        const restored = await a.page.getByRole('button', { name: 'Block' }).first().isVisible().catch(() => false);
-        (restored ? pass : info)('contacts', 'Unblock restores original state', `restored=${restored}`);
-      } else { fail('contacts', 'Block flips contact to blocked state', 'no Unblock button after Block'); }
-    } else { info('contacts', 'Block/Unblock', 'no Block button (no eligible contact rendered)'); }
+    const block = a.page.getByRole('button', { name: 'Block' }).first();
+    const unblock = a.page.getByRole('button', { name: 'Unblock' }).first();
+    const hasBlock = await block.isVisible().catch(() => false);
+    const hasUnblock = await unblock.isVisible().catch(() => false);
+    if (hasBlock) {
+      // Normal path: block a contact, assert it flips, then unblock to restore the original state.
+      await block.click();
+      await a.page.getByRole('button', { name: 'Unblock' }).first().waitFor({ timeout: 8000 });
+      pass('contacts', 'Block flips contact to blocked state', 'Unblock button appeared');
+      await a.page.getByRole('button', { name: 'Unblock' }).first().click();       // RESTORE
+      await a.page.getByRole('button', { name: 'Block' }).first().waitFor({ timeout: 8000 });
+      pass('contacts', 'Unblock restores original (unblocked) state', 'Block button reappeared');
+    } else if (hasUnblock) {
+      // Recovery path: a contact is already blocked (e.g. an earlier aborted run). Clearing it both
+      // proves the toggle works AND leaves the account in the clean, unblocked state.
+      await unblock.click();
+      await a.page.getByRole('button', { name: 'Block' }).first().waitFor({ timeout: 8000 });
+      pass('contacts', 'Unblock flips contact to unblocked state', 'recovered a pre-blocked contact; Block button reappeared');
+    } else { info('contacts', 'Block/Unblock', 'no Block/Unblock control (no eligible contact rendered)'); }
   });
   await step('contacts', 'Message from contact row opens a conversation', async () => {
     await a.page.goto(`${WEB}/contacts`, { waitUntil: 'domcontentloaded' });
@@ -442,7 +449,8 @@ async function main() {
   // ============================================================= 7. ACTIVITY (home) features
   await step('activity', 'home cards render', async () => {
     await a.page.goto(`${WEB}/activity`, { waitUntil: 'domcontentloaded' });
-    await a.page.getByRole('heading', { name: 'Stewra' }).first().waitFor({ timeout: 12000 });
+    // "Stewra" is only the nav brand, not a card heading — wait for a real, always-present card
+    await a.page.getByRole('heading', { name: 'Your sources' }).first().waitFor({ timeout: 12000 });
     for (const h of ['Your sources', 'Gmail window', 'Learn my writing style', 'Ask for an insight', 'Activity']) {
       const vis = await a.page.getByRole('heading', { name: h }).isVisible().catch(() => false);
       info('activity', `card "${h}" renders`, `visible=${vis}`);
@@ -456,7 +464,10 @@ async function main() {
     const disabled = await connectBtn.isDisabled().catch(() => false);
     if (disabled) { info('activity', 'Connect Google consent modal', 'button disabled (email not verified) — not clicked'); return; }
     await connectBtn.click();
-    const modal = await a.page.getByText('One quick check', { exact: false }).isVisible().catch(() => false);
+    // The "One quick check" modal only appears after an async startGoogleConnection() round-trip,
+    // so wait for it rather than checking instantly (the instant check races the network call).
+    const modal = await a.page.getByText('One quick check', { exact: false })
+      .waitFor({ timeout: 12000 }).then(() => true).catch(() => false);
     (modal ? pass : fail)('activity', 'Connect Google opens in-page consent modal', `modal shown=${modal}`);
     await shot(a.page, 'full_activity_consent');
     // Do NOT click "Yes, continue to Google" (real external OAuth redirect). Cancel instead.
