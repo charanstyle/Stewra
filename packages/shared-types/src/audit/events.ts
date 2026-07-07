@@ -15,7 +15,10 @@ export type AuditResourceType =
   | 'memory'
   | 'process_profile'
   | 'conversation'
-  | 'call';
+  | 'call'
+  // A stored email (thread/message) synced from Gmail, and a Stewra-produced suggestion/nudge.
+  | 'email'
+  | 'suggestion';
 
 /**
  * Actions the audit log records. `read` covers brokered data access; `insight` covers an
@@ -42,6 +45,19 @@ export type AuditAction =
   | 'dismiss'
   | 'converse'
   | 'call'
+  // Proactive-assistant actions. `sync` covers a background email sync; `suggest` a nudge produced
+  // for the user; `brief` a daily briefing produced; `snooze` the user deferring a nudge; `draft` a
+  // reply drafted for review (no send). `send`/`archive`/`label`/`mark_read` are the confirm-gated
+  // Gmail writes — each only ever recorded after the user explicitly approved the action.
+  | 'sync'
+  | 'suggest'
+  | 'brief'
+  | 'snooze'
+  | 'draft'
+  | 'send'
+  | 'archive'
+  | 'label'
+  | 'mark_read'
   | 'auth.register'
   | 'auth.login'
   | 'auth.refresh'

@@ -1,10 +1,13 @@
 import { db } from '../database/index';
+import { config } from '../config/unifiedConfig';
 
 /** A stored preferences row. Absent until the user changes a setting for the first time. */
 export interface UserPreferencesRow {
   readonly userId: string;
   readonly gmailLookbackDays: number;
   readonly learnFromSentMail: boolean;
+  /** Durable email retention window (days); null when the user hasn't chosen (resolve to default). */
+  readonly emailRetentionDays: number | null;
 }
 
 /**
@@ -15,10 +18,23 @@ export class UserPreferencesRepository {
   async findForUser(userId: string): Promise<UserPreferencesRow | undefined> {
     const row = await db
       .selectFrom('user_preferences')
-      .select(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail'])
+      .select(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days'])
       .where('user_id', '=', userId)
       .executeTakeFirst();
     return row ? toRow(row) : undefined;
+  }
+
+  /** Insert-or-update the user's email retention window (days), stamping updated_at on conflict. */
+  async upsertEmailRetentionDays(userId: string, days: number): Promise<UserPreferencesRow> {
+    const row = await db
+      .insertInto('user_preferences')
+      .values({ user_id: userId, gmail_lookback_days: config.gmail.lookbackDays, email_retention_days: days })
+      .onConflict((oc) =>
+        oc.column('user_id').doUpdateSet({ email_retention_days: days, updated_at: new Date() }),
+      )
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days'])
+      .executeTakeFirstOrThrow();
+    return toRow(row);
   }
 
   /** Insert-or-update the user's Gmail lookback window, stamping updated_at on conflict. */
@@ -29,7 +45,7 @@ export class UserPreferencesRepository {
       .onConflict((oc) =>
         oc.column('user_id').doUpdateSet({ gmail_lookback_days: days, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -57,7 +73,7 @@ export class UserPreferencesRepository {
           .column('user_id')
           .doUpdateSet({ learn_from_sent_mail: learn, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -68,11 +84,13 @@ function toRow(row: {
   user_id: string;
   gmail_lookback_days: number;
   learn_from_sent_mail: boolean;
+  email_retention_days: number | null;
 }): UserPreferencesRow {
   return {
     userId: row.user_id,
     gmailLookbackDays: row.gmail_lookback_days,
     learnFromSentMail: row.learn_from_sent_mail,
+    emailRetentionDays: row.email_retention_days,
   };
 }
 

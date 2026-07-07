@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import jwt from 'jsonwebtoken';
-import { google } from 'googleapis';
+import { google, type gmail_v1 } from 'googleapis';
 import * as Sentry from '@sentry/node';
 import { config } from '../config/unifiedConfig';
 import type { CalendarEvent } from './calendarFacts';
@@ -93,13 +93,25 @@ export function verifyCalendarState(state: string): string {
   return payload.sub;
 }
 
-/** Exchange an authorization code for a long-lived refresh token (stored in the vault by the caller). */
-export async function exchangeCodeForRefreshToken(code: string): Promise<string> {
+/**
+ * Exchange an authorization code for a long-lived refresh token (stored in the vault by the caller)
+ * plus the scopes Google actually granted. The granted set (from `tokens.scope`, space-separated) is
+ * persisted on the connection so the backend can tell a full grant from a read-only one and prompt
+ * for re-consent when the write scopes are missing. The token itself is returned only to the caller,
+ * which vaults it — it is never logged.
+ */
+export async function exchangeCodeForRefreshToken(
+  code: string,
+): Promise<{ refreshToken: string; scopes: string[] }> {
   const { tokens } = await oauthClient().getToken(code);
   if (!tokens.refresh_token) {
     throw new Error('Google did not return a refresh token; re-consent is required');
   }
-  return tokens.refresh_token;
+  const scopes = (tokens.scope ?? '')
+    .split(/\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return { refreshToken: tokens.refresh_token, scopes };
 }
 
 /**
@@ -190,6 +202,139 @@ export async function fetchRecentEmails(
     });
   }
   return emails;
+}
+
+/**
+ * A gmail v1 API client bound to a vaulted refresh token. Built once by the sync engine and reused
+ * across many message reads so a single token refresh serves the whole pass.
+ */
+export type GmailClient = ReturnType<typeof google.gmail>;
+
+export function gmailClient(refreshToken: string): GmailClient {
+  const client = oauthClient();
+  client.setCredentials({ refresh_token: refreshToken });
+  return google.gmail({ version: 'v1', auth: client });
+}
+
+/** A full message pulled for the encrypted store. Unlike the minimized-facts path, this DOES carry
+ * the body — it is persisted (encrypted) in the control plane and never crosses to the agent. */
+export interface FetchedMessage {
+  readonly gmailMessageId: string;
+  readonly gmailThreadId: string;
+  readonly gmailHistoryId: string | null;
+  readonly fromAddress: string;
+  readonly fromName: string;
+  readonly sentAt: Date | null;
+  readonly subject: string;
+  readonly snippet: string;
+  readonly body: string;
+  readonly labelIds: ReadonlyArray<string>;
+}
+
+/** One page of message ids from a Gmail search. */
+export async function listMessageIds(
+  gmail: GmailClient,
+  query: string,
+  pageSize: number,
+  pageToken?: string,
+): Promise<{ ids: string[]; nextPageToken: string | null }> {
+  const list = await gmail.users.messages.list({
+    userId: 'me',
+    q: query,
+    maxResults: pageSize,
+    ...(pageToken ? { pageToken } : {}),
+  });
+  const ids = (list.data.messages ?? []).map((m) => m.id).filter((id): id is string => !!id);
+  return { ids, nextPageToken: list.data.nextPageToken ?? null };
+}
+
+/** Decode a base64url Gmail body part to UTF-8 text. */
+function decodeBody(data: string): string {
+  return Buffer.from(data, 'base64url').toString('utf8');
+}
+
+/** Recursively pull the best plaintext out of a Gmail MIME payload (prefers text/plain). */
+function extractPlainBody(payload: gmail_v1.Schema$MessagePart | undefined): string {
+  if (payload === undefined) {
+    return '';
+  }
+  if (payload.mimeType === 'text/plain' && payload.body?.data) {
+    return decodeBody(payload.body.data);
+  }
+  if (payload.parts) {
+    // Prefer a text/plain part; fall back to whatever text the nested parts yield.
+    for (const part of payload.parts) {
+      const text = extractPlainBody(part);
+      if (text.length > 0) {
+        return text;
+      }
+    }
+  }
+  if (payload.mimeType === 'text/html' && payload.body?.data) {
+    // Strip tags as a last resort so an HTML-only mail still yields readable text.
+    return decodeBody(payload.body.data).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  return '';
+}
+
+/** Fetch and normalize one full message for the store. */
+export async function getFullMessage(gmail: GmailClient, id: string): Promise<FetchedMessage> {
+  const message = await gmail.users.messages.get({ userId: 'me', id, format: 'full' });
+  const data = message.data;
+  const headers = data.payload?.headers ?? [];
+  const fromHeader = headerValue(headers, 'From');
+  const fromMatch = fromHeader.match(/<([^>]+)>/);
+  const fromAddress = (fromMatch?.[1] ?? fromHeader).trim().toLowerCase();
+  const fromName = fromMatch ? fromHeader.slice(0, fromHeader.indexOf('<')).trim() : '';
+  const internalDate = data.internalDate ? Number(data.internalDate) : NaN;
+  return {
+    gmailMessageId: data.id ?? id,
+    gmailThreadId: data.threadId ?? '',
+    gmailHistoryId: data.historyId ?? null,
+    fromAddress,
+    fromName: fromName.replace(/^"|"$/g, ''),
+    sentAt: Number.isFinite(internalDate) ? new Date(internalDate) : null,
+    subject: headerValue(headers, 'Subject'),
+    snippet: data.snippet ?? '',
+    body: extractPlainBody(data.payload ?? undefined),
+    labelIds: data.labelIds ?? [],
+  };
+}
+
+/** Ids of messages added since `startHistoryId`, plus the newest historyId. `expired` is true when the
+ * cursor is too old (Gmail 404s) — the caller falls back to a bounded re-list. */
+export async function listHistory(
+  gmail: GmailClient,
+  startHistoryId: string,
+): Promise<{ messageIds: string[]; lastHistoryId: string | null; expired: boolean }> {
+  try {
+    const ids = new Set<string>();
+    let pageToken: string | undefined;
+    let lastHistoryId: string | null = startHistoryId;
+    do {
+      const res = await gmail.users.history.list({
+        userId: 'me',
+        startHistoryId,
+        historyTypes: ['messageAdded'],
+        ...(pageToken ? { pageToken } : {}),
+      });
+      for (const h of res.data.history ?? []) {
+        for (const added of h.messagesAdded ?? []) {
+          if (added.message?.id) {
+            ids.add(added.message.id);
+          }
+        }
+      }
+      lastHistoryId = res.data.historyId ?? lastHistoryId;
+      pageToken = res.data.nextPageToken ?? undefined;
+    } while (pageToken);
+    return { messageIds: [...ids], lastHistoryId, expired: false };
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && statusOf(error) === 404) {
+      return { messageIds: [], lastHistoryId: null, expired: true };
+    }
+    throw error;
+  }
 }
 
 /** Extract the bare email addresses from a raw recipient header ("A <a@x.com>, b@y.com" → both). */

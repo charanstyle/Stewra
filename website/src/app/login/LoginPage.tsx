@@ -36,11 +36,11 @@ export default function LoginPage(): React.JSX.Element {
           values.password,
           values.displayName ?? '',
         );
-        navigate(requiresVerification ? '/verify-email' : '/activity');
+        navigate(requiresVerification ? '/verify-email' : '/today');
         return;
       }
       await login(values.email, values.password);
-      navigate('/activity');
+      navigate('/today');
     } catch (err) {
       setServerError(err instanceof ApiError ? err.message : 'Something went wrong');
     }

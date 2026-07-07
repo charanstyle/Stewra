@@ -57,6 +57,16 @@ import type {
   SendVoiceMessageResponse,
   TurnCredentialsResponse,
   ListCallHistoryResponse,
+  GetBriefingResponse,
+  ListSuggestionsResponse,
+  SnoozeSuggestionRequest,
+  SnoozeSuggestionResponse,
+  DismissSuggestionResponse,
+  MarkSuggestionDoneResponse,
+  RequestDraftRequest,
+  RequestDraftResponse,
+  ChatAboutSuggestionRequest,
+  ChatAboutSuggestionResponse,
 } from '@stewra/shared-types';
 
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -331,6 +341,34 @@ export const api = {
     request('/calls/turn-credentials'),
 
   listCallHistory: (): Promise<ListCallHistoryResponse> => request('/calls/history'),
+
+  // --- Today (briefing + nudges) ---
+
+  getBriefing: (): Promise<GetBriefingResponse> => request('/home/briefing'),
+
+  listSuggestions: (): Promise<ListSuggestionsResponse> => request('/home/suggestions'),
+
+  snoozeSuggestion: (
+    id: string,
+    body: SnoozeSuggestionRequest,
+  ): Promise<SnoozeSuggestionResponse> =>
+    request(`/home/suggestions/${id}/snooze`, { method: 'POST', body }),
+
+  dismissSuggestion: (id: string): Promise<DismissSuggestionResponse> =>
+    request(`/home/suggestions/${id}/dismiss`, { method: 'POST', body: {} }),
+
+  markSuggestionDone: (id: string): Promise<MarkSuggestionDoneResponse> =>
+    request(`/home/suggestions/${id}/done`, { method: 'POST', body: {} }),
+
+  /** Read-only: returns draft text for review, never sends. */
+  requestDraft: (id: string, body: RequestDraftRequest): Promise<RequestDraftResponse> =>
+    request(`/home/suggestions/${id}/draft`, { method: 'POST', body }),
+
+  chatAboutSuggestion: (
+    id: string,
+    body: ChatAboutSuggestionRequest,
+  ): Promise<ChatAboutSuggestionResponse> =>
+    request(`/home/suggestions/${id}/chat`, { method: 'POST', body }),
 };
 
 /**

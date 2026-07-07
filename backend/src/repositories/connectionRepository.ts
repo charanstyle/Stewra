@@ -4,6 +4,7 @@ import type {
   ConnectionStatus,
 } from '@stewra/shared-types';
 import { db } from '../database/index';
+import { config } from '../config/unifiedConfig';
 
 /** A connection row as the control plane needs it internally (includes the vault handle). */
 export interface ConnectionRow {
@@ -13,6 +14,21 @@ export interface ConnectionRow {
   readonly accountEmail: string;
   readonly vaultRef: string;
   readonly status: string;
+  /** OAuth scopes granted at last consent (parsed from the comma-joined column). */
+  readonly scopes: ReadonlyArray<string>;
+}
+
+/** Split the stored comma-joined scope string into a trimmed, non-empty list. */
+function parseScopes(value: string): ReadonlyArray<string> {
+  return value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/** A connection needs re-consent when its granted scopes are missing any required scope. */
+function computeNeedsReconsent(granted: ReadonlyArray<string>): boolean {
+  return config.google.requiredScopes.some((required) => !granted.includes(required));
 }
 
 /** Narrow a stored provider string to the union, failing loud on an unknown value. */
@@ -61,7 +77,9 @@ export class ConnectionRepository {
     provider: ConnectionProvider,
     accountEmail: string,
     vaultRef: string,
+    scopes: ReadonlyArray<string>,
   ): Promise<ConnectionRow> {
+    const scopeStr = scopes.join(',');
     const row = await db
       .insertInto('connections')
       .values({
@@ -70,11 +88,12 @@ export class ConnectionRepository {
         account_email: accountEmail,
         vault_ref: vaultRef,
         status: 'active',
+        scopes: scopeStr,
       })
       .onConflict((oc) =>
         oc
           .columns(['user_id', 'provider', 'account_email'])
-          .doUpdateSet({ vault_ref: vaultRef, status: 'active' }),
+          .doUpdateSet({ vault_ref: vaultRef, status: 'active', scopes: scopeStr }),
       )
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -99,6 +118,19 @@ export class ConnectionRepository {
       .where('account_email', '=', accountEmail)
       .executeTakeFirst();
     return row?.vault_ref;
+  }
+
+  /** Distinct ids of users who have at least one active connection for a provider — the scheduler's
+   * fan-out set (who gets a proactive sync + briefing). */
+  async activeUserIds(provider: ConnectionProvider): Promise<ReadonlyArray<string>> {
+    const rows = await db
+      .selectFrom('connections')
+      .select('user_id')
+      .distinct()
+      .where('provider', '=', provider)
+      .where('status', '=', 'active')
+      .execute();
+    return rows.map((r) => r.user_id);
   }
 
   /** Public-facing list for the trust/control surfaces (no vault handle). */
@@ -139,6 +171,7 @@ export class ConnectionRepository {
     account_email: string;
     vault_ref: string;
     status: string;
+    scopes: string;
   }): ConnectionRow {
     return {
       id: row.id,
@@ -147,6 +180,7 @@ export class ConnectionRepository {
       accountEmail: row.account_email,
       vaultRef: row.vault_ref,
       status: row.status,
+      scopes: parseScopes(row.scopes),
     };
   }
 
@@ -155,13 +189,17 @@ export class ConnectionRepository {
     provider: string;
     account_email: string;
     status: string;
+    scopes: string;
     created_at: Date;
   }): Connection {
+    const scopes = parseScopes(row.scopes);
     return {
       id: row.id,
       provider: toConnectionProvider(row.provider),
       accountEmail: row.account_email,
       status: toConnectionStatus(row.status),
+      scopes,
+      needsReconsent: computeNeedsReconsent(scopes),
       createdAt: row.created_at.toISOString(),
     };
   }

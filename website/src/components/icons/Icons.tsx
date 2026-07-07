@@ -106,3 +106,72 @@ export function EyeOffIcon(props: IconProps): React.JSX.Element {
     </svg>
   );
 }
+
+/** "needs_reply" nudge kind — a reply arrow. */
+export function ReplyIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(props)}>
+      <polyline points="9 17 4 12 9 7" />
+      <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+    </svg>
+  );
+}
+
+/** "important_unread" nudge kind — an envelope. */
+export function MailIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(props)}>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="m22 7-10 5L2 7" />
+    </svg>
+  );
+}
+
+/** "follow_up" nudge kind — a clock, for "haven't heard back yet". */
+export function ClockIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(props)}>
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 16 14" />
+    </svg>
+  );
+}
+
+/** "calendar_prep" nudge kind — a calendar. */
+export function CalendarIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(props)}>
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+  );
+}
+
+/** "other" nudge kind — a generic sparkle/attention mark. */
+export function SparkleIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(props)}>
+      <path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3.5 3.5M14.5 14.5 18 18M18 6l-3.5 3.5M9.5 14.5 6 18" />
+    </svg>
+  );
+}
+
+/** "Chat with Stewra about this" — a speech bubble. */
+export function ChatBubbleIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(props)}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+/** Expand/collapse affordance on the nudge card header. */
+export function ChevronDownIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(props)}>
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}

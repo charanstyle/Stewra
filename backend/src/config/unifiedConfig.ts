@@ -7,18 +7,31 @@ import {
   CALENDAR_LOOKAHEAD_MAX_DAYS,
 } from '@stewra/shared-types';
 
-/** The narrowest read-only scopes that let Stewra advise — the safe default when GOOGLE_SCOPES is
- * unset. Never write/send access. Overridable per deploy, but never widened silently in code. */
+/** The scopes Stewra now requests: read calendar + full Gmail read, plus modify (archive/label/
+ * mark-read) and send — needed so Stewra can act on the user's behalf AFTER they confirm each action.
+ * `gmail.readonly` is kept alongside `gmail.modify` for continuity with existing grants. Overridable
+ * per deploy via GOOGLE_SCOPES, but never widened silently in code. */
 const DEFAULT_GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/calendar.readonly',
   'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/gmail.send',
+].join(',');
+
+/** The scopes that unlock the proactive assistant (reading full mail history + acting on confirm). A
+ * connection whose GRANTED scopes are missing any of these needs a re-consent — the backend compares
+ * a connection's stored granted scopes against this canonical set to set `needsReconsent`. */
+const REQUIRED_GOOGLE_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/gmail.send',
 ].join(',');
 
 /** Plain-language consent shown to the user — NOT a raw scope list (build-plan principle 6). The
  * default deploy copy; overridable via GOOGLE_CONSENT_PROMPT for localization/wording changes. */
 const DEFAULT_GOOGLE_CONSENT_PROMPT =
-  'Allow Stewra to read your Google Calendar and Gmail? It only reads — to spot conflicts, bills, ' +
-  'and things worth your attention. It never sends, replies, deletes, or changes anything.';
+  'Allow Stewra to read your Google Calendar and Gmail, and — only when you tap Confirm — send ' +
+  'replies, archive, and label mail on your behalf? Stewra reads to summarise your inbox and spot ' +
+  'what needs a reply; it never sends or changes anything until you explicitly approve it.';
 
 // Load backend/.env once, here. This is the ONE place process.env is read directly;
 // everything else imports `config` from this module.
@@ -71,11 +84,34 @@ const EnvSchema = z.object({
   SENT_MAIL_LOOKBACK_DAYS: z.coerce.number().int().min(1).max(365).default(90),
   SENT_MAIL_MIN_SUPPORT: z.coerce.number().int().min(1).max(200).default(5),
   SENT_MAIL_MIN_SHARE: z.coerce.number().min(0.5).max(1).default(0.6),
-  // Comma-separated OAuth scopes. Defaults to the two read-only scopes; overridable per deploy but
-  // deliberately explicit so widening access is a visible, auditable config change — never in code.
+  // Comma-separated OAuth scopes. Defaults to read calendar + full Gmail read/modify/send;
+  // overridable per deploy but deliberately explicit so widening access is a visible, auditable
+  // config change — never in code.
   GOOGLE_SCOPES: z.string().min(1).default(DEFAULT_GOOGLE_SCOPES),
+  // The canonical set a connection must have GRANTED to run the proactive assistant. A connection
+  // missing any of these is flagged `needsReconsent`. Overridable but rarely changed.
+  GOOGLE_REQUIRED_SCOPES: z.string().min(1).default(REQUIRED_GOOGLE_SCOPES),
   // Plain-language consent copy shown before redirecting to Google. Overridable for wording/locale.
   GOOGLE_CONSENT_PROMPT: z.string().min(1).default(DEFAULT_GOOGLE_CONSENT_PROMPT),
+  // Email sync (full-body backfill + incremental) knobs. `RETENTION_DEFAULT_DAYS` is the deploy
+  // fallback window when a user has no per-user `email_retention_days` set (the durable choice lives
+  // in user_preferences). `BACKFILL_MAX_MESSAGES` caps a single backfill pass; `BACKFILL_PAGE_SIZE`
+  // is the Gmail list page size (max 500); `SYNC_MAX_RETRIES` bounds exponential backoff on transient
+  // Gmail errors. Sane defaults, overridable per deploy — never magic numbers in code.
+  EMAIL_RETENTION_DEFAULT_DAYS: z.coerce.number().int().min(1).max(36500).default(90),
+  EMAIL_BACKFILL_MAX_MESSAGES: z.coerce.number().int().min(1).max(100000).default(2000),
+  EMAIL_BACKFILL_PAGE_SIZE: z.coerce.number().int().min(1).max(500).default(100),
+  EMAIL_SYNC_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(5),
+  // Briefing/nudge shaping caps: how many "you owe a reply" threads become nudges in one run, and how
+  // many recent messages feed the model's briefing context. Bound so the prompt and card list stay
+  // sane. Sane defaults, overridable per deploy — never magic numbers in code.
+  BRIEFING_MAX_NUDGES: z.coerce.number().int().min(1).max(50).default(8),
+  BRIEFING_CONTEXT_MESSAGES: z.coerce.number().int().min(1).max(200).default(30),
+  // The background briefing scheduler. OFF by default so supertest/dev boxes aren't spun up
+  // unexpectedly; enable per deploy. `INTERVAL_MINUTES` is how often the tick syncs mail + rebuilds
+  // each connected user's briefing. Sane defaults, overridable — never magic numbers in code.
+  BRIEFING_SCHEDULE_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  BRIEFING_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(1440).default(180),
   // Outbound mail (Mailu mailbox), used for the email-verification code. Required: a new account
   // can't be verified without it, so we fail loud rather than silently skip verification.
   SMTP_HOST: z.string().min(1, 'SMTP_HOST is required'),
@@ -279,9 +315,30 @@ export const config = {
     scopes: env.GOOGLE_SCOPES.split(',')
       .map((s) => s.trim())
       .filter((s) => s.length > 0),
+    // The canonical scopes a connection must have granted to run the proactive assistant.
+    requiredScopes: env.GOOGLE_REQUIRED_SCOPES.split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
     consentPrompt: env.GOOGLE_CONSENT_PROMPT,
     maxEvents: env.GOOGLE_MAX_EVENTS,
     maxEmails: env.GOOGLE_MAX_EMAILS,
+  },
+  emailSync: {
+    // Deploy fallback retention window (days) when the user has set none; the durable per-user choice
+    // lives in user_preferences. Also the cap + paging + retry bounds for backfill/incremental sync.
+    retentionDefaultDays: env.EMAIL_RETENTION_DEFAULT_DAYS,
+    backfillMaxMessages: env.EMAIL_BACKFILL_MAX_MESSAGES,
+    backfillPageSize: env.EMAIL_BACKFILL_PAGE_SIZE,
+    maxRetries: env.EMAIL_SYNC_MAX_RETRIES,
+  },
+  briefing: {
+    // Max "owe a reply" threads turned into nudges per run, and how many recent messages feed the
+    // model's briefing context.
+    maxNudges: env.BRIEFING_MAX_NUDGES,
+    contextMessages: env.BRIEFING_CONTEXT_MESSAGES,
+    // Background scheduler: master switch + tick interval (minutes).
+    scheduleEnabled: env.BRIEFING_SCHEDULE_ENABLED,
+    intervalMinutes: env.BRIEFING_INTERVAL_MINUTES,
   },
   gmail: {
     // Default lookback window (days); a per-insight request may override within the shared bounds.

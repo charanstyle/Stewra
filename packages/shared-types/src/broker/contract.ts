@@ -64,6 +64,15 @@ export type ConversationTurn = ModelMessage;
 export interface IModelClient {
   complete(messages: ReadonlyArray<ModelMessage>): Promise<string>;
   completeStream?(messages: ReadonlyArray<ModelMessage>): AsyncIterable<string>;
+  /**
+   * OPTIONAL structured-output path: ask the model for a single JSON object matching a caller-owned
+   * shape. Implemented by providers that can constrain output (Claude CLI JSON, Anthropic tool-use,
+   * OpenAI json_object); callers must treat its absence as "not available" and degrade. Like
+   * `completeStream`, this grants NO new capability — it is still just "ask the model", the caller
+   * validates the returned value. The generic is the parsed result type; the impl returns raw JSON
+   * text that the trusted caller parses/validates (keeping this package Zod-free).
+   */
+  completeStructured?(messages: ReadonlyArray<ModelMessage>): Promise<string>;
 }
 
 /** An insight produced by the agent — advice only, never an action (read-first product). */

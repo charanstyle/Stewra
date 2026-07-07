@@ -17,7 +17,7 @@ export default function VerifyEmailPage(): React.JSX.Element {
   // If the user is already verified (e.g. landed here by mistake), send them on.
   useEffect(() => {
     if (user !== null && user.emailVerified) {
-      navigate('/activity', { replace: true });
+      navigate('/today', { replace: true });
     }
   }, [user, navigate]);
 
@@ -36,7 +36,7 @@ export default function VerifyEmailPage(): React.JSX.Element {
     try {
       const res = await api.verifyEmail({ code });
       applyUser(res.user);
-      navigate('/activity', { replace: true });
+      navigate('/today', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong');
     } finally {

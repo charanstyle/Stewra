@@ -16,6 +16,9 @@ export function AppNav(): React.JSX.Element {
       <div className={styles.left}>
         <span className={styles.brand}>Stewra</span>
         <nav className={styles.links}>
+          <NavLink to="/today" className={linkClass}>
+            Today
+          </NavLink>
           <NavLink to="/chats" className={linkClass}>
             Chats
           </NavLink>

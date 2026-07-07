@@ -8,6 +8,7 @@ import { config } from './config/unifiedConfig';
 import { assertDbConnection, closeDb } from './database/index';
 import { logger } from './utils/logger';
 import { initSockets } from './websocket';
+import { startScheduler } from './scheduler/scheduler';
 import type { AppServer } from './websocket/types';
 
 /**
@@ -33,8 +34,12 @@ async function main(): Promise<void> {
     logger.info(`Stewra backend listening on port ${config.port}`);
   });
 
+  // Start the proactive briefing scheduler after the listener is up (no-op unless enabled in config).
+  const stopScheduler = startScheduler();
+
   const shutdown = (signal: string): void => {
     logger.info(`Received ${signal}, shutting down gracefully`);
+    stopScheduler();
     // Close Socket.IO first (drops live connections) before the HTTP server stops accepting.
     io.close(() => {
       server.close(() => {

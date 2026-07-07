@@ -24,6 +24,10 @@ import * as m019 from './migrations/019_call_push_tokens';
 import * as m020 from './migrations/020_stewra_ai_conversation';
 import * as m021 from './migrations/021_media_assets';
 import * as m022 from './migrations/022_password_reset_codes';
+import * as m023 from './migrations/023_connection_scopes';
+import * as m024 from './migrations/024_email_store';
+import * as m025 from './migrations/025_email_retention_pref';
+import * as m026 from './migrations/026_briefings_suggestions';
 import { logger } from '../utils/logger';
 
 interface Migration {
@@ -55,6 +59,10 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '020_stewra_ai_conversation', up: m020.up },
   { name: '021_media_assets', up: m021.up },
   { name: '022_password_reset_codes', up: m022.up },
+  { name: '023_connection_scopes', up: m023.up },
+  { name: '024_email_store', up: m024.up },
+  { name: '025_email_retention_pref', up: m025.up },
+  { name: '026_briefings_suggestions', up: m026.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

@@ -22,5 +22,17 @@ export interface Connection {
   /** The connected account's email (Google address); empty for providers without one. */
   readonly accountEmail: string;
   readonly status: ConnectionStatus;
+  /**
+   * The OAuth scopes actually GRANTED at the last consent, as returned by Google. Older connections
+   * (made before Stewra requested write access) have a narrower set; the client never sees raw
+   * tokens — only which capabilities the grant covers.
+   */
+  readonly scopes: ReadonlyArray<string>;
+  /**
+   * True when this connection's granted scopes are missing one or more that the proactive assistant
+   * needs (full mail read + modify/send). The UI prompts the user to reconnect; until they do,
+   * read-only briefing still works but actions are disabled.
+   */
+  readonly needsReconsent: boolean;
   readonly createdAt: ISODateString;
 }

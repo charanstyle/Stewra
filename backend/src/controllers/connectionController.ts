@@ -20,6 +20,7 @@ import {
 } from '../services/googleOAuthService';
 import { memoryService } from '../services/memoryService';
 import { processMemoryService } from '../services/processMemoryService';
+import { emailRetentionService } from '../services/emailRetentionService';
 import { parse } from '../utils/validate';
 import { NotFoundError } from '../utils/errors';
 
@@ -60,7 +61,7 @@ class ConnectionController extends BaseController {
       const { code, state } = parse(callbackSchema, req.query);
       const userId = verifyCalendarState(state);
 
-      const refreshToken = await exchangeCodeForRefreshToken(code);
+      const { refreshToken, scopes } = await exchangeCodeForRefreshToken(code);
       const accountEmail = await fetchAccountEmail(refreshToken);
 
       // Reconnecting the same account replaces its token — capture the handle it's about to
@@ -71,19 +72,24 @@ class ConnectionController extends BaseController {
         accountEmail,
       );
       const vaultRef = await vault.put(refreshToken);
-      await connectionRepository.upsert(userId, 'google', accountEmail, vaultRef);
+      await connectionRepository.upsert(userId, 'google', accountEmail, vaultRef, scopes);
       if (priorVaultRef !== undefined && priorVaultRef !== vaultRef) {
         await vault.delete(priorVaultRef);
       }
 
+      // Reflect in the audit summary whether this grant covers acting on the user's behalf (send/
+      // modify) or is read-only — so the record is honest about the access the user just granted.
+      const canAct = config.google.requiredScopes.every((s) => scopes.includes(s));
       await auditWriter.write({
         userId,
         action: 'connect',
         resourceType: 'system',
         resourceId: null,
-        summary: `Connected Google account ${accountEmail} (Calendar + Gmail, read-only)`,
+        summary: canAct
+          ? `Connected Google account ${accountEmail} (Calendar + Gmail; can send/modify on confirm)`
+          : `Connected Google account ${accountEmail} (Calendar + Gmail, read-only)`,
         success: true,
-        metadata: { accountEmail },
+        metadata: { accountEmail, canAct },
       });
 
       res.redirect(302, `${config.web.appUrl}/activity?connected=google`);
@@ -155,6 +161,9 @@ class ConnectionController extends BaseController {
       // latter also purges any vaulted contact behind an `identifying` rule.
       await memoryService.forgetForDisconnectedProvider(userId, existing.provider);
       await processMemoryService.forgetForDisconnectedProvider(userId, existing.provider);
+      // Also purge the encrypted email store for this specific connection (its rows are only
+      // flipped to revoked, so the ON DELETE CASCADE never fires) and the vaulted contact addresses.
+      await emailRetentionService.forgetForDisconnectedConnection(userId, id);
 
       const body: ConnectionResponse = { connection };
       this.handleSuccess(res, body, 200);

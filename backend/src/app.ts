@@ -18,6 +18,7 @@ import conversationsRoutes from './routes/conversations';
 import messagesRoutes from './routes/messages';
 import callsRoutes from './routes/calls';
 import mediaRoutes from './routes/media';
+import homeRoutes from './routes/home';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 
 /**
@@ -52,6 +53,7 @@ export function createApp(): Express {
   app.use('/messages', messagesRoutes);
   app.use('/calls', callsRoutes);
   app.use('/media', mediaRoutes);
+  app.use('/home', homeRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

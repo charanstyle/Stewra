@@ -2,6 +2,7 @@ import type { ColumnType, Generated } from 'kysely';
 import type {
   AuditAction,
   AuditResourceType,
+  BriefingSection,
   CallEndReason,
   CallKind,
   CallPushPlatform,
@@ -20,6 +21,10 @@ import type {
   ReactionType,
   ResourceKind,
   SenderKind,
+  SuggestionKind,
+  SuggestionOption,
+  SuggestionSourceRef,
+  SuggestionStatus,
   UserRole,
 } from '@stewra/shared-types';
 
@@ -65,6 +70,8 @@ export interface ConnectionsTable {
   /** Handle into the vault. The actual token NEVER lives in this table. */
   vault_ref: string;
   status: string;
+  /** Comma-joined OAuth scopes actually granted at last consent (migration 023). DB default ''. */
+  scopes: ColumnType<string, string | undefined, string>;
   created_at: CreatedAt;
 }
 
@@ -74,6 +81,9 @@ export interface UserPreferencesTable {
   // Opt-in switch for the Sent-mail style observer. Has a DB default of false (migration 011), so it
   // is optional on insert (the default fills it when omitted) and settable on update.
   learn_from_sent_mail: ColumnType<boolean, boolean | undefined, boolean>;
+  // Durable email retention window (days); NULL means "not chosen" → resolved to the deploy default
+  // (migration 025). Optional on insert, settable on update.
+  email_retention_days: ColumnType<number | null, number | null | undefined, number | null>;
   created_at: CreatedAt;
   updated_at: ColumnType<Date, never, Date>;
 }
@@ -171,6 +181,109 @@ export interface ProcessMemoryTable {
   derived_from_provider: string | null;
   visible: Generated<boolean>;
   last_reinforced_at: ColumnType<Date | null, Date | null, Date | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, never, Date>;
+}
+
+/**
+ * A person the user corresponds with by email (migration 024). The concrete address is vaulted
+ * (`address_vault_ref`); `address_sha256` allows dedupe/lookup without holding the plaintext here.
+ * `awaiting_reply` is a derived flag: the user owes this contact a reply.
+ */
+export interface EmailContactsTable {
+  id: Generated<string>;
+  user_id: string;
+  connection_id: string;
+  address_vault_ref: string;
+  address_sha256: string;
+  display_name: ColumnType<string, string | undefined, string>;
+  first_seen_at: ColumnType<Date, Date | undefined, Date>;
+  last_seen_at: ColumnType<Date, Date | undefined, Date>;
+  message_count: ColumnType<number, number | undefined, number>;
+  last_inbound_at: ColumnType<Date | null, Date | null, Date | null>;
+  last_outbound_at: ColumnType<Date | null, Date | null, Date | null>;
+  awaiting_reply: ColumnType<boolean, boolean | undefined, boolean>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, never, Date>;
+}
+
+/** An email thread (migration 024). `awaiting_reply` = latest message is inbound and unanswered. */
+export interface EmailThreadsTable {
+  id: Generated<string>;
+  user_id: string;
+  connection_id: string;
+  gmail_thread_id: string;
+  subject: ColumnType<string, string | undefined, string>;
+  last_message_at: ColumnType<Date | null, Date | null, Date | null>;
+  /** jsonb array of email_contact ids; written as a JSON string, read back parsed. */
+  participant_contact_ids: ColumnType<ReadonlyArray<string>, string | undefined, string>;
+  has_unread: ColumnType<boolean, boolean | undefined, boolean>;
+  awaiting_reply: ColumnType<boolean, boolean | undefined, boolean>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, never, Date>;
+}
+
+/** One email message (migration 024). `body_ciphertext` is the AES-256-GCM envelope — never plaintext. */
+export interface EmailMessagesTable {
+  id: Generated<string>;
+  user_id: string;
+  connection_id: string;
+  thread_id: string;
+  gmail_message_id: string;
+  /** Stored as varchar so a large uint64 historyId never loses precision as a JS number. */
+  gmail_history_id: string | null;
+  from_contact_id: string | null;
+  direction: 'inbound' | 'outbound';
+  sent_at: ColumnType<Date | null, Date | null, Date | null>;
+  subject: ColumnType<string, string | undefined, string>;
+  snippet: ColumnType<string, string | undefined, string>;
+  /** fieldCrypto envelope of the plaintext body. '' when there was no body. */
+  body_ciphertext: ColumnType<string, string | undefined, string>;
+  /** jsonb array of Gmail label ids; written as a JSON string, read back parsed. */
+  label_ids: ColumnType<ReadonlyArray<string>, string | undefined, string>;
+  created_at: CreatedAt;
+}
+
+/** One sync-state row per connection (migration 024), driving resumable backfill + incremental sync. */
+export interface EmailSyncStateTable {
+  connection_id: string;
+  user_id: string;
+  last_history_id: ColumnType<string | null, string | null | undefined, string | null>;
+  backfill_cursor: ColumnType<string | null, string | null | undefined, string | null>;
+  backfill_complete: ColumnType<boolean, boolean | undefined, boolean>;
+  last_synced_at: ColumnType<Date | null, Date | null, Date | null>;
+  retention_days: number;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, never, Date>;
+}
+
+/** One current briefing per user (migration 026); upserted each run. */
+export interface BriefingsTable {
+  id: Generated<string>;
+  user_id: string;
+  summary: ColumnType<string, string | undefined, string>;
+  /** jsonb array of BriefingSection; written as a JSON string, read back parsed. */
+  sections: ColumnType<ReadonlyArray<BriefingSection>, string | undefined, string>;
+  generated_at: ColumnType<Date, Date | undefined, Date>;
+  created_at: CreatedAt;
+}
+
+/**
+ * A proactive nudge (migration 026). `dedup_key` gives it a stable identity so a re-computation
+ * updates the open one in place and never clobbers a user-acted one. `source_refs`/`options` are
+ * jsonb, written as JSON strings and read back parsed.
+ */
+export interface SuggestionsTable {
+  id: Generated<string>;
+  user_id: string;
+  dedup_key: string;
+  kind: SuggestionKind;
+  title: string;
+  rationale: ColumnType<string, string | undefined, string>;
+  source_refs: ColumnType<ReadonlyArray<SuggestionSourceRef>, string | undefined, string>;
+  options: ColumnType<ReadonlyArray<SuggestionOption>, string | undefined, string>;
+  status: ColumnType<SuggestionStatus, SuggestionStatus | undefined, SuggestionStatus>;
+  snoozed_until: ColumnType<Date | null, Date | null, Date | null>;
   created_at: CreatedAt;
   updated_at: ColumnType<Date, never, Date>;
 }
@@ -376,6 +489,12 @@ export interface Database {
   insight_feedback: InsightFeedbackTable;
   agent_memory: AgentMemoryTable;
   process_memory: ProcessMemoryTable;
+  email_contacts: EmailContactsTable;
+  email_threads: EmailThreadsTable;
+  email_messages: EmailMessagesTable;
+  email_sync_state: EmailSyncStateTable;
+  briefings: BriefingsTable;
+  suggestions: SuggestionsTable;
   contacts: ContactsTable;
   contact_invites: ContactInvitesTable;
   conversations: ConversationsTable;

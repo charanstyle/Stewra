@@ -6,6 +6,7 @@ import { CallScreen } from './components/call/CallScreen';
 import { ContactNotifier } from './components/ContactNotifier/ContactNotifier';
 import LoginPage from './app/login/LoginPage';
 import VerifyEmailPage from './app/verify/VerifyEmailPage';
+import TodayPage from './app/today/TodayPage';
 import ActivityPage from './app/activity/ActivityPage';
 import MemoryPage from './app/memory/MemoryPage';
 import ChatsPage from './app/chats/ChatsPage';
@@ -24,6 +25,14 @@ export default function App(): React.JSX.Element {
             element={
               <ProtectedRoute>
                 <VerifyEmailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/today"
+            element={
+              <ProtectedRoute>
+                <TodayPage />
               </ProtectedRoute>
             }
           />
@@ -75,7 +84,7 @@ export default function App(): React.JSX.Element {
               </ProtectedRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/activity" replace />} />
+          <Route path="*" element={<Navigate to="/today" replace />} />
         </Routes>
         {/* Call surfaces + contact banners render above the router so they persist across navigation. */}
         <ContactNotifier />

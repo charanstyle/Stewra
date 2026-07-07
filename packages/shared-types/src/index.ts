@@ -4,6 +4,16 @@ export type { UUID, ISODateString, ApiSuccess, ApiError, ApiResponse, Paginated 
 // Models
 export type { User, UserRole } from './models/user';
 export type { Connection, ConnectionProvider, ConnectionStatus } from './models/connection';
+export type {
+  Suggestion,
+  SuggestionKind,
+  SuggestionStatus,
+  SuggestionOption,
+  SuggestionSourceRef,
+  ProposedAction,
+  ProposedActionType,
+} from './models/suggestion';
+export type { Briefing, BriefingSection } from './models/briefing';
 export type { UserPreferences } from './models/preferences';
 export type { Rating, InsightFeedback } from './models/feedback';
 export { RATINGS, RATING_REWARD, POSITIVE_RATINGS } from './models/feedback';
@@ -80,6 +90,18 @@ export type {
   InsightEngagementResponse,
 } from './api/insights';
 export type { SubmitFeedbackRequest, SubmitFeedbackResponse } from './api/feedback';
+export type { GetBriefingResponse } from './api/briefing';
+export type {
+  ListSuggestionsResponse,
+  SnoozeSuggestionRequest,
+  SnoozeSuggestionResponse,
+  DismissSuggestionResponse,
+  MarkSuggestionDoneResponse,
+  RequestDraftRequest,
+  RequestDraftResponse,
+  ChatAboutSuggestionRequest,
+  ChatAboutSuggestionResponse,
+} from './api/suggestions';
 export type {
   ListMemoriesRequest,
   ListMemoriesResponse,

@@ -8,6 +8,9 @@ import { chooseModelProvider } from './modelProvider';
 /** A short advisory insight never needs many tokens; bound the API call. */
 const MAX_OUTPUT_TOKENS = 1024;
 
+/** A structured briefing (summary + sections + several nudges) needs a larger budget than an insight. */
+const MAX_STRUCTURED_TOKENS = 4096;
+
 /** Split a message list into the Anthropic-style (system text, user/assistant turns). */
 function splitMessages(messages: ReadonlyArray<ModelMessage>): {
   system: string;
@@ -78,6 +81,12 @@ export class ClaudeCliModelClient implements IModelClient {
 
     return stdout.trim();
   }
+
+  /** Structured output via the CLI: the JSON contract is carried in the system prompt (the caller
+   * validates the returned text), so this is the same text call as `complete`. */
+  async completeStructured(messages: ReadonlyArray<ModelMessage>): Promise<string> {
+    return this.complete(messages);
+  }
 }
 
 /**
@@ -99,6 +108,22 @@ export class AnthropicModelClient implements IModelClient {
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: MAX_OUTPUT_TOKENS,
+      ...(system.length > 0 ? { system } : {}),
+      messages: turns.map((t) => ({ role: t.role, content: t.content })),
+    });
+    return response.content
+      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+      .map((block) => block.text)
+      .join('')
+      .trim();
+  }
+
+  /** Structured output: a larger token budget + a JSON-only instruction; the caller validates. */
+  async completeStructured(messages: ReadonlyArray<ModelMessage>): Promise<string> {
+    const { system, turns } = splitMessages(messages);
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: MAX_STRUCTURED_TOKENS,
       ...(system.length > 0 ? { system } : {}),
       messages: turns.map((t) => ({ role: t.role, content: t.content })),
     });
@@ -132,6 +157,17 @@ export class OpenAICompatibleModelClient implements IModelClient {
     });
     return (response.choices[0]?.message?.content ?? '').trim();
   }
+
+  /** Structured output via the OpenAI-compatible `json_object` response format + a larger budget. */
+  async completeStructured(messages: ReadonlyArray<ModelMessage>): Promise<string> {
+    const response = await this.client.chat.completions.create({
+      model: this.model,
+      max_tokens: MAX_STRUCTURED_TOKENS,
+      response_format: { type: 'json_object' },
+      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    });
+    return (response.choices[0]?.message?.content ?? '').trim();
+  }
 }
 
 /**
@@ -154,6 +190,12 @@ export class LocalDeterministicModelClient implements IModelClient {
       return 'Nothing stands out right now — you look clear.';
     }
     return `Worth noting: ${factLines.join('; ')}.`;
+  }
+
+  /** Offline structured output: a valid, empty briefing envelope so the loop runs without a model. */
+  async completeStructured(messages: ReadonlyArray<ModelMessage>): Promise<string> {
+    const text = await this.complete(messages);
+    return JSON.stringify({ summary: text, sections: [], nudges: [] });
   }
 }
 

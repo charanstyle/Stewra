@@ -37,6 +37,16 @@ export class PreferencesService {
   }
 
   /**
+   * The effective email retention window (days) for a user — how far back the sync engine keeps mail
+   * and past which the retention sweep expires it. Resolves the durable per-user choice, falling back
+   * to the deploy default when the user hasn't set one. The single source of the effective window.
+   */
+  async emailRetentionDays(userId: string): Promise<number> {
+    const stored = await userPreferencesRepository.findForUser(userId);
+    return stored?.emailRetentionDays ?? config.emailSync.retentionDefaultDays;
+  }
+
+  /**
    * Apply a partial update. Validates each provided field against the shared bounds, persists it,
    * and returns the full resolved preferences. Omitted fields are left unchanged.
    */
