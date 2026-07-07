@@ -100,7 +100,8 @@ class BriefingService {
       const latest = await emailMessageRepository.latestInThread(thread.id);
       const sender = latest ? await this.senderAddressFor(latest.fromContactId) : null;
       const stillAwaiting =
-        latest !== undefined && isReplyableInbound(latest.direction, latest.labelIds, sender);
+        latest !== undefined &&
+        isReplyableInbound(latest.direction, latest.labelIds, sender, latest.subject);
       if (stillAwaiting) {
         genuine.push(thread);
       } else {

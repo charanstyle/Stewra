@@ -35,6 +35,20 @@ export function isNoReplySender(address: string): boolean {
 }
 
 /**
+ * Subjects that are unmistakably transactional — a one-time code, verification, or password reset. These
+ * arrive from ordinary-looking addresses (so the no-reply and category checks miss them) but are never a
+ * conversation the user replies to. Kept deliberately narrow/high-precision so it can't swallow a real
+ * thread that merely mentions a "code".
+ */
+const TRANSACTIONAL_SUBJECT =
+  /\b(?:verification code|verify (?:your )?(?:email|account|code)|one[-\s]?time (?:pass)?code|security code|otp|confirm your (?:email|account)|password reset|reset your password)\b/i;
+
+/** True when the subject marks the message as a transactional code/verification, not a conversation. */
+export function isTransactionalSubject(subject: string): boolean {
+  return TRANSACTIONAL_SUBJECT.test(subject);
+}
+
+/**
  * The single question the nudge engine actually asks: is this a message a PERSON is waiting on the user
  * to reply to? It must be inbound, not bulk/automated by category, and not from a no-reply mailbox. A
  * null sender (address unknown) is treated as replyable — we don't drop a genuine thread for lack of data.
@@ -43,6 +57,7 @@ export function isReplyableInbound(
   direction: 'inbound' | 'outbound',
   labelIds: ReadonlyArray<string>,
   senderAddress: string | null,
+  subject: string,
 ): boolean {
   if (direction !== 'inbound') {
     return false;
@@ -51,6 +66,9 @@ export function isReplyableInbound(
     return false;
   }
   if (senderAddress !== null && isNoReplySender(senderAddress)) {
+    return false;
+  }
+  if (isTransactionalSubject(subject)) {
     return false;
   }
   return true;

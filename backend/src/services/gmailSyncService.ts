@@ -268,7 +268,7 @@ class GmailSyncService {
       lastMessageAt: sentAt,
       participantContactIds: contactId ? [contactId] : [],
       hasUnread: message.labelIds.includes('UNREAD'),
-      awaitingReply: isReplyableInbound(direction, message.labelIds, senderAddress),
+      awaitingReply: isReplyableInbound(direction, message.labelIds, senderAddress, message.subject),
     });
 
     await emailMessageRepository.insert({
@@ -290,7 +290,12 @@ class GmailSyncService {
     const latest = await emailMessageRepository.latestInThread(thread.id);
     if (latest) {
       const latestSender = await this.senderAddressFor(latest.fromContactId);
-      const awaiting = isReplyableInbound(latest.direction, latest.labelIds, latestSender);
+      const awaiting = isReplyableInbound(
+        latest.direction,
+        latest.labelIds,
+        latestSender,
+        latest.subject,
+      );
       await emailThreadRepository.upsert({
         userId: connection.userId,
         connectionId: connection.id,
