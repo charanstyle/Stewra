@@ -69,8 +69,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   );
 
   const logout = useCallback(async (): Promise<void> => {
-    disconnectSocket();
-    await clearTokens();
+    // Best-effort teardown: neither the socket disconnect nor the token wipe may
+    // throw, or the sign-out would abort and (on a release build) silently strand
+    // the user logged in. Whatever happens, we still null the user so the
+    // navigator swaps to Login.
+    try {
+      disconnectSocket();
+    } catch {
+      // socket already gone — ignore
+    }
+    try {
+      await clearTokens();
+    } catch {
+      // secure-store wipe failed; the user is still signed out locally and the
+      // next app launch will re-validate and clear stale tokens
+    }
     setUser(null);
   }, []);
 

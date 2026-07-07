@@ -6,6 +6,7 @@ import ChatListScreen from '../screens/chat/ChatListScreen';
 import ContactsScreen from '../screens/chat/ContactsScreen';
 import StewraVoiceScreen from '../screens/chat/StewraVoiceScreen';
 import { ChatIcon, ContactsIcon, MicIcon } from '../components/icons/Icons';
+import LogoutButton from '../components/LogoutButton';
 import { theme } from '../theme/colors';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -24,6 +25,7 @@ export default function MainTabs(): React.JSX.Element {
   const screenOptions: BottomTabNavigationOptions = {
     headerStyle: { backgroundColor: theme.colors.surface },
     headerTintColor: theme.colors.textPrimary,
+    headerRight: () => <LogoutButton />,
     tabBarStyle: {
       backgroundColor: theme.colors.surface,
       borderTopColor: theme.colors.border,
