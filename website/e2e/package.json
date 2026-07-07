@@ -9,6 +9,7 @@
     "video": "node calls.video.mjs",
     "calls": "node calls.audio.mjs && node calls.video.mjs",
     "full": "node full.mjs",
+    "today": "node today.mjs",
     "all": "node run-all.mjs"
   },
   "devDependencies": {

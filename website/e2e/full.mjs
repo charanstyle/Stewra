@@ -184,11 +184,11 @@ async function main() {
     pass('nav', 'Activity "What I\'ve learned" → Memory → Activity', 'round-trip works');
   });
 
-  // 1f. Unknown route → /activity
-  await step('nav', 'unknown route redirects to /activity', async () => {
+  // 1f. Unknown route → /today (the proactive home is the post-login landing + catch-all target)
+  await step('nav', 'unknown route redirects to /today', async () => {
     await a.page.goto(`${WEB}/zzz-${nonce()}`, { waitUntil: 'domcontentloaded' });
     await settle(a.page, 1500);
-    (path(a.page) === '/activity' ? pass : fail)('nav', 'unknown route redirects to /activity', `landed ${path(a.page)}`);
+    (path(a.page) === '/today' ? pass : fail)('nav', 'unknown route redirects to /today', `landed ${path(a.page)}`);
   });
 
   // 1g. identity: AppNav shows each display name
