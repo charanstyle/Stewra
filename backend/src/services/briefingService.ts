@@ -17,11 +17,12 @@ import { extractCalendarFacts } from './calendarFacts';
 import {
   emailThreadRepository,
   emailMessageRepository,
+  emailContactRepository,
   type EmailThreadRow,
 } from '../repositories/emailStore';
 import { briefingRepository } from '../repositories/briefingRepository';
 import { suggestionRepository } from '../repositories/suggestionRepository';
-import { isBulkCategory } from './emailClassification';
+import { isReplyableInbound } from './emailClassification';
 import { processMemoryService } from './processMemoryService';
 import { logger } from '../utils/logger';
 
@@ -65,6 +66,10 @@ class BriefingService {
 
     const briefing = await briefingRepository.upsertForUser(userId, summary, sections);
     await this.upsertNudges(userId, awaitingThreads);
+    // Retract any open needs_reply nudge whose thread is no longer awaiting (replied to, or now
+    // reclassified as bulk/no-reply) so stale nudges don't linger after the source thread moves on.
+    const keepDedupKeys = awaitingThreads.map((t) => `needs_reply:${t.id}`);
+    await suggestionRepository.retractStaleNeedsReply(userId, keepDedupKeys);
 
     await auditWriter.write({
       userId,
@@ -93,8 +98,9 @@ class BriefingService {
     const genuine: EmailThreadRow[] = [];
     for (const thread of candidates) {
       const latest = await emailMessageRepository.latestInThread(thread.id);
+      const sender = latest ? await this.senderAddressFor(latest.fromContactId) : null;
       const stillAwaiting =
-        latest !== undefined && latest.direction === 'inbound' && !isBulkCategory(latest.labelIds);
+        latest !== undefined && isReplyableInbound(latest.direction, latest.labelIds, sender);
       if (stillAwaiting) {
         genuine.push(thread);
       } else {
@@ -103,6 +109,19 @@ class BriefingService {
       }
     }
     return genuine.slice(0, cap);
+  }
+
+  /** Resolve an inbound message's sender address from its vaulted contact handle; null when unknown. */
+  private async senderAddressFor(contactId: string | null): Promise<string | null> {
+    if (contactId === null) {
+      return null;
+    }
+    try {
+      const ref = await emailContactRepository.addressVaultRefById(contactId);
+      return ref === undefined ? null : await vault.get(ref);
+    } catch {
+      return null;
+    }
   }
 
   /** Calendar facts for the user's first active Google account; empty on any failure (calendar is

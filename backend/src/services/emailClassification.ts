@@ -19,3 +19,39 @@ const BULK_CATEGORY_LABELS: ReadonlySet<string> = new Set([
 export function isBulkCategory(labelIds: ReadonlyArray<string>): boolean {
   return labelIds.some((label) => BULK_CATEGORY_LABELS.has(label));
 }
+
+/**
+ * Senders you cannot actually reply to — transactional/automated addresses (password resets,
+ * verification codes, receipts, delivery daemons). Gmail often files these under CATEGORY_PERSONAL, so
+ * the category check alone misses them; the local-part is the reliable tell. Matched on the address's
+ * local-part so `no-reply@x.com`, `noreply@x.com`, `donotreply@x.com`, `mailer-daemon@…` all count.
+ */
+const NO_REPLY_LOCALPART =
+  /^\s*(?:"?[^"<]*"?\s*<\s*)?(?:no[-_.]?reply|do[-_.]?not[-_.]?reply|donotreply|mailer-daemon|postmaster|bounce[+-]?\w*)@/i;
+
+/** True when the sender address is a no-reply / automated mailbox that can't be replied to. */
+export function isNoReplySender(address: string): boolean {
+  return NO_REPLY_LOCALPART.test(address);
+}
+
+/**
+ * The single question the nudge engine actually asks: is this a message a PERSON is waiting on the user
+ * to reply to? It must be inbound, not bulk/automated by category, and not from a no-reply mailbox. A
+ * null sender (address unknown) is treated as replyable — we don't drop a genuine thread for lack of data.
+ */
+export function isReplyableInbound(
+  direction: 'inbound' | 'outbound',
+  labelIds: ReadonlyArray<string>,
+  senderAddress: string | null,
+): boolean {
+  if (direction !== 'inbound') {
+    return false;
+  }
+  if (isBulkCategory(labelIds)) {
+    return false;
+  }
+  if (senderAddress !== null && isNoReplySender(senderAddress)) {
+    return false;
+  }
+  return true;
+}

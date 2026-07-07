@@ -64,6 +64,30 @@ export class SuggestionRepository {
       .execute();
   }
 
+  /**
+   * Close open `needs_reply` nudges whose thread is no longer awaiting a reply — the retraction half of
+   * recomputation. `keepDedupKeys` are the nudges that SHOULD stay open (one per genuine awaiting thread,
+   * "needs_reply:<threadId>"); every other open needs_reply row is marked done so a thread that got
+   * replied to, or was reclassified as bulk/no-reply, stops surfacing. Only touches 'open' rows, so a
+   * user's snooze/dismiss is never overridden. Returns the number retracted.
+   */
+  async retractStaleNeedsReply(
+    userId: string,
+    keepDedupKeys: ReadonlyArray<string>,
+  ): Promise<number> {
+    let query = db
+      .updateTable('suggestions')
+      .set({ status: 'done', updated_at: new Date() })
+      .where('user_id', '=', userId)
+      .where('kind', '=', 'needs_reply')
+      .where('status', '=', 'open');
+    if (keepDedupKeys.length > 0) {
+      query = query.where('dedup_key', 'not in', keepDedupKeys);
+    }
+    const result = await query.executeTakeFirst();
+    return Number(result.numUpdatedRows ?? 0n);
+  }
+
   /** Open nudges plus any snoozed ones now due, newest first. */
   async listOpen(userId: string): Promise<ReadonlyArray<Suggestion>> {
     const now = new Date();

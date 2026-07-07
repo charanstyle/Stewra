@@ -36,6 +36,8 @@ export interface EmailMessagePlain {
   /** Decrypted plaintext body ('' when none). Control-plane only — never surfaced to the client/agent. */
   readonly body: string;
   readonly labelIds: ReadonlyArray<string>;
+  /** The inbound sender's contact id (null for outbound) — lets the caller resolve the sender address. */
+  readonly fromContactId: string | null;
 }
 
 class EmailContactRepository {
@@ -103,6 +105,17 @@ class EmailContactRepository {
       .set({ awaiting_reply: awaiting, updated_at: new Date() })
       .where('id', '=', id)
       .execute();
+  }
+
+  /** The vault handle for a contact's email address — the caller resolves it to plaintext via the
+   * vault to classify the sender (e.g. no-reply detection). Control-plane only. */
+  async addressVaultRefById(id: string): Promise<string | undefined> {
+    const row = await db
+      .selectFrom('email_contacts')
+      .select('address_vault_ref')
+      .where('id', '=', id)
+      .executeTakeFirst();
+    return row?.address_vault_ref;
   }
 
   /** Contacts the user currently owes a reply — the "who's waiting on you" source for the briefing. */
@@ -427,6 +440,7 @@ function toMessagePlain(row: {
   snippet: string;
   body_ciphertext: string;
   label_ids: ReadonlyArray<string>;
+  from_contact_id: string | null;
 }): EmailMessagePlain {
   return {
     id: row.id,
@@ -438,6 +452,7 @@ function toMessagePlain(row: {
     snippet: row.snippet,
     body: row.body_ciphertext.length > 0 ? decryptField(row.body_ciphertext) : '',
     labelIds: row.label_ids,
+    fromContactId: row.from_contact_id,
   };
 }
 

@@ -21,7 +21,7 @@ import {
   type GmailClient,
   type FetchedMessage,
 } from './googleOAuthService';
-import { isBulkCategory } from './emailClassification';
+import { isReplyableInbound } from './emailClassification';
 import { logger } from '../utils/logger';
 
 /**
@@ -208,6 +208,23 @@ class GmailSyncService {
     return stored;
   }
 
+  /** Resolve an inbound message's sender address from its contact handle (vaulted). Null when there's
+   * no contact (outbound) or the secret can't be read — callers treat null as "unknown, keep it". */
+  private async senderAddressFor(contactId: string | null): Promise<string | null> {
+    if (contactId === null) {
+      return null;
+    }
+    try {
+      const ref = await emailContactRepository.addressVaultRefById(contactId);
+      if (ref === undefined) {
+        return null;
+      }
+      return await vault.get(ref);
+    } catch {
+      return null;
+    }
+  }
+
   /** Persist one fetched message: resolve thread + (inbound) contact, store the body encrypted, then
    * (re)derive the thread's awaiting-reply state from its actual latest message. */
   private async persistMessage(connection: ConnectionRow, message: FetchedMessage): Promise<void> {
@@ -241,7 +258,8 @@ class GmailSyncService {
     }
 
     // "Awaiting reply" means a PERSON is waiting on the user — bulk/automated mail (promotions,
-    // newsletters, receipts) is inbound but never something to reply to, so it must not flag the thread.
+    // newsletters, receipts) and no-reply senders are inbound but never something to reply to.
+    const senderAddress = message.fromAddress.length > 0 ? message.fromAddress : null;
     const thread = await emailThreadRepository.upsert({
       userId: connection.userId,
       connectionId: connection.id,
@@ -250,7 +268,7 @@ class GmailSyncService {
       lastMessageAt: sentAt,
       participantContactIds: contactId ? [contactId] : [],
       hasUnread: message.labelIds.includes('UNREAD'),
-      awaitingReply: direction === 'inbound' && !isBulkCategory(message.labelIds),
+      awaitingReply: isReplyableInbound(direction, message.labelIds, senderAddress),
     });
 
     await emailMessageRepository.insert({
@@ -271,7 +289,8 @@ class GmailSyncService {
     // Re-derive thread state from the true latest message (backfill can insert out of order).
     const latest = await emailMessageRepository.latestInThread(thread.id);
     if (latest) {
-      const awaiting = latest.direction === 'inbound' && !isBulkCategory(latest.labelIds);
+      const latestSender = await this.senderAddressFor(latest.fromContactId);
+      const awaiting = isReplyableInbound(latest.direction, latest.labelIds, latestSender);
       await emailThreadRepository.upsert({
         userId: connection.userId,
         connectionId: connection.id,
