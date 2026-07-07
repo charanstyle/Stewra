@@ -1,0 +1,18 @@
+# Full end-to-end journey on a real device/emulator: login → send a message →
+# place a voice call (caller-side smoke) → logout.
+#
+# Run with credentials supplied via env (see ../README.md):
+#   maestro test --env EMAIL=... --env PASSWORD=... --env CONTACT_NAME=... flows/full.yaml
+#
+# Each step is its own reusable flow so you can run them individually too.
+appId: com.stewra.app
+env:
+  EMAIL: ""
+  PASSWORD: ""
+  CONTACT_NAME: ""
+  MESSAGE_TEXT: "E2E hello from Maestro"
+---
+- runFlow: login.yaml
+- runFlow: send-message.yaml
+- runFlow: call-smoke.yaml
+- runFlow: logout.yaml

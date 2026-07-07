@@ -1,0 +1,13 @@
+# Sign out via the header Log out button and confirm we return to the sign-in screen.
+#
+# This guards the logout hardening in AuthContext/LogoutButton: signing out must
+# always land back on "Sign in", never leave the app on a half-torn-down screen.
+appId: com.stewra.app
+---
+- assertVisible: "Chats"
+- tapOn: "Chats"
+- tapOn:
+    accessibilityLabel: "Log out"
+- assertVisible:
+    text: "Sign in"
+    timeout: 15000

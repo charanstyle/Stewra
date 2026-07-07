@@ -1,0 +1,30 @@
+# Single-device smoke test for placing a voice call.
+#
+# This verifies the caller side only: the call screen launches and can be ended.
+# A true two-party connect/answer test needs a second live session and is covered
+# by the website suite (website/e2e/calls.audio.mjs), which drives two users at
+# once. Maestro drives one device, so we assert the outgoing-call UI, not connect.
+appId: com.stewra.app
+env:
+  CONTACT_NAME: ""
+---
+- assertVisible: "Chats"
+- tapOn: "Chats"
+- runFlow:
+    when:
+      true: ${CONTACT_NAME != ""}
+    commands:
+      - tapOn: ${CONTACT_NAME}
+    else:
+      - tapOn:
+          index: 0
+          text: ".*"
+- tapOn:
+    accessibilityLabel: "Start voice call"
+# The call screen should come up with a Hang up / End control; end it right away
+# so the flow leaves no dangling ringing call.
+- assertVisible:
+    accessibilityLabel: "End call"
+    timeout: 15000
+- tapOn:
+    accessibilityLabel: "End call"

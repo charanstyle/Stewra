@@ -1,0 +1,10 @@
+# Never commit real tokens — this holds live production credentials for local runs.
+e2e.config.json
+
+# Test tooling + artifacts
+node_modules/
+artifacts/
+report/
+*.png
+full-report.md
+full-report.json

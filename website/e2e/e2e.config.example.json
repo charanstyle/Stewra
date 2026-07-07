@@ -1,0 +1,18 @@
+{
+  "_comment": "Copy this file to e2e.config.json (gitignored) and fill in real values, OR provide everything via environment variables (see README.md). Tokens belong to two email-verified test users who are contacts of each other. Access tokens are short-lived; the suite refreshes them up front, so keep the refreshTokens fresh.",
+  "webUrl": "https://www.stewra.com",
+  "apiUrl": "",
+  "audioFile": "",
+  "users": {
+    "a": {
+      "email": "user-a@example.com",
+      "accessToken": "REPLACE_WITH_USER_A_ACCESS_TOKEN",
+      "refreshToken": "REPLACE_WITH_USER_A_REFRESH_TOKEN"
+    },
+    "b": {
+      "email": "user-b@example.com",
+      "accessToken": "REPLACE_WITH_USER_B_ACCESS_TOKEN",
+      "refreshToken": "REPLACE_WITH_USER_B_REFRESH_TOKEN"
+    }
+  }
+}

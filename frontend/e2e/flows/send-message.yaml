@@ -1,0 +1,33 @@
+# Open a conversation and send a text message.
+#
+# Assumes the app is already signed in (run login.yaml first, or use full.yaml).
+# CONTACT_NAME picks which thread to open; MESSAGE_TEXT is what to send. Both are
+# env-driven so the flow never bakes in a person or payload.
+appId: com.stewra.app
+env:
+  CONTACT_NAME: ""
+  MESSAGE_TEXT: "E2E hello from Maestro"
+---
+- assertVisible: "Chats"
+- tapOn: "Chats"
+# Open the target thread by contact name (falls back to the first row if unset).
+- runFlow:
+    when:
+      true: ${CONTACT_NAME != ""}
+    commands:
+      - tapOn: ${CONTACT_NAME}
+- runFlow:
+    when:
+      true: ${CONTACT_NAME == ""}
+    commands:
+      - tapOn:
+          index: 0
+          text: ".*"
+- assertVisible: "Message"
+- tapOn: "Message"
+- inputText: ${MESSAGE_TEXT}
+- tapOn: "Send"
+# The sent bubble echoing our text confirms the message posted to the thread.
+- assertVisible:
+    text: ${MESSAGE_TEXT}
+    timeout: 15000

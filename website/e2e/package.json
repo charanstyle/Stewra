@@ -1,0 +1,17 @@
+{
+  "name": "stewra-website-e2e",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end tests for the Stewra website, driving two real user sessions with Playwright.",
+  "scripts": {
+    "postinstall": "playwright install chromium",
+    "audio": "node calls.audio.mjs",
+    "video": "node calls.video.mjs",
+    "calls": "node calls.audio.mjs && node calls.video.mjs",
+    "full": "node full.mjs",
+    "all": "node run-all.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.55.0"
+  }
+}

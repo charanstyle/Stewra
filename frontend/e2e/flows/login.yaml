@@ -1,0 +1,22 @@
+# Sign in to the Stewra app with credentials supplied via env.
+#
+# Never hardcodes credentials: EMAIL / PASSWORD default to empty and MUST be
+# overridden at run time (see ../README.md). A blank credential fails the login
+# assertion loudly rather than silently signing in as the wrong user.
+appId: com.stewra.app
+env:
+  EMAIL: ""
+  PASSWORD: ""
+---
+- launchApp:
+    clearState: true          # start from a signed-out state every run
+- assertVisible: "Sign in"
+- tapOn: "Email"
+- inputText: ${EMAIL}
+- tapOn: "Password"
+- inputText: ${PASSWORD}
+- tapOn: "Sign in"
+# Landing on the Chats tab proves the token was issued and the user is verified.
+- assertVisible:
+    text: "Chats"
+    timeout: 20000

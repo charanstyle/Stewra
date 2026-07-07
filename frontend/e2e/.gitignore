@@ -1,0 +1,7 @@
+# Never commit real credentials.
+e2e.env
+
+# Maestro artifacts
+.maestro/
+*.mp4
+maestro-*.log
