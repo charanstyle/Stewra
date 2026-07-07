@@ -14,9 +14,14 @@ import { auditWriter } from '../control-plane/audit/auditWriter';
 import { connectionRepository } from '../repositories/connectionRepository';
 import { fetchUpcomingEvents } from './googleOAuthService';
 import { extractCalendarFacts } from './calendarFacts';
-import { emailThreadRepository, emailMessageRepository } from '../repositories/emailStore';
+import {
+  emailThreadRepository,
+  emailMessageRepository,
+  type EmailThreadRow,
+} from '../repositories/emailStore';
 import { briefingRepository } from '../repositories/briefingRepository';
 import { suggestionRepository } from '../repositories/suggestionRepository';
+import { isBulkCategory } from './emailClassification';
 import { processMemoryService } from './processMemoryService';
 import { logger } from '../utils/logger';
 
@@ -43,10 +48,7 @@ const BriefingModelSchema = z.object({
 class BriefingService {
   /** Compute and persist the user's current briefing + open nudges. */
   async computeAndStore(userId: string): Promise<Briefing> {
-    const awaitingThreads = await emailThreadRepository.listAwaitingReply(
-      userId,
-      config.briefing.maxNudges,
-    );
+    const awaitingThreads = await this.genuineAwaitingThreads(userId);
     const recent = await emailMessageRepository.recent(userId, config.briefing.contextMessages);
     const unreadCount = recent.filter((m) => m.labelIds.includes('UNREAD')).length;
     const calendarFacts = await this.calendarFactsFor(userId);
@@ -75,6 +77,32 @@ class BriefingService {
     });
 
     return briefing;
+  }
+
+  /**
+   * The threads genuinely awaiting the user's reply — a person is waiting, not a newsletter or promo.
+   * Bulk mail can still carry awaiting_reply=true (rows synced before this rule, or a category Gmail
+   * applied after we stored the message), so re-check each candidate's latest message against the bulk
+   * categories and SELF-HEAL the flag when it was wrong. That keeps "Reply to 'Get 15% off'" out of the
+   * nudges AND out of the "waiting on you" count. Over-fetch so genuine threads aren't crowded out of the
+   * window by bulk ones, then cap at maxNudges.
+   */
+  private async genuineAwaitingThreads(userId: string): Promise<ReadonlyArray<EmailThreadRow>> {
+    const cap = config.briefing.maxNudges;
+    const candidates = await emailThreadRepository.listAwaitingReply(userId, cap * 4);
+    const genuine: EmailThreadRow[] = [];
+    for (const thread of candidates) {
+      const latest = await emailMessageRepository.latestInThread(thread.id);
+      const stillAwaiting =
+        latest !== undefined && latest.direction === 'inbound' && !isBulkCategory(latest.labelIds);
+      if (stillAwaiting) {
+        genuine.push(thread);
+      } else {
+        // Correct the stored flag so this thread stops being counted/surfaced on later runs.
+        await emailThreadRepository.setAwaitingReply(thread.id, false);
+      }
+    }
+    return genuine.slice(0, cap);
   }
 
   /** Calendar facts for the user's first active Google account; empty on any failure (calendar is

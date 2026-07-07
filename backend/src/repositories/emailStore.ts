@@ -181,6 +181,15 @@ class EmailThreadRepository {
     return row ? toThreadRow(row) : undefined;
   }
 
+  /** Flip a thread's awaiting-reply flag — used to self-heal a stale/misclassified flag at read time. */
+  async setAwaitingReply(id: string, awaiting: boolean): Promise<void> {
+    await db
+      .updateTable('email_threads')
+      .set({ awaiting_reply: awaiting, updated_at: new Date() })
+      .where('id', '=', id)
+      .execute();
+  }
+
   /** Threads the user owes a reply on, newest first — the briefing/nudge source. */
   async listAwaitingReply(userId: string, limit: number): Promise<ReadonlyArray<EmailThreadRow>> {
     const rows = await db

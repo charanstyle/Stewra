@@ -21,6 +21,7 @@ import {
   type GmailClient,
   type FetchedMessage,
 } from './googleOAuthService';
+import { isBulkCategory } from './emailClassification';
 import { logger } from '../utils/logger';
 
 /**
@@ -239,6 +240,8 @@ class GmailSyncService {
       }
     }
 
+    // "Awaiting reply" means a PERSON is waiting on the user — bulk/automated mail (promotions,
+    // newsletters, receipts) is inbound but never something to reply to, so it must not flag the thread.
     const thread = await emailThreadRepository.upsert({
       userId: connection.userId,
       connectionId: connection.id,
@@ -247,7 +250,7 @@ class GmailSyncService {
       lastMessageAt: sentAt,
       participantContactIds: contactId ? [contactId] : [],
       hasUnread: message.labelIds.includes('UNREAD'),
-      awaitingReply: direction === 'inbound',
+      awaitingReply: direction === 'inbound' && !isBulkCategory(message.labelIds),
     });
 
     await emailMessageRepository.insert({
@@ -268,7 +271,7 @@ class GmailSyncService {
     // Re-derive thread state from the true latest message (backfill can insert out of order).
     const latest = await emailMessageRepository.latestInThread(thread.id);
     if (latest) {
-      const awaiting = latest.direction === 'inbound';
+      const awaiting = latest.direction === 'inbound' && !isBulkCategory(latest.labelIds);
       await emailThreadRepository.upsert({
         userId: connection.userId,
         connectionId: connection.id,
