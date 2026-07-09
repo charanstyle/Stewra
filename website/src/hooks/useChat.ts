@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CLIENT_EVENTS, SERVER_EVENTS } from '@stewra/shared-types';
-import type { Message, UUID } from '@stewra/shared-types';
+import type {
+  ChatDeliveredEvent,
+  ChatReadEvent,
+  Message,
+  ReadReceipt,
+  UUID,
+} from '@stewra/shared-types';
 import { api } from '../services/api';
 import { useSocket } from './useSocket';
 
@@ -58,6 +64,21 @@ export function useChat(conversationId: UUID | null): UseChatResult {
       return next;
     });
   }, []);
+
+  // Patch a single already-loaded message in place (delivery/read status flips carry only a partial
+  // update, not a whole Message, so upsert-by-replacement doesn't fit — we merge onto the existing row).
+  const patchMessage = useCallback(
+    (messageId: UUID, patch: (msg: Message) => Message): void => {
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === messageId);
+        if (idx < 0) return prev;
+        const next = [...prev];
+        next[idx] = patch(prev[idx]);
+        return next;
+      });
+    },
+    [],
+  );
 
   // Initial load (newest page, returned newest-first → reverse to chronological).
   useEffect(() => {
@@ -120,11 +141,35 @@ export function useChat(conversationId: UUID | null): UseChatResult {
       });
     };
 
+    // A recipient's client came online / opened the thread: flip my matching bubble sent→delivered.
+    // Never downgrade a bubble already marked read (read is the stronger, terminal state).
+    const onDelivered = (event: ChatDeliveredEvent): void => {
+      if (event.conversationId !== conversationId) return;
+      patchMessage(event.messageId, (msg) =>
+        msg.status === 'read'
+          ? msg
+          : { ...msg, deliveredAt: event.deliveredAt, status: 'delivered' },
+      );
+    };
+
+    // A recipient read one or more of my messages: attach each receipt and flip that bubble to read.
+    const onRead = (event: ChatReadEvent): void => {
+      if (event.conversationId !== conversationId) return;
+      for (const receipt of event.receipts) {
+        patchMessage(receipt.messageId, (msg) => {
+          const others: ReadReceipt[] = msg.readReceipts.filter((r) => r.userId !== receipt.userId);
+          return { ...msg, status: 'read', readReceipts: [...others, receipt] };
+        });
+      }
+    };
+
     socket.on(SERVER_EVENTS.CHAT_MESSAGE, onMessage);
     socket.on(SERVER_EVENTS.STEWRA_REPLY, onReply);
     socket.on(SERVER_EVENTS.STEWRA_THINKING, onStewraThinking);
     socket.on(SERVER_EVENTS.STEWRA_ERROR, onStewraError);
     socket.on(SERVER_EVENTS.CHAT_TYPING, onTyping);
+    socket.on(SERVER_EVENTS.CHAT_MESSAGE_DELIVERED, onDelivered);
+    socket.on(SERVER_EVENTS.CHAT_MESSAGE_READ, onRead);
     return () => {
       socket.emit(CLIENT_EVENTS.CHAT_LEAVE, { conversationId }, () => undefined);
       socket.off(SERVER_EVENTS.CHAT_MESSAGE, onMessage);
@@ -132,8 +177,10 @@ export function useChat(conversationId: UUID | null): UseChatResult {
       socket.off(SERVER_EVENTS.STEWRA_THINKING, onStewraThinking);
       socket.off(SERVER_EVENTS.STEWRA_ERROR, onStewraError);
       socket.off(SERVER_EVENTS.CHAT_TYPING, onTyping);
+      socket.off(SERVER_EVENTS.CHAT_MESSAGE_DELIVERED, onDelivered);
+      socket.off(SERVER_EVENTS.CHAT_MESSAGE_READ, onRead);
     };
-  }, [socket, conversationId, upsert]);
+  }, [socket, conversationId, upsert, patchMessage]);
 
   // Mark the newest message read whenever the tail advances.
   useEffect(() => {

@@ -21,7 +21,15 @@ export class PreferencesService {
       gmailLookbackDays: stored?.gmailLookbackDays ?? config.gmail.lookbackDays,
       // The Sent-mail observer is off until the user turns it on — no row (or no opt-in) means off.
       learnFromSentMail: stored?.learnFromSentMail ?? false,
+      // Read receipts are on by default (WhatsApp behavior); only an explicit opt-out turns them off.
+      readReceiptsEnabled: stored?.readReceiptsEnabled ?? true,
     };
+  }
+
+  /** Whether the user shares read receipts — the gate the chat read path checks before writing/emitting. */
+  async readReceiptsEnabled(userId: string): Promise<boolean> {
+    const prefs = await this.getForUser(userId);
+    return prefs.readReceiptsEnabled;
   }
 
   /** The effective Gmail lookback window (days) for a user — the only consumer in the data path. */
@@ -52,7 +60,11 @@ export class PreferencesService {
    */
   async update(
     userId: string,
-    patch: { gmailLookbackDays?: number | undefined; learnFromSentMail?: boolean | undefined },
+    patch: {
+      gmailLookbackDays?: number | undefined;
+      learnFromSentMail?: boolean | undefined;
+      readReceiptsEnabled?: boolean | undefined;
+    },
   ): Promise<UserPreferences> {
     if (patch.gmailLookbackDays !== undefined) {
       const days = patch.gmailLookbackDays;
@@ -77,6 +89,16 @@ export class PreferencesService {
       await userPreferencesRepository.upsertLearnFromSentMail(
         userId,
         patch.learnFromSentMail,
+        lookbackForInsert,
+      );
+    }
+    if (patch.readReceiptsEnabled !== undefined) {
+      // Same first-write concern as the other opt-ins: supply the effective lookback so the row can be
+      // created NOT-NULL even when the user has never set a lookback.
+      const lookbackForInsert = await this.gmailLookbackDays(userId);
+      await userPreferencesRepository.upsertReadReceiptsEnabled(
+        userId,
+        patch.readReceiptsEnabled,
         lookbackForInsert,
       );
     }

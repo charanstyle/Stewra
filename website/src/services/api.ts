@@ -51,10 +51,12 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   ListMessagesResponse,
+  ListReadReceiptsResponse,
   ReactRequest,
   ReactResponse,
   DeleteMessageResponse,
   SendVoiceMessageResponse,
+  UploadAvatarResponse,
   TurnCredentialsResponse,
   ListCallHistoryResponse,
   GetBriefingResponse,
@@ -316,6 +318,17 @@ export const api = {
 
   reactToMessage: (id: string, body: ReactRequest): Promise<ReactResponse> =>
     request(`/messages/${id}/react`, { method: 'POST', body }),
+
+  /** Per-participant read acknowledgements for one message (drives the read-receipt detail view). */
+  listMessageReceipts: (id: string): Promise<ListReadReceiptsResponse> =>
+    request(`/messages/${id}/receipts`),
+
+  /** Upload a profile photo as multipart (field `avatar`); returns the new `/media/:id` URL. */
+  uploadAvatar: (image: Blob, filename = 'avatar.jpg'): Promise<UploadAvatarResponse> => {
+    const form = new FormData();
+    form.set('avatar', image, filename);
+    return requestMultipart('/users/me/avatar', form);
+  },
 
   deleteMessage: (id: string): Promise<DeleteMessageResponse> =>
     request(`/messages/${id}`, { method: 'DELETE' }),

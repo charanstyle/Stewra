@@ -46,6 +46,12 @@ export interface OkAck {
   readonly error?: string;
 }
 
+/** Ack for `presence:subscribe`: the current status of every requested user (for an immediate paint). */
+export interface PresenceSubscribeAck {
+  readonly ok: boolean;
+  readonly statuses: ReadonlyArray<PresenceUpdateEvent>;
+}
+
 /** Server → client event payload map, one entry per `SERVER_EVENTS` value. */
 interface ServerToClientEvents {
   [SERVER_EVENTS.PRESENCE_UPDATE]: (event: PresenceUpdateEvent) => void;
@@ -71,7 +77,10 @@ interface ServerToClientEvents {
 
 /** Client → server event payload/ack map, one entry per `CLIENT_EVENTS` value. */
 interface ClientToServerEvents {
-  [CLIENT_EVENTS.PRESENCE_SUBSCRIBE]: (payload: PresenceSubscribePayload) => void;
+  [CLIENT_EVENTS.PRESENCE_SUBSCRIBE]: (
+    payload: PresenceSubscribePayload,
+    ack: (response: PresenceSubscribeAck) => void,
+  ) => void;
   [CLIENT_EVENTS.CHAT_JOIN]: (payload: ChatJoinPayload) => void;
   [CLIENT_EVENTS.CHAT_LEAVE]: (payload: ChatJoinPayload) => void;
   [CLIENT_EVENTS.CHAT_TYPING]: (payload: ChatTypingPayload) => void;

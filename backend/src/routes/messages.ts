@@ -31,6 +31,10 @@ router.get('/', requireAuth, verified, (req, res) => {
   void messagesController.list(req, res);
 });
 
+router.get('/:id/receipts', requireAuth, verified, (req, res) => {
+  void messagesController.listReceipts(req, res);
+});
+
 router.post('/:id/react', requireAuth, verified, (req, res) => {
   void messagesController.react(req, res);
 });

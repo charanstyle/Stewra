@@ -31,6 +31,20 @@ export const MESSAGE_TYPES: ReadonlyArray<MessageType> = [
  */
 export type SenderKind = 'user' | 'assistant';
 
+/**
+ * Delivery lifecycle of a message, as shown by the sender's status ticks (WhatsApp/iMessage-style).
+ * `sending`/`failed` are client-only optimistic states; the server derives and returns one of
+ * `sent`/`delivered`/`read` from `deliveredAt` + the existence of another participant's read receipt.
+ */
+export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+export const MESSAGE_STATUSES: ReadonlyArray<MessageStatus> = [
+  'sending',
+  'sent',
+  'delivered',
+  'read',
+  'failed',
+];
+
 /** The fixed set of reactions a user can place on a message (WhatsApp/Zalo-style). */
 export type ReactionType = 'like' | 'love' | 'haha' | 'wow' | 'sad' | 'angry';
 export const REACTION_TYPES: ReadonlyArray<ReactionType> = [
@@ -68,6 +82,17 @@ export interface Message {
   readonly isDeleted: boolean;
   /** Stamped when the message reaches an online recipient (or on their next join). Null until then. */
   readonly deliveredAt: ISODateString | null;
+  /**
+   * Sender-facing delivery status, derived server-side (`sent`/`delivered`/`read`). Only meaningful on
+   * the caller's own messages; for others' messages it is always `sent`. Clients may locally set
+   * `sending`/`failed` on an optimistic bubble before the server round-trip resolves.
+   */
+  readonly status: MessageStatus;
+  /**
+   * Per-participant read acknowledgements for THIS message, excluding the sender. Drives the "seen by"
+   * reader avatar on the last-read message and the read-receipt detail view. Empty until someone reads it.
+   */
+  readonly readReceipts: ReadonlyArray<ReadReceipt>;
   readonly createdAt: ISODateString;
   readonly reactions: ReadonlyArray<MessageReaction>;
 }

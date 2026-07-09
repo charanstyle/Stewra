@@ -39,6 +39,11 @@ import type {
   ReactResponse,
   DeleteMessageResponse,
   SendVoiceMessageResponse,
+  ListReadReceiptsResponse,
+  UploadAvatarResponse,
+  GetPreferencesResponse,
+  UpdatePreferencesRequest,
+  UpdatePreferencesResponse,
   TurnCredentialsResponse,
   RegisterCallPushTokenRequest,
   RegisterCallPushTokenResponse,
@@ -242,6 +247,26 @@ export const api = {
 
   reactToMessage: (messageId: string, body: ReactRequest): Promise<ReactResponse> =>
     request(`/messages/${messageId}/react`, { method: 'POST', body }),
+
+  /** Per-participant read acknowledgements for one message (drives the read-receipt detail view). */
+  listMessageReceipts: (messageId: string): Promise<ListReadReceiptsResponse> =>
+    request(`/messages/${messageId}/receipts`),
+
+  getPreferences: (): Promise<GetPreferencesResponse> => request('/preferences'),
+
+  updatePreferences: (body: UpdatePreferencesRequest): Promise<UpdatePreferencesResponse> =>
+    request('/preferences', { method: 'PATCH', body }),
+
+  /** Multipart avatar upload: a single `avatar` image file field. Returns the new `/media/:id` URL. */
+  uploadAvatar: (imageUri: string, fileName: string, mimeType: string): Promise<UploadAvatarResponse> => {
+    const formData = new FormData();
+    formData.append('avatar', {
+      uri: imageUri,
+      name: fileName,
+      type: mimeType,
+    });
+    return request('/users/me/avatar', { method: 'POST', formData });
+  },
 
   deleteMessage: (messageId: string): Promise<DeleteMessageResponse> =>
     request(`/messages/${messageId}`, { method: 'DELETE' }),

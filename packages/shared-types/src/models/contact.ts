@@ -47,6 +47,11 @@ export interface PublicUser {
   readonly id: UUID;
   readonly displayName: string;
   readonly email: string;
+  /**
+   * Relative URL of the user's profile photo (`/media/{assetId}`), or null when they haven't set one.
+   * Clients fall back to an initial-letter avatar when null.
+   */
+  readonly avatarUrl: string | null;
 }
 
 /** A contact edge joined with the other user's public profile, for rendering a contact list. */

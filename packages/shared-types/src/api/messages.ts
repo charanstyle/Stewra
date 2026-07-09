@@ -1,5 +1,5 @@
 import type { Paginated, UUID } from '../common/base';
-import type { Message, ReactionType } from '../models/message';
+import type { Message, ReactionType, ReadReceipt } from '../models/message';
 
 /**
  * Send a text message. Media and voice go through dedicated multipart routes (POST /messages/media,
@@ -53,4 +53,12 @@ export interface SendVoiceMessageResponse {
 /** Result of POST /messages/media (multipart image/video/audio upload). */
 export interface SendMediaMessageResponse {
   readonly message: Message;
+}
+
+/**
+ * Per-participant read acknowledgements for one message (GET /messages/:id/receipts), powering the
+ * read-receipt detail view. Ordered by `readAt`; excludes the message's own sender.
+ */
+export interface ListReadReceiptsResponse {
+  readonly receipts: ReadonlyArray<ReadReceipt>;
 }

@@ -13,6 +13,8 @@ export interface UpdatePreferencesRequest {
   readonly gmailLookbackDays?: number;
   /** Turn the Sent-mail style observer on or off (explicit opt-in; defaults off server-side). */
   readonly learnFromSentMail?: boolean;
+  /** Share read receipts in human chats (symmetric: off also hides others' receipts). Defaults on. */
+  readonly readReceiptsEnabled?: boolean;
 }
 
 export interface UpdatePreferencesResponse {

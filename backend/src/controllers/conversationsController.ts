@@ -10,7 +10,6 @@ import {
   type LeaveConversationResponse,
   type ListConversationsResponse,
   type MarkReadResponse,
-  type ReadReceipt,
 } from '@stewra/shared-types';
 import { BaseController } from './baseController';
 import { conversationService } from '../services/conversationService';
@@ -118,12 +117,13 @@ class ConversationsController extends BaseController {
       const userId = this.userId(req);
       const { id } = parse(idParamsSchema, req.params);
       const { upToMessageId } = parse(markReadSchema, req.body);
-      const at = await conversationService.markRead(userId, id, upToMessageId);
+      const { lastReadAt: at, receipts } = await conversationService.markRead(userId, id, upToMessageId);
       const lastReadAt = at.toISOString();
 
-      const receipt: ReadReceipt = { messageId: upToMessageId, userId, readAt: lastReadAt };
-      const event: ChatReadEvent = { conversationId: id, receipts: [receipt] };
-      emitToConversation(id, SERVER_EVENTS.CHAT_MESSAGE_READ, event);
+      if (receipts.length > 0) {
+        const event: ChatReadEvent = { conversationId: id, receipts };
+        emitToConversation(id, SERVER_EVENTS.CHAT_MESSAGE_READ, event);
+      }
 
       const body: MarkReadResponse = { conversationId: id, lastReadAt };
       this.handleSuccess(res, body);

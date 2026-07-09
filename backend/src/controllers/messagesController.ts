@@ -9,6 +9,7 @@ import {
   type Conversation,
   type DeleteMessageResponse,
   type ListMessagesResponse,
+  type ListReadReceiptsResponse,
   type Message,
   type MessageReaction,
   type ReactResponse,
@@ -170,6 +171,18 @@ class MessagesController extends BaseController {
       this.handleSuccess(res, body);
     } catch (error) {
       this.handleError(error, res, 'MessagesController.list');
+    }
+  }
+
+  /** GET /messages/:id/receipts — per-participant read acknowledgements for the detail view. */
+  async listReceipts(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = parse(idParamsSchema, req.params);
+      const receipts = await messageService.listReceipts(this.userId(req), id);
+      const body: ListReadReceiptsResponse = { receipts };
+      this.handleSuccess(res, body);
+    } catch (error) {
+      this.handleError(error, res, 'MessagesController.listReceipts');
     }
   }
 

@@ -1,0 +1,103 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.content {
+  max-width: 620px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px 20px;
+}
+
+.heading {
+  font-size: 22px;
+  margin: 0 0 20px;
+}
+
+.section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+
+.sectionTitle {
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0 0 14px;
+}
+
+.avatarRow {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.button {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+}
+
+.toggleText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toggleLabel {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.toggleHint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.checkbox {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.error {
+  background: rgba(229, 115, 115, 0.12);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}

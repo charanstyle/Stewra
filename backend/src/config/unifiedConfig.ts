@@ -181,6 +181,11 @@ const EnvSchema = z.object({
   // backend instances share rooms/presence) and the presence store. Fail loud if absent — we never
   // silently fall back to a single-process in-memory bus (that would break fan-out in prod).
   REDIS_URL: z.string().url('REDIS_URL must be a valid redis:// URL'),
+  // Channel/key prefix for the Socket.IO Redis adapter. Every backend instance that shares a prefix
+  // forms one broadcast cluster (rooms fan out across them). Default 'socket.io' matches the adapter's
+  // own default. Override it to run an isolated instance against a Redis that another deployment also
+  // uses — a different prefix keeps the two clusters from cross-relaying each other's socket events.
+  SOCKET_IO_ADAPTER_KEY: z.string().min(1).default('socket.io'),
   // Master switch for audio/video calling. When false, the /calls routes return 503 and signaling is
   // not wired — a dev box without coturn isn't blocked. The TURN_* knobs below are required only when
   // this is true (checked post-parse, mirroring the MODEL_PROVIDER block).
@@ -404,6 +409,8 @@ export const config = {
   redis: {
     // Backs the Socket.IO adapter + presence store. Required — no single-process fallback.
     url: env.REDIS_URL,
+    // Socket.IO adapter cluster prefix; override to isolate an instance sharing a Redis with another.
+    adapterKey: env.SOCKET_IO_ADAPTER_KEY,
   },
   calls: {
     // Master switch; when false the /calls routes 503 and signaling stays unwired.

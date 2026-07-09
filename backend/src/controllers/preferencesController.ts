@@ -20,6 +20,8 @@ const updateSchema = z.object({
     .optional(),
   // Explicit opt-in for the Sent-mail style observer (a new data use) — a plain boolean toggle.
   learnFromSentMail: z.boolean().optional(),
+  // Share read receipts in human chats (symmetric: off also hides others' receipts).
+  readReceiptsEnabled: z.boolean().optional(),
 });
 
 class PreferencesController extends BaseController {

@@ -1,5 +1,6 @@
 import { createAdapter } from '@socket.io/redis-adapter';
 import { createRedisClient } from '../services/redisClient';
+import { config } from '../config/unifiedConfig';
 import { logger } from '../utils/logger';
 import type { AppServer } from './types';
 
@@ -14,7 +15,7 @@ import type { AppServer } from './types';
 export function attachRedisAdapter(io: AppServer): { pub: ReturnType<typeof createRedisClient>; sub: ReturnType<typeof createRedisClient> } {
   const pub = createRedisClient();
   const sub = createRedisClient();
-  io.adapter(createAdapter(pub, sub));
+  io.adapter(createAdapter(pub, sub, { key: config.redis.adapterKey }));
   logger.info('Socket.IO Redis adapter attached');
   return { pub, sub };
 }

@@ -1,7 +1,7 @@
 import { db } from '../database/index';
 
 /** The kinds of stored binary a media_assets row can hold (matches the migration CHECK). */
-export type MediaAssetKind = 'voice_in' | 'tts_out' | 'image' | 'video' | 'audio' | 'file';
+export type MediaAssetKind = 'voice_in' | 'tts_out' | 'image' | 'video' | 'audio' | 'file' | 'avatar';
 
 /** A stored media asset, owner-scoped so the streaming route can authorize before serving. */
 export interface MediaAsset {

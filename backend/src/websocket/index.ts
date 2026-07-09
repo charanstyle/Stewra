@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/node';
 import { SERVER_EVENTS } from '@stewra/shared-types';
 import type { PresenceUpdateEvent } from '@stewra/shared-types';
 import { presenceService } from '../services/presenceService';
+import { messageService } from '../services/messageService';
 import { logger } from '../utils/logger';
 import { attachRedisAdapter } from './socketAdapter';
 import { setIo } from './emitter';
@@ -59,6 +60,13 @@ export function initSockets(io: AppServer): void {
         Sentry.captureException(err);
         logger.error('presence connect failed', { userId });
       });
+
+    // Catch up delivery ticks — every message that arrived while this user was offline becomes delivered
+    // now. Fire-and-forget; a failure just leaves the stamp for the recipient's next fetch to resolve.
+    messageService.markPendingDeliveredOnConnect(userId).catch((err: unknown) => {
+      Sentry.captureException(err);
+      logger.error('delivered-on-connect failed', { userId });
+    });
 
     socket.on('disconnect', () => {
       const at = new Date();

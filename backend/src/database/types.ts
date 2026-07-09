@@ -42,6 +42,8 @@ export interface UsersTable {
   role: UserRole;
   /** Email-ownership flag. DB default false; flipped true when the user enters their code. */
   email_verified: Generated<boolean>;
+  /** Profile photo → media_assets.id (kind='avatar'); null = no photo (clients fall back to initials). */
+  avatar_asset_id: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: CreatedAt;
   updated_at: ColumnType<Date, never, Date>;
 }
@@ -84,6 +86,9 @@ export interface UserPreferencesTable {
   // Durable email retention window (days); NULL means "not chosen" → resolved to the deploy default
   // (migration 025). Optional on insert, settable on update.
   email_retention_days: ColumnType<number | null, number | null | undefined, number | null>;
+  // Whether the user shares read receipts in human chats (migration 027). NOT NULL with a DB default
+  // of true, so it is optional on insert and settable on update.
+  read_receipts_enabled: ColumnType<boolean, boolean | undefined, boolean>;
   created_at: CreatedAt;
   updated_at: ColumnType<Date, never, Date>;
 }
@@ -469,7 +474,7 @@ export interface MediaAssetsTable {
   id: Generated<string>;
   owner_id: string;
   conversation_id: string | null;
-  kind: 'voice_in' | 'tts_out' | 'image' | 'video' | 'audio' | 'file';
+  kind: 'voice_in' | 'tts_out' | 'image' | 'video' | 'audio' | 'file' | 'avatar';
   path: string;
   mime: string;
   bytes: ColumnType<bigint, bigint | number, never>;

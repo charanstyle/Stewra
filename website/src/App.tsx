@@ -13,6 +13,7 @@ import ChatsPage from './app/chats/ChatsPage';
 import ConversationPage from './app/chats/ConversationPage';
 import ContactsPage from './app/contacts/ContactsPage';
 import StewraPage from './app/stewra/StewraPage';
+import SettingsPage from './app/settings/SettingsPage';
 
 export default function App(): React.JSX.Element {
   return (
@@ -81,6 +82,14 @@ export default function App(): React.JSX.Element {
             element={
               <ProtectedRoute>
                 <StewraPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <SettingsPage />
               </ProtectedRoute>
             }
           />

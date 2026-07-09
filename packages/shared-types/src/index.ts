@@ -49,13 +49,14 @@ export { CONVERSATION_TYPES } from './models/conversation';
 export type {
   Message,
   MessageType,
+  MessageStatus,
   SenderKind,
   ReactionType,
   MessageReaction,
   MessagePreview,
   ReadReceipt,
 } from './models/message';
-export { MESSAGE_TYPES, REACTION_TYPES } from './models/message';
+export { MESSAGE_TYPES, MESSAGE_STATUSES, REACTION_TYPES } from './models/message';
 export type {
   CallKind,
   CallStatus,
@@ -179,7 +180,9 @@ export type {
   DeleteMessageResponse,
   SendVoiceMessageResponse,
   SendMediaMessageResponse,
+  ListReadReceiptsResponse,
 } from './api/messages';
+export type { UploadAvatarResponse } from './api/avatar';
 export type {
   IceServerConfig,
   TurnCredentialsResponse,

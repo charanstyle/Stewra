@@ -12,6 +12,7 @@ export interface MainTabParamList {
   Chats: undefined;
   Contacts: undefined;
   StewraVoice: undefined;
+  Settings: undefined;
   [key: string]: object | undefined;
 }
 

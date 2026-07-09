@@ -52,7 +52,7 @@ export default function ChatsPage(): React.JSX.Element {
         <ul className={styles.list}>
           {conversations.map((summary) => {
             const peer = summary.participants[0];
-            const online = peer && presence.get(peer.id) === 'online';
+            const online = peer && presence.get(peer.id)?.status === 'online';
             return (
               <li
                 key={summary.conversation.id}

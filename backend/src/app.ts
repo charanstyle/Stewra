@@ -16,6 +16,7 @@ import preferencesRoutes from './routes/preferences';
 import contactsRoutes from './routes/contacts';
 import conversationsRoutes from './routes/conversations';
 import messagesRoutes from './routes/messages';
+import usersRoutes from './routes/users';
 import callsRoutes from './routes/calls';
 import mediaRoutes from './routes/media';
 import homeRoutes from './routes/home';
@@ -51,6 +52,7 @@ export function createApp(): Express {
   app.use('/contacts', contactsRoutes);
   app.use('/conversations', conversationsRoutes);
   app.use('/messages', messagesRoutes);
+  app.use('/users', usersRoutes);
   app.use('/calls', callsRoutes);
   app.use('/media', mediaRoutes);
   app.use('/home', homeRoutes);

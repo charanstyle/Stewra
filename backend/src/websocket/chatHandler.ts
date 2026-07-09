@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { CLIENT_EVENTS, SERVER_EVENTS } from '@stewra/shared-types';
-import type { ChatReadEvent, ChatTypingEvent, ReadReceipt } from '@stewra/shared-types';
+import type { ChatReadEvent, ChatTypingEvent } from '@stewra/shared-types';
 import { conversationService } from '../services/conversationService';
 import { BaseSocketHandler } from './baseSocketHandler';
 import { conversationRoom } from './types';
@@ -48,23 +48,22 @@ export class ChatHandler extends BaseSocketHandler {
       if (typeof ack === 'function') ack({ ok: true });
     });
 
-    // Advance the durable read watermark and notify the room.
+    // Advance the durable read watermark, persist per-message receipts, and notify the room. The
+    // broadcast carries the ACTUAL freshly-seen messages (not just the watermark), so senders can flip
+    // each affected bubble to "read". Nothing is emitted when the reader shares no receipts.
     this.on(CLIENT_EVENTS.CHAT_MARK_READ, MarkReadSchema, async (payload, ack) => {
-      const at = await conversationService.markRead(
+      const { lastReadAt, receipts } = await conversationService.markRead(
         this.userId,
         payload.conversationId,
         payload.upToMessageId,
       );
-      const receipt: ReadReceipt = {
-        messageId: payload.upToMessageId,
-        userId: this.userId,
-        readAt: at.toISOString(),
-      };
-      const event: ChatReadEvent = { conversationId: payload.conversationId, receipts: [receipt] };
-      this.socket
-        .to(conversationRoom(payload.conversationId))
-        .emit(SERVER_EVENTS.CHAT_MESSAGE_READ, event);
-      if (typeof ack === 'function') ack({ ok: true, lastReadAt: receipt.readAt });
+      if (receipts.length > 0) {
+        const event: ChatReadEvent = { conversationId: payload.conversationId, receipts };
+        this.socket
+          .to(conversationRoom(payload.conversationId))
+          .emit(SERVER_EVENTS.CHAT_MESSAGE_READ, event);
+      }
+      if (typeof ack === 'function') ack({ ok: true, lastReadAt: lastReadAt.toISOString() });
     });
   }
 }

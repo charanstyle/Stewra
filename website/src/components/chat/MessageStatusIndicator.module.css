@@ -1,0 +1,21 @@
+.indicator {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+  margin-left: 2px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.read {
+  color: var(--accent);
+}
+
+.failed {
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1;
+}

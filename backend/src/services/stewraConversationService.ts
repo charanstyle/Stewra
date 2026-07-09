@@ -68,10 +68,13 @@ class StewraConversationService {
     conversationId: string,
     excludeMessageId: string,
   ): Promise<ConversationTurn[]> {
+    // Viewer is irrelevant here — this projection only reads text/senderKind for model context, never
+    // the sender-facing status ticks, so an empty viewer id is fine.
     const { items } = await messageRepository.listByConversation(
       conversationId,
       undefined,
       HISTORY_LIMIT,
+      '',
     );
     const turns: ConversationTurn[] = [];
     // listByConversation returns newest-first; reverse to chronological for the model.

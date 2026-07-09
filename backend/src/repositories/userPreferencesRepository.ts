@@ -8,6 +8,8 @@ export interface UserPreferencesRow {
   readonly learnFromSentMail: boolean;
   /** Durable email retention window (days); null when the user hasn't chosen (resolve to default). */
   readonly emailRetentionDays: number | null;
+  /** Whether the user shares read receipts in human chats (DB default true). */
+  readonly readReceiptsEnabled: boolean;
 }
 
 /**
@@ -18,7 +20,7 @@ export class UserPreferencesRepository {
   async findForUser(userId: string): Promise<UserPreferencesRow | undefined> {
     const row = await db
       .selectFrom('user_preferences')
-      .select(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days'])
+      .select(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled'])
       .where('user_id', '=', userId)
       .executeTakeFirst();
     return row ? toRow(row) : undefined;
@@ -32,7 +34,7 @@ export class UserPreferencesRepository {
       .onConflict((oc) =>
         oc.column('user_id').doUpdateSet({ email_retention_days: days, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -45,7 +47,7 @@ export class UserPreferencesRepository {
       .onConflict((oc) =>
         oc.column('user_id').doUpdateSet({ gmail_lookback_days: days, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -73,7 +75,31 @@ export class UserPreferencesRepository {
           .column('user_id')
           .doUpdateSet({ learn_from_sent_mail: learn, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled'])
+      .executeTakeFirstOrThrow();
+    return toRow(row);
+  }
+
+  /**
+   * Insert-or-update the read-receipt sharing toggle. Like the other opt-ins, first write needs a
+   * concrete `gmail_lookback_days` (NOT NULL, no DB default); on conflict only the toggle changes.
+   */
+  async upsertReadReceiptsEnabled(
+    userId: string,
+    enabled: boolean,
+    gmailLookbackDaysForInsert: number,
+  ): Promise<UserPreferencesRow> {
+    const row = await db
+      .insertInto('user_preferences')
+      .values({
+        user_id: userId,
+        gmail_lookback_days: gmailLookbackDaysForInsert,
+        read_receipts_enabled: enabled,
+      })
+      .onConflict((oc) =>
+        oc.column('user_id').doUpdateSet({ read_receipts_enabled: enabled, updated_at: new Date() }),
+      )
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -85,12 +111,14 @@ function toRow(row: {
   gmail_lookback_days: number;
   learn_from_sent_mail: boolean;
   email_retention_days: number | null;
+  read_receipts_enabled: boolean;
 }): UserPreferencesRow {
   return {
     userId: row.user_id,
     gmailLookbackDays: row.gmail_lookback_days,
     learnFromSentMail: row.learn_from_sent_mail,
     emailRetentionDays: row.email_retention_days,
+    readReceiptsEnabled: row.read_receipts_enabled,
   };
 }
 

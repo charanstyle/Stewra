@@ -1,10 +1,12 @@
-import type { ChatDeliveredEvent, Conversation, Message, Paginated, ReactionType } from '@stewra/shared-types';
+import { SERVER_EVENTS } from '@stewra/shared-types';
+import type { ChatDeliveredEvent, Conversation, Message, Paginated, ReactionType, ReadReceipt } from '@stewra/shared-types';
 import { messageRepository, MessageRepository } from '../repositories/messageRepository';
 import { conversationService } from './conversationService';
 import { mediaService } from './mediaService';
 import { sttService } from './sttService';
 import { stewraConversationService } from './stewraConversationService';
 import { presenceService } from './presenceService';
+import { emitToUser } from '../websocket/emitter';
 import { ForbiddenError, NotFoundError, ValidationError } from '../utils/errors';
 
 const DEFAULT_LIMIT = 30;
@@ -146,7 +148,37 @@ class MessageService {
   ): Promise<Paginated<Message>> {
     await conversationService.assertParticipant(userId, conversationId);
     const capped = Math.min(Math.max(limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
-    return messageRepository.listByConversation(conversationId, cursor, capped);
+    return messageRepository.listByConversation(conversationId, cursor, capped, userId);
+  }
+
+  /**
+   * On a user's socket connect, stamp delivered_at for every message that arrived while they were
+   * offline and notify each affected sender (their ticks advance sent→delivered without the recipient
+   * opening the thread). Best-effort: a missing socket bus just means no live tick, the stamp persists.
+   */
+  async markPendingDeliveredOnConnect(userId: string): Promise<void> {
+    const delivered = await messageRepository.markPendingDeliveredForUser(userId);
+    for (const d of delivered) {
+      const event: ChatDeliveredEvent = {
+        conversationId: d.conversationId,
+        messageId: d.messageId,
+        userId,
+        deliveredAt: d.deliveredAt,
+      };
+      emitToUser(d.senderId, SERVER_EVENTS.CHAT_MESSAGE_DELIVERED, event);
+    }
+  }
+
+  /**
+   * The per-participant read acknowledgements for one message (for the read-receipt detail view). The
+   * caller must be an active participant of the message's conversation. Receipts already exclude the
+   * message's own sender (only other readers ever get a row).
+   */
+  async listReceipts(userId: string, messageId: string): Promise<ReadReceipt[]> {
+    const message = await messageRepository.findById(messageId, userId);
+    if (message === undefined) throw new NotFoundError('Message not found');
+    await conversationService.assertParticipant(userId, message.conversationId);
+    return messageRepository.listReceipts(messageId);
   }
 
   /** Add or retract a reaction on a message in a conversation the caller participates in. */
@@ -156,7 +188,7 @@ class MessageService {
     reactionType: ReactionType,
     remove: boolean,
   ): Promise<Message> {
-    const message = await messageRepository.findById(messageId);
+    const message = await messageRepository.findById(messageId, userId);
     if (message === undefined) throw new NotFoundError('Message not found');
     await conversationService.assertParticipant(userId, message.conversationId);
     if (remove) {
@@ -164,14 +196,14 @@ class MessageService {
     } else {
       await messageRepository.addReaction(messageId, userId, reactionType);
     }
-    const updated = await messageRepository.findById(messageId);
+    const updated = await messageRepository.findById(messageId, userId);
     if (updated === undefined) throw new NotFoundError('Message not found');
     return updated;
   }
 
   /** Soft-delete a message the caller authored. */
   async delete(userId: string, messageId: string): Promise<void> {
-    const message = await messageRepository.findById(messageId);
+    const message = await messageRepository.findById(messageId, userId);
     if (message === undefined) throw new NotFoundError('Message not found');
     await conversationService.assertParticipant(userId, message.conversationId);
     const deleted = await messageRepository.softDelete(messageId, userId);

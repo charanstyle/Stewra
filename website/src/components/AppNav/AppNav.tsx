@@ -37,7 +37,9 @@ export function AppNav(): React.JSX.Element {
         </nav>
       </div>
       <div className={styles.right}>
-        <span className={styles.who}>{user?.displayName}</span>
+        <NavLink to="/settings" className={styles.who}>
+          {user?.displayName}
+        </NavLink>
         <button
           type="button"
           className={styles.ghost}

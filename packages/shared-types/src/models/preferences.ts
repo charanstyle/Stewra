@@ -15,4 +15,10 @@ export interface UserPreferences {
    * off, no Sent mail is read and no `observed` style rules are proposed.
    */
   readonly learnFromSentMail: boolean;
+  /**
+   * Whether the user shares read receipts in human chats. When off, opening a conversation still
+   * advances their own unread watermark but no per-message read receipt is written or broadcast to the
+   * sender — and, symmetrically, the user does not see others' read receipts either. Defaults to `true`.
+   */
+  readonly readReceiptsEnabled: boolean;
 }

@@ -2,8 +2,10 @@ import type {
   Message,
   MessageReaction,
   MessagePreview,
+  MessageStatus,
   MessageType,
   ReactionType,
+  ReadReceipt,
   SenderKind,
 } from '@stewra/shared-types';
 import { db } from '../database/index';
@@ -36,6 +38,12 @@ interface ReactionRow {
   readonly created_at: Date;
 }
 
+interface ReceiptRow {
+  readonly message_id: string;
+  readonly user_id: string;
+  readonly read_at: Date;
+}
+
 const MESSAGE_COLUMNS = [
   'id',
   'conversation_id',
@@ -58,6 +66,8 @@ const MESSAGE_COLUMNS = [
 
 const REACTION_COLUMNS = ['message_id', 'user_id', 'reaction_type', 'created_at'] as const;
 
+const RECEIPT_COLUMNS = ['message_id', 'user_id', 'read_at'] as const;
+
 function toReaction(row: ReactionRow): MessageReaction {
   return {
     messageId: row.message_id,
@@ -67,7 +77,37 @@ function toReaction(row: ReactionRow): MessageReaction {
   };
 }
 
-function toMessage(row: MessageRow, reactions: ReadonlyArray<MessageReaction>): Message {
+function toReceipt(row: ReceiptRow): ReadReceipt {
+  return {
+    messageId: row.message_id,
+    userId: row.user_id,
+    readAt: row.read_at.toISOString(),
+  };
+}
+
+/**
+ * The sender-facing delivery status, derived from delivery + read facts. Only the caller's OWN messages
+ * carry a meaningful tick (others' messages always read `sent`, since the recipient never shows ticks on
+ * incoming bubbles). For an own message: any read receipt (necessarily from another participant) → `read`;
+ * else a delivery stamp → `delivered`; else `sent`.
+ */
+function deriveStatus(
+  row: MessageRow,
+  receipts: ReadonlyArray<ReadReceipt>,
+  viewerId: string,
+): MessageStatus {
+  if (row.sender_id === null || row.sender_id !== viewerId) return 'sent';
+  if (receipts.length > 0) return 'read';
+  if (row.delivered_at !== null) return 'delivered';
+  return 'sent';
+}
+
+function toMessage(
+  row: MessageRow,
+  reactions: ReadonlyArray<MessageReaction>,
+  receipts: ReadonlyArray<ReadReceipt>,
+  viewerId: string,
+): Message {
   return {
     id: row.id,
     conversationId: row.conversation_id,
@@ -85,6 +125,8 @@ function toMessage(row: MessageRow, reactions: ReadonlyArray<MessageReaction>): 
     isEdited: row.is_edited,
     isDeleted: row.is_deleted,
     deliveredAt: row.delivered_at ? row.delivered_at.toISOString() : null,
+    status: deriveStatus(row, receipts, viewerId),
+    readReceipts: receipts,
     createdAt: row.created_at.toISOString(),
     reactions,
   };
@@ -129,6 +171,14 @@ function decodeCursor(cursor: string): { createdAt: Date; id: string } | null {
 // Typed literals so insert values type-check against the column without a type assertion.
 const SENDER_USER: SenderKind = 'user';
 
+/** One "delivered on connect" notification: a message freshly stamped delivered, addressed to its sender. */
+export interface PendingDelivery {
+  readonly messageId: string;
+  readonly conversationId: string;
+  readonly senderId: string;
+  readonly deliveredAt: string;
+}
+
 export interface NewMessage {
   readonly conversationId: string;
   readonly senderId: string | null;
@@ -170,26 +220,33 @@ export class MessageRepository {
         .returning(MESSAGE_COLUMNS)
         .executeTakeFirstOrThrow();
       await conversationRepository.touchLastMessage(input.conversationId, row.created_at, trx);
-      return toMessage(row, []);
+      // A freshly-created message has no receipts yet; the sender is the viewer, so status resolves to
+      // `sent` (or `delivered` once markDeliveredToOnline stamps it and re-emits).
+      return toMessage(row, [], [], input.senderId ?? '');
     });
   }
 
-  async findById(id: string): Promise<Message | undefined> {
+  /** A single message hydrated for `viewerId` (drives that viewer's own-message status ticks). */
+  async findById(id: string, viewerId: string): Promise<Message | undefined> {
     const row = await db
       .selectFrom('messages')
       .select(MESSAGE_COLUMNS)
       .where('id', '=', id)
       .executeTakeFirst();
     if (!row) return undefined;
-    const reactions = await this.reactionsFor([row.id]);
-    return toMessage(row, reactions.get(row.id) ?? []);
+    const [reactions, receipts] = await Promise.all([
+      this.reactionsFor([row.id]),
+      this.receiptsFor([row.id]),
+    ]);
+    return toMessage(row, reactions.get(row.id) ?? [], receipts.get(row.id) ?? [], viewerId);
   }
 
-  /** Page a conversation's messages newest-first via the opaque keyset cursor. */
+  /** Page a conversation's messages newest-first via the opaque keyset cursor, hydrated for `viewerId`. */
   async listByConversation(
     conversationId: string,
     cursor: string | undefined,
     limit: number,
+    viewerId: string,
   ): Promise<{ items: Message[]; nextCursor: string | null }> {
     let q = db
       .selectFrom('messages')
@@ -214,8 +271,14 @@ export class MessageRepository {
     const rows = await q.execute();
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
-    const reactions = await this.reactionsFor(page.map((r) => r.id));
-    const items = page.map((r) => toMessage(r, reactions.get(r.id) ?? []));
+    const ids = page.map((r) => r.id);
+    const [reactions, receipts] = await Promise.all([
+      this.reactionsFor(ids),
+      this.receiptsFor(ids),
+    ]);
+    const items = page.map((r) =>
+      toMessage(r, reactions.get(r.id) ?? [], receipts.get(r.id) ?? [], viewerId),
+    );
     const last = page[page.length - 1];
     const nextCursor = hasMore && last ? encodeCursor(last) : null;
     return { items, nextCursor };
@@ -236,6 +299,107 @@ export class MessageRepository {
       map.set(row.message_id, list);
     }
     return map;
+  }
+
+  /** Every read receipt for a single message (oldest read first), for the read-receipt detail view. */
+  async listReceipts(messageId: string): Promise<ReadReceipt[]> {
+    const map = await this.receiptsFor([messageId]);
+    return map.get(messageId) ?? [];
+  }
+
+  /** Read receipts for a set of message ids, grouped by message id (oldest read first). */
+  private async receiptsFor(messageIds: ReadonlyArray<string>): Promise<Map<string, ReadReceipt[]>> {
+    const map = new Map<string, ReadReceipt[]>();
+    if (messageIds.length === 0) return map;
+    const rows = await db
+      .selectFrom('message_read_receipts')
+      .select(RECEIPT_COLUMNS)
+      .where('message_id', 'in', messageIds)
+      .orderBy('read_at', 'asc')
+      .execute();
+    for (const row of rows) {
+      const list = map.get(row.message_id) ?? [];
+      list.push(toReceipt(row));
+      map.set(row.message_id, list);
+    }
+    return map;
+  }
+
+  /**
+   * Record that `userId` has read every message in `conversationId` created at/before `upToCreatedAt`
+   * and authored by someone else. Idempotent on the unique (message, user) — only rows that did NOT
+   * already exist are returned, so the caller emits a read receipt exactly once per newly-seen message.
+   */
+  async insertReceiptsUpTo(
+    userId: string,
+    conversationId: string,
+    upToMessageId: string,
+  ): Promise<ReadReceipt[]> {
+    // Derive the boundary from the message's own `created_at` IN SQL — never round-trip it through a JS
+    // Date. `timestamptz` carries microseconds; a JS Date truncates to milliseconds, so comparing
+    // `created_at <= <truncated boundary>` would drop the boundary message itself (the newest one, the
+    // one the reader just opened). The subquery keeps full precision so `<=` includes that message.
+    const targets = await db
+      .selectFrom('messages')
+      .select('id')
+      .where('conversation_id', '=', conversationId)
+      .where('created_at', '<=', (eb) =>
+        eb
+          .selectFrom('messages as boundary')
+          .select('boundary.created_at')
+          .where('boundary.id', '=', upToMessageId)
+          .where('boundary.conversation_id', '=', conversationId),
+      )
+      .where('sender_id', 'is not', null)
+      .where('sender_id', '!=', userId)
+      .execute();
+    if (targets.length === 0) return [];
+    const values = targets.map((t) => {
+      return { message_id: t.id, user_id: userId };
+    });
+    const inserted = await db
+      .insertInto('message_read_receipts')
+      .values(values)
+      .onConflict((oc) => oc.columns(['message_id', 'user_id']).doNothing())
+      .returning(RECEIPT_COLUMNS)
+      .execute();
+    return inserted.map(toReceipt);
+  }
+
+  /**
+   * Stamp delivered_at (once) on every still-undelivered message authored by someone else in a
+   * conversation `userId` actively participates in — the "delivered on connect" catch-up for messages
+   * that arrived while they were offline. Returns one delivered event per newly-stamped message so the
+   * caller can notify each sender.
+   */
+  async markPendingDeliveredForUser(userId: string): Promise<PendingDelivery[]> {
+    const now = new Date();
+    const participantConversations = db
+      .selectFrom('conversation_participants')
+      .select('conversation_id')
+      .where('user_id', '=', userId)
+      .where('left_at', 'is', null);
+    const updated = await db
+      .updateTable('messages')
+      .set({ delivered_at: now })
+      .where('delivered_at', 'is', null)
+      .where('sender_id', 'is not', null)
+      .where('sender_id', '!=', userId)
+      .where('conversation_id', 'in', participantConversations)
+      .returning(['id', 'conversation_id', 'sender_id'])
+      .execute();
+    const iso = now.toISOString();
+    const out: PendingDelivery[] = [];
+    for (const r of updated) {
+      if (r.sender_id === null) continue;
+      out.push({
+        messageId: r.id,
+        conversationId: r.conversation_id,
+        senderId: r.sender_id,
+        deliveredAt: iso,
+      });
+    }
+    return out;
   }
 
   /** Add a reaction (idempotent on the unique (message,user,type)). Returns the reaction. */

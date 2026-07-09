@@ -175,3 +175,22 @@ export function ChevronDownIcon(props: IconProps): React.JSX.Element {
     </svg>
   );
 }
+
+/** Single check — a message that has been sent (one tick). */
+export function CheckIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(props)}>
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+/** Double check — delivered (grey) or read (accent), the WhatsApp-style two ticks. */
+export function CheckCheckIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(props)}>
+      <path d="M18 6 7 17l-5-5" />
+      <path d="m22 10-7.5 7.5L13 16" />
+    </svg>
+  );
+}

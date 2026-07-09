@@ -3,11 +3,13 @@ import type {
   ConversationParticipant,
   ConversationSummary,
   PublicUser,
+  ReadReceipt,
 } from '@stewra/shared-types';
 import { conversationRepository } from '../repositories/conversationRepository';
 import { messageRepository } from '../repositories/messageRepository';
 import { userRepository } from '../repositories/userRepository';
 import { contactService } from './contactService';
+import { preferencesService } from './preferencesService';
 import { ForbiddenError, NotFoundError, ValidationError } from '../utils/errors';
 
 /**
@@ -112,16 +114,31 @@ class ConversationService {
     await conversationRepository.leave(conversationId, userId);
   }
 
-  /** Advance the caller's read watermark to the given message's timestamp. */
+  /**
+   * Advance the caller's read watermark to the given message's timestamp AND record a per-message read
+   * receipt for every message up to it (activating the "seen by" surface). The durable watermark always
+   * advances; the receipts (which the sender sees) are only written and returned when the caller shares
+   * read receipts — a privacy opt-out suppresses the receipts without hiding the caller's own unread state.
+   * Returns the applied timestamp plus the newly-created receipts (empty when receipts are disabled or
+   * nothing new was seen), so the caller emits `chat:message-read` exactly for freshly-seen messages.
+   */
   async markRead(
     userId: string,
     conversationId: string,
     upToMessageId: string,
-  ): Promise<Date> {
+  ): Promise<{ lastReadAt: Date; receipts: ReadReceipt[] }> {
     await this.assertParticipant(userId, conversationId);
+    // Validate the message exists in THIS conversation (also blocks marking read against a foreign id).
     const at = await messageRepository.createdAtOf(upToMessageId, conversationId);
     if (at === undefined) throw new NotFoundError('Message not found in this conversation');
-    return conversationRepository.markRead(conversationId, userId, at);
+    // Pass the message id (not its truncated Date) so the watermark + receipts use full timestamp
+    // precision and always include the boundary message itself.
+    const lastReadAt = await conversationRepository.markRead(conversationId, userId, upToMessageId);
+    const sharesReceipts = await preferencesService.readReceiptsEnabled(userId);
+    const receipts = sharesReceipts
+      ? await messageRepository.insertReceiptsUpTo(userId, conversationId, upToMessageId)
+      : [];
+    return { lastReadAt, receipts };
   }
 
   /** The ids of a conversation's active participants OTHER than the given user (no membership check). */

@@ -10,7 +10,7 @@ import {
 } from '../repositories/mediaAssetRepository';
 import { ForbiddenError, NotFoundError } from '../utils/errors';
 
-/** Fallback extensions per common audio mime so a stored clip keeps a sensible suffix on disk. */
+/** Fallback extensions per common audio/image mime so a stored binary keeps a sensible suffix on disk. */
 const EXT_BY_MIME: Readonly<Record<string, string>> = {
   'audio/wav': '.wav',
   'audio/x-wav': '.wav',
@@ -20,6 +20,10 @@ const EXT_BY_MIME: Readonly<Record<string, string>> = {
   'audio/mpeg': '.mp3',
   'audio/mp4': '.m4a',
   'audio/aac': '.aac',
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
 };
 
 /**
@@ -96,7 +100,9 @@ class MediaService {
 
   /**
    * Authorize a download and return the asset + its resolved absolute path. The caller must be the
-   * owner OR an active participant of the asset's conversation. A missing asset is a 404; a present but
+   * owner OR an active participant of the asset's conversation. Avatars are the one exception: a profile
+   * photo is visible to any authenticated user (contacts must be able to see each other's picture, and
+   * they share no conversation until they start one). A missing asset is a 404; a present but
    * unauthorized one is a 403. The resolved path is bounds-checked against UPLOADS_DIR so a crafted
    * stored filename can never escape the uploads root (defense in depth — filenames are server-generated).
    */
@@ -107,7 +113,7 @@ class MediaService {
     const asset = await mediaAssetRepository.findById(assetId);
     if (asset === undefined) throw new NotFoundError('Media not found');
 
-    if (asset.ownerId !== userId) {
+    if (asset.kind !== 'avatar' && asset.ownerId !== userId) {
       const participant = asset.conversationId
         ? await conversationRepository.getActiveParticipant(asset.conversationId, userId)
         : undefined;

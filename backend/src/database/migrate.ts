@@ -28,6 +28,7 @@ import * as m023 from './migrations/023_connection_scopes';
 import * as m024 from './migrations/024_email_store';
 import * as m025 from './migrations/025_email_retention_pref';
 import * as m026 from './migrations/026_briefings_suggestions';
+import * as m027 from './migrations/027_chat_receipts_avatars_prefs';
 import { logger } from '../utils/logger';
 
 interface Migration {
@@ -63,6 +64,7 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '024_email_store', up: m024.up },
   { name: '025_email_retention_pref', up: m025.up },
   { name: '026_briefings_suggestions', up: m026.up },
+  { name: '027_chat_receipts_avatars_prefs', up: m027.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

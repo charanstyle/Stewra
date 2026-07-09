@@ -8,6 +8,7 @@ export interface UserRow {
   readonly password_hash: string;
   readonly role: UserRole;
   readonly email_verified: boolean;
+  readonly avatar_asset_id: string | null;
   readonly created_at: Date;
   readonly updated_at: Date;
 }
@@ -27,6 +28,7 @@ export function toUserModel(row: UserRow): User {
     displayName: row.display_name,
     role: row.role,
     emailVerified: row.email_verified,
+    avatarUrl: row.avatar_asset_id === null ? null : `/media/${row.avatar_asset_id}`,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -39,6 +41,7 @@ const COLUMNS = [
   'password_hash',
   'role',
   'email_verified',
+  'avatar_asset_id',
   'created_at',
   'updated_at',
 ] as const;
@@ -48,11 +51,19 @@ interface PublicUserRow {
   readonly id: string;
   readonly display_name: string;
   readonly email: string;
+  readonly avatar_asset_id: string | null;
 }
-const PUBLIC_COLUMNS = ['id', 'display_name', 'email'] as const;
+const PUBLIC_COLUMNS = ['id', 'display_name', 'email', 'avatar_asset_id'] as const;
 
 export function toPublicUser(row: PublicUserRow): PublicUser {
-  return { id: row.id, displayName: row.display_name, email: row.email };
+  return {
+    id: row.id,
+    displayName: row.display_name,
+    email: row.email,
+    // Avatars stream through the same authenticated GET /media/:id route as other assets; null means
+    // the user hasn't uploaded a photo and the client falls back to an initials avatar.
+    avatarUrl: row.avatar_asset_id === null ? null : `/media/${row.avatar_asset_id}`,
+  };
 }
 
 export class UserRepository {
@@ -82,6 +93,15 @@ export class UserRepository {
     await db
       .updateTable('users')
       .set({ password_hash: passwordHash, updated_at: new Date() })
+      .where('id', '=', id)
+      .execute();
+  }
+
+  /** Point the user's profile photo at a stored `avatar` media asset (replacing any previous one). */
+  async setAvatarAssetId(id: string, assetId: string): Promise<void> {
+    await db
+      .updateTable('users')
+      .set({ avatar_asset_id: assetId, updated_at: new Date() })
       .where('id', '=', id)
       .execute();
   }

@@ -242,14 +242,29 @@ export class ConversationRepository {
   }
 
   /** Advance the user's read watermark. Returns the applied timestamp. */
-  async markRead(conversationId: string, userId: string, at: Date): Promise<Date> {
-    await db
+  async markRead(conversationId: string, userId: string, upToMessageId: string): Promise<Date> {
+    // Set the watermark to the message's exact `created_at` via subquery — full microsecond precision,
+    // so the just-read message never re-counts as unread (a JS Date boundary truncates to ms and would
+    // leave it fractionally "after" the watermark). Mirrors insertReceiptsUpTo's precision fix.
+    const row = await db
       .updateTable('conversation_participants')
-      .set({ last_read_at: at })
+      .set((eb) => ({
+        last_read_at: eb
+          .selectFrom('messages as boundary')
+          .select('boundary.created_at')
+          .where('boundary.id', '=', upToMessageId)
+          .where('boundary.conversation_id', '=', conversationId),
+      }))
       .where('conversation_id', '=', conversationId)
       .where('user_id', '=', userId)
-      .execute();
-    return at;
+      .returning('last_read_at')
+      .executeTakeFirstOrThrow();
+    // Non-null in practice: the caller validates the message exists in this conversation before calling,
+    // so the subquery always resolves to a concrete timestamp. Guard to satisfy the nullable column type.
+    if (row.last_read_at === null) {
+      throw new Error('markRead: boundary message not found in conversation');
+    }
+    return row.last_read_at;
   }
 
   /** Bump last_message_at (called when a message is sent). Accepts a transaction to stay atomic. */
