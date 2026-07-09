@@ -186,6 +186,13 @@ const EnvSchema = z.object({
   // own default. Override it to run an isolated instance against a Redis that another deployment also
   // uses — a different prefix keeps the two clusters from cross-relaying each other's socket events.
   SOCKET_IO_ADAPTER_KEY: z.string().min(1).default('socket.io'),
+  // Presence liveness window. A user is "online" while they hold ≥1 socket whose heartbeat is newer than
+  // PRESENCE_STALE_MS; each backend instance re-stamps its live sockets every PRESENCE_REFRESH_MS. This
+  // makes presence self-healing: a crashed/redeployed instance stops re-stamping, so its sockets age out
+  // of the window and the user auto-goes-offline instead of being pinned "online" forever. Refresh must
+  // be comfortably shorter than stale (checked post-parse) so a live socket never lapses between beats.
+  PRESENCE_STALE_MS: z.coerce.number().int().positive().default(60_000),
+  PRESENCE_REFRESH_MS: z.coerce.number().int().positive().default(20_000),
   // Master switch for audio/video calling. When false, the /calls routes return 503 and signaling is
   // not wired — a dev box without coturn isn't blocked. The TURN_* knobs below are required only when
   // this is true (checked post-parse, mirroring the MODEL_PROVIDER block).
@@ -280,6 +287,14 @@ if (env.VOICE_ENABLED) {
   if (missing.length > 0) {
     throw new Error(`VOICE_ENABLED=true requires: ${missing.join(', ')}`);
   }
+}
+
+// A socket must be re-stamped at least twice before its heartbeat could go stale, or a live but quiet
+// socket would briefly flap offline between beats. Enforce a 2× safety margin loudly at boot.
+if (env.PRESENCE_REFRESH_MS * 2 > env.PRESENCE_STALE_MS) {
+  throw new Error(
+    `PRESENCE_STALE_MS (${env.PRESENCE_STALE_MS}) must be at least 2× PRESENCE_REFRESH_MS (${env.PRESENCE_REFRESH_MS})`,
+  );
 }
 
 const resolvedBaseUrl =
@@ -411,6 +426,12 @@ export const config = {
     url: env.REDIS_URL,
     // Socket.IO adapter cluster prefix; override to isolate an instance sharing a Redis with another.
     adapterKey: env.SOCKET_IO_ADAPTER_KEY,
+  },
+  presence: {
+    // A socket counts as live while its heartbeat is newer than staleMs; each instance re-stamps its
+    // sockets every refreshMs. staleMs must exceed refreshMs (with margin) — enforced below.
+    staleMs: env.PRESENCE_STALE_MS,
+    refreshMs: env.PRESENCE_REFRESH_MS,
   },
   calls: {
     // Master switch; when false the /calls routes 503 and signaling stays unwired.

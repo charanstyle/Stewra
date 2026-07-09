@@ -40,6 +40,22 @@ export function initSockets(io: AppServer): void {
   setIo(io);
   io.use(socketAuthMiddleware);
 
+  // Heartbeat sweep: re-stamp this instance's live sockets so they stay inside the presence liveness
+  // window. If the instance crashes or is redeployed, the sweep stops and its sockets age out of the
+  // window on their own — that self-healing is what keeps a user from being pinned "online" forever
+  // after an unclean disconnect. `unref` so the timer never keeps the process alive on shutdown.
+  const heartbeat = setInterval(() => {
+    const entries = [...io.of('/').sockets.values()].map((s) => ({
+      userId: s.data.userId,
+      socketId: s.id,
+    }));
+    presenceService.refresh(entries).catch((err: unknown) => {
+      Sentry.captureException(err);
+      logger.error('presence heartbeat sweep failed');
+    });
+  }, config.presence.refreshMs);
+  heartbeat.unref();
+
   io.on('connection', (socket: AppSocket) => {
     const { userId } = socket.data;
     // Personal fan-out room: presence transitions, incoming messages/calls, and Stewra replies target it.
@@ -52,7 +68,7 @@ export function initSockets(io: AppServer): void {
 
     // Mark online; only broadcast on a real offline→online transition (not on an extra tab).
     presenceService
-      .connect(userId)
+      .connect(userId, socket.id)
       .then((becameOnline) => {
         if (becameOnline) broadcastPresence(io, userId, true, new Date().toISOString());
       })
@@ -71,7 +87,7 @@ export function initSockets(io: AppServer): void {
     socket.on('disconnect', () => {
       const at = new Date();
       Promise.all(handlers.map((h) => h.cleanup()))
-        .then(() => presenceService.disconnect(userId, at))
+        .then(() => presenceService.disconnect(userId, socket.id, at))
         .then((becameOffline) => {
           if (becameOffline) broadcastPresence(io, userId, false, at.toISOString());
         })
