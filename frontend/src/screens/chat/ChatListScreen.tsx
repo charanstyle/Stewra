@@ -6,6 +6,7 @@ import type { ConversationSummary } from '@stewra/shared-types';
 import type { MainTabParamList } from '../../navigation/types';
 import { api } from '../../services/api';
 import { theme } from '../../theme/colors';
+import { TinyAvatar } from '../../components/chat/TinyAvatar';
 
 type Props = BottomTabScreenProps<MainTabParamList, 'Chats'>;
 
@@ -17,6 +18,18 @@ function titleFor(summary: ConversationSummary): string {
     return summary.conversation.title;
   }
   return summary.participants.map((participant) => participant.displayName).join(', ') || 'Conversation';
+}
+
+/**
+ * The profile photo to show on a list row: a group uses its own conversation avatar; a direct thread
+ * uses the single other participant's photo. Stewra (and any participant without a photo) has no
+ * avatarUrl and falls back to initials inside TinyAvatar.
+ */
+function avatarUrlFor(summary: ConversationSummary): string | null {
+  if (summary.conversation.type === 'group') {
+    return summary.conversation.avatarUrl;
+  }
+  return summary.participants[0]?.avatarUrl ?? null;
 }
 
 export default function ChatListScreen({ navigation }: Props): React.JSX.Element {
@@ -65,7 +78,7 @@ export default function ChatListScreen({ navigation }: Props): React.JSX.Element
         style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       >
         <View style={styles.avatar}>
-          <Text style={styles.avatarInitial}>{title.charAt(0).toUpperCase()}</Text>
+          <TinyAvatar name={title} avatarUrl={avatarUrlFor(item)} size={48} />
         </View>
         <View style={styles.rowBody}>
           <Text style={styles.rowTitle} numberOfLines={1}>
@@ -120,18 +133,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: theme.radius.pill,
-    backgroundColor: theme.colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginRight: theme.spacing.md,
-  },
-  avatarInitial: {
-    color: theme.colors.onPrimary,
-    fontSize: 18,
-    fontWeight: '600',
   },
   rowBody: {
     flex: 1,
