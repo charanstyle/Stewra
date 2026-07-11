@@ -153,10 +153,39 @@ async function request<T>(path: string, options: RequestOptions = {}, isRetry = 
  * playback source here — so this downloads once per media id and reuses the
  * cached copy on subsequent calls.
  */
+/**
+ * `File.downloadFileAsync` writes the response body to disk regardless of HTTP status, so a failed
+ * media GET (401/403/404) leaves the API's JSON error envelope cached under the asset's stable
+ * filename — and the plain `exists` short-circuit would then serve that poison forever, so the image
+ * silently falls back to initials and never self-heals. Guard against it generically: our API only
+ * ever returns a JSON object (`{…}`) on failure, and no real media file (jpeg `FF D8`, png `89 50`,
+ * webp `RIFF`, wav `RIFF`, mp4 `…ftyp`) ever begins with `{`. Only small files are byte-scanned so a
+ * large legitimate clip is never read into memory just to validate it.
+ */
+async function isPoisonedMediaFile(file: File): Promise<boolean> {
+  if (!file.exists) return true;
+  const size = file.size ?? 0;
+  if (size === 0) return true;
+  if (size >= 4096) return false; // too big to be an error envelope — real media, keep it
+  const bytes = await file.bytes();
+  let i = 0;
+  while (
+    i < bytes.length &&
+    (bytes[i] === 0x20 || bytes[i] === 0x09 || bytes[i] === 0x0a || bytes[i] === 0x0d)
+  ) {
+    i += 1;
+  }
+  return bytes[i] === 0x7b; // '{' — a JSON API error body, not media
+}
+
 export async function fetchAuthedMediaFile(mediaUrl: string, mediaId: string): Promise<string> {
   const destination = new File(Paths.cache, `stewra-media-${mediaId}`);
   if (destination.exists) {
-    return destination.uri;
+    if (!(await isPoisonedMediaFile(destination))) {
+      return destination.uri;
+    }
+    // Clear a stale error body cached by an earlier failed fetch so this attempt can self-heal.
+    destination.delete();
   }
 
   const tokens = await readTokens();
@@ -167,8 +196,14 @@ export async function fetchAuthedMediaFile(mediaUrl: string, mediaId: string): P
   const url = mediaUrl.startsWith('http') ? mediaUrl : `${config.apiBaseUrl}${mediaUrl}`;
   try {
     const downloaded = await File.downloadFileAsync(url, destination, { headers });
+    if (await isPoisonedMediaFile(downloaded)) {
+      if (downloaded.exists) downloaded.delete();
+      throw new ApiError('Media response was not a valid file', 'MEDIA_FETCH_FAILED');
+    }
     return downloaded.uri;
   } catch (error) {
+    if (destination.exists) destination.delete();
+    if (error instanceof ApiError) throw error;
     throw new ApiError(
       error instanceof Error ? error.message : 'Failed to fetch media',
       'MEDIA_FETCH_FAILED',
