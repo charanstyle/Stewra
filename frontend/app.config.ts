@@ -83,6 +83,15 @@ const config: ExpoConfig = {
       },
     ],
     [
+      // Profile-photo picker (Settings → Change photo). On Android 13+ this uses
+      // the system photo picker, so no READ_MEDIA_IMAGES runtime grant is needed;
+      // the plugin still sets the iOS photo-library usage string below.
+      'expo-image-picker',
+      {
+        photosPermission: 'Stewra uses your photos so you can set a profile picture.',
+      },
+    ],
+    [
       'expo-build-properties',
       {
         // CallKit + PushKit floor; androidx.core-telecom requires API 26+.
