@@ -179,75 +179,84 @@ export default function ConversationScreen({ route, navigation }: Props): React.
   }, [conversationId, messages]);
 
   useEffect(() => {
-    let unsubscribed = false;
-    void connectSocket().then((socket) => {
-      if (unsubscribed) {
+    // Handlers are declared at effect scope (not inside the `.then`) so the SAME identities used to
+    // register are the ones the cleanup removes, and — crucially — the cleanup is returned by the
+    // EFFECT itself, not by the promise callback. Returning cleanup from inside `.then(...)` hands it
+    // to the promise (which discards it), so React never runs it: handlers leak onto the singleton
+    // socket and `chat:leave` never fires on unmount/conversation-switch.
+    const onMessage = (event: { message: Message }): void => {
+      if (event.message.conversationId !== conversationId) {
         return;
       }
-      socket.emit(CLIENT_EVENTS.CHAT_JOIN, { conversationId });
-
-      const onMessage = (event: { message: Message }): void => {
-        if (event.message.conversationId !== conversationId) {
-          return;
-        }
-        upsertMessage(event.message);
-      };
-      const onTyping = (event: { conversationId: string; userId: string; isTyping: boolean }): void => {
-        if (event.conversationId !== conversationId || event.userId === user?.id) {
-          return;
-        }
-        setPeerTyping(event.isTyping);
-      };
-      // Stewra-AI text turns: the assistant reply arrives over `stewra:reply` (not `chat:message`),
-      // preceded by a `stewra:thinking` ping and, on model/TTS failure, a `stewra:error`. Without
-      // these subscriptions a text reply is generated server-side but never rendered live.
-      const onStewraThinking = (event: { conversationId: string }): void => {
-        if (event.conversationId !== conversationId) {
-          return;
-        }
-        setStewraThinking(true);
-      };
-      const onStewraReply = (event: { message: Message }): void => {
-        if (event.message.conversationId !== conversationId) {
-          return;
-        }
-        setStewraThinking(false);
-        upsertMessage(event.message);
-      };
-      const onStewraError = (event: { conversationId: string }): void => {
-        if (event.conversationId !== conversationId) {
-          return;
-        }
-        setStewraThinking(false);
-      };
-      // A recipient came online / opened the thread: flip my matching bubble sent→delivered. Never
-      // downgrade one already read (read is the terminal state).
-      const onDelivered = (event: ChatDeliveredEvent): void => {
-        if (event.conversationId !== conversationId) return;
-        patchMessage(event.messageId, (msg) =>
-          msg.status === 'read'
-            ? msg
-            : { ...msg, deliveredAt: event.deliveredAt, status: 'delivered' },
-        );
-      };
-      // A recipient read one or more of my messages: attach each receipt and flip that bubble to read.
-      const onRead = (event: ChatReadEvent): void => {
-        if (event.conversationId !== conversationId) return;
-        for (const receipt of event.receipts) {
-          patchMessage(receipt.messageId, (msg) => {
-            const others = msg.readReceipts.filter((r) => r.userId !== receipt.userId);
-            return { ...msg, status: 'read', readReceipts: [...others, receipt] };
-          });
-        }
-      };
-      const onPresence = (event: PresenceUpdateEvent): void => {
-        setPresence((prev) => {
-          const next = new Map(prev);
-          next.set(event.userId, { status: event.status, lastActiveAt: event.lastActiveAt });
-          return next;
+      upsertMessage(event.message);
+    };
+    const onTyping = (event: { conversationId: string; userId: string; isTyping: boolean }): void => {
+      if (event.conversationId !== conversationId || event.userId === user?.id) {
+        return;
+      }
+      setPeerTyping(event.isTyping);
+    };
+    // Stewra-AI text turns: the assistant reply arrives over `stewra:reply` (not `chat:message`),
+    // preceded by a `stewra:thinking` ping and, on model/TTS failure, a `stewra:error`. Without
+    // these subscriptions a text reply is generated server-side but never rendered live.
+    const onStewraThinking = (event: { conversationId: string }): void => {
+      if (event.conversationId !== conversationId) {
+        return;
+      }
+      setStewraThinking(true);
+    };
+    const onStewraReply = (event: { message: Message }): void => {
+      if (event.message.conversationId !== conversationId) {
+        return;
+      }
+      setStewraThinking(false);
+      upsertMessage(event.message);
+    };
+    const onStewraError = (event: { conversationId: string }): void => {
+      if (event.conversationId !== conversationId) {
+        return;
+      }
+      setStewraThinking(false);
+    };
+    // A recipient came online / opened the thread: flip my matching bubble sent→delivered. Never
+    // downgrade one already read (read is the terminal state).
+    const onDelivered = (event: ChatDeliveredEvent): void => {
+      if (event.conversationId !== conversationId) return;
+      patchMessage(event.messageId, (msg) =>
+        msg.status === 'read'
+          ? msg
+          : { ...msg, deliveredAt: event.deliveredAt, status: 'delivered' },
+      );
+    };
+    // A recipient read one or more of my messages: attach each receipt and flip that bubble to read.
+    const onRead = (event: ChatReadEvent): void => {
+      if (event.conversationId !== conversationId) return;
+      for (const receipt of event.receipts) {
+        patchMessage(receipt.messageId, (msg) => {
+          const others = msg.readReceipts.filter((r) => r.userId !== receipt.userId);
+          return { ...msg, status: 'read', readReceipts: [...others, receipt] };
         });
-      };
+      }
+    };
+    const onPresence = (event: PresenceUpdateEvent): void => {
+      setPresence((prev) => {
+        const next = new Map(prev);
+        next.set(event.userId, { status: event.status, lastActiveAt: event.lastActiveAt });
+        return next;
+      });
+    };
 
+    // `connectSocket()` is a singleton, so this resolves fast (usually already-connected). Guard the
+    // registration with `disposed` in case the screen unmounts before the socket resolves, and keep a
+    // ref to whatever socket we joined on so cleanup detaches from the exact same instance.
+    let disposed = false;
+    let joined: Awaited<ReturnType<typeof connectSocket>> | null = null;
+    void connectSocket().then((socket) => {
+      if (disposed) {
+        return;
+      }
+      joined = socket;
+      socket.emit(CLIENT_EVENTS.CHAT_JOIN, { conversationId });
       socket.on(SERVER_EVENTS.CHAT_MESSAGE, onMessage);
       socket.on(SERVER_EVENTS.CHAT_TYPING, onTyping);
       socket.on(SERVER_EVENTS.STEWRA_THINKING, onStewraThinking);
@@ -256,21 +265,23 @@ export default function ConversationScreen({ route, navigation }: Props): React.
       socket.on(SERVER_EVENTS.CHAT_MESSAGE_DELIVERED, onDelivered);
       socket.on(SERVER_EVENTS.CHAT_MESSAGE_READ, onRead);
       socket.on(SERVER_EVENTS.PRESENCE_UPDATE, onPresence);
-
-      return (): void => {
-        socket.emit(CLIENT_EVENTS.CHAT_LEAVE, { conversationId });
-        socket.off(SERVER_EVENTS.CHAT_MESSAGE, onMessage);
-        socket.off(SERVER_EVENTS.CHAT_TYPING, onTyping);
-        socket.off(SERVER_EVENTS.STEWRA_THINKING, onStewraThinking);
-        socket.off(SERVER_EVENTS.STEWRA_REPLY, onStewraReply);
-        socket.off(SERVER_EVENTS.STEWRA_ERROR, onStewraError);
-        socket.off(SERVER_EVENTS.CHAT_MESSAGE_DELIVERED, onDelivered);
-        socket.off(SERVER_EVENTS.CHAT_MESSAGE_READ, onRead);
-        socket.off(SERVER_EVENTS.PRESENCE_UPDATE, onPresence);
-      };
     });
+
     return () => {
-      unsubscribed = true;
+      disposed = true;
+      const socket = joined;
+      if (socket === null) {
+        return;
+      }
+      socket.emit(CLIENT_EVENTS.CHAT_LEAVE, { conversationId });
+      socket.off(SERVER_EVENTS.CHAT_MESSAGE, onMessage);
+      socket.off(SERVER_EVENTS.CHAT_TYPING, onTyping);
+      socket.off(SERVER_EVENTS.STEWRA_THINKING, onStewraThinking);
+      socket.off(SERVER_EVENTS.STEWRA_REPLY, onStewraReply);
+      socket.off(SERVER_EVENTS.STEWRA_ERROR, onStewraError);
+      socket.off(SERVER_EVENTS.CHAT_MESSAGE_DELIVERED, onDelivered);
+      socket.off(SERVER_EVENTS.CHAT_MESSAGE_READ, onRead);
+      socket.off(SERVER_EVENTS.PRESENCE_UPDATE, onPresence);
     };
   }, [conversationId, user?.id, upsertMessage, patchMessage]);
 
