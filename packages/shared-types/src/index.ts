@@ -55,8 +55,15 @@ export type {
   MessageReaction,
   MessagePreview,
   ReadReceipt,
+  ProposedEmail,
+  ProposedActionStatus,
 } from './models/message';
-export { MESSAGE_TYPES, MESSAGE_STATUSES, REACTION_TYPES } from './models/message';
+export {
+  MESSAGE_TYPES,
+  MESSAGE_STATUSES,
+  REACTION_TYPES,
+  PROPOSED_ACTION_STATUSES,
+} from './models/message';
 export type {
   CallKind,
   CallStatus,
@@ -181,6 +188,9 @@ export type {
   SendVoiceMessageResponse,
   SendMediaMessageResponse,
   ListReadReceiptsResponse,
+  ConfirmEmailAction,
+  ConfirmEmailRequest,
+  ConfirmEmailResponse,
 } from './api/messages';
 export type { UploadAvatarResponse } from './api/avatar';
 export type {

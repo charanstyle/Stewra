@@ -95,6 +95,12 @@ export interface Message {
   readonly readReceipts: ReadonlyArray<ReadReceipt>;
   readonly createdAt: ISODateString;
   readonly reactions: ReadonlyArray<MessageReaction>;
+  /**
+   * A Stewra-proposed email awaiting the user's confirmation (or its terminal outcome), when this
+   * assistant message offered to send one. Null for every ordinary message. Drives the in-chat
+   * "Send this email?" confirmation card and its post-send state.
+   */
+  readonly proposedEmail: ProposedEmail | null;
 }
 
 /** A compact last-message projection for conversation-list rows (no reactions/media payload). */
@@ -120,4 +126,36 @@ export interface ReadReceipt {
   readonly messageId: UUID;
   readonly userId: UUID;
   readonly readAt: ISODateString;
+}
+
+/**
+ * Lifecycle of a Stewra-proposed action the user must confirm. `pending` awaits the user's tap;
+ * `sent`/`cancelled` are the terminal outcomes of confirming or dismissing; `failed` means the user
+ * confirmed but the send could not be carried out (e.g. no connected account with send permission).
+ */
+export type ProposedActionStatus = 'pending' | 'sent' | 'cancelled' | 'failed';
+export const PROPOSED_ACTION_STATUSES: ReadonlyArray<ProposedActionStatus> = [
+  'pending',
+  'sent',
+  'cancelled',
+  'failed',
+];
+
+/**
+ * An email Stewra has drafted and is proposing to send on the user's behalf, attached to the assistant
+ * message that offered it. Stewra (the untrusted agent) only ever produces this DRAFT — the actual send
+ * is performed by the trusted control plane after the user explicitly confirms (the confirm-gated
+ * executor). `provider` names the delivery backend the send used/would use (e.g. `google`); it is
+ * resolved from the user's connected accounts, so the tool is not Gmail-only by construction. On a
+ * `failed` outcome `failureReason` is a short machine code the client maps to a friendly message.
+ */
+export interface ProposedEmail {
+  readonly status: ProposedActionStatus;
+  readonly to: string;
+  readonly subject: string;
+  readonly body: string;
+  /** The delivery backend the send resolved to (e.g. `google`); null while still `pending`. */
+  readonly provider: string | null;
+  /** Short code explaining a `failed` send (e.g. `no_send_account`, `send_failed`); null otherwise. */
+  readonly failureReason: string | null;
 }

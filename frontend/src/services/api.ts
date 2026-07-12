@@ -37,6 +37,8 @@ import type {
   ListMessagesResponse,
   ReactRequest,
   ReactResponse,
+  ConfirmEmailRequest,
+  ConfirmEmailResponse,
   DeleteMessageResponse,
   SendVoiceMessageResponse,
   ListReadReceiptsResponse,
@@ -282,6 +284,10 @@ export const api = {
 
   reactToMessage: (messageId: string, body: ReactRequest): Promise<ReactResponse> =>
     request(`/messages/${messageId}/react`, { method: 'POST', body }),
+
+  /** Confirm (send) or dismiss (cancel) an email Stewra proposed on an assistant message. */
+  confirmEmail: (messageId: string, body: ConfirmEmailRequest): Promise<ConfirmEmailResponse> =>
+    request(`/messages/${messageId}/confirm-email`, { method: 'POST', body }),
 
   /** Per-participant read acknowledgements for one message (drives the read-receipt detail view). */
   listMessageReceipts: (messageId: string): Promise<ListReadReceiptsResponse> =>

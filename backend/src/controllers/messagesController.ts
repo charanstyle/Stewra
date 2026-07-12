@@ -6,6 +6,8 @@ import {
   type ChatDeliveredEvent,
   type ChatMessageEvent,
   type ChatReactionEvent,
+  type ConfirmEmailAction,
+  type ConfirmEmailResponse,
   type Conversation,
   type DeleteMessageResponse,
   type ListMessagesResponse,
@@ -44,6 +46,8 @@ const listSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 const idParamsSchema = z.object({ id: z.string().uuid() });
+const confirmEmailValues: [ConfirmEmailAction, ...ConfirmEmailAction[]] = ['send', 'cancel'];
+const confirmEmailSchema = z.object({ action: z.enum(confirmEmailValues) });
 // Multipart text fields for POST /messages/voice (the audio itself arrives as the `audio` file part).
 const voiceFieldsSchema = z.object({ conversationId: z.string().uuid() });
 const reactSchema = z.object({
@@ -208,6 +212,28 @@ class MessagesController extends BaseController {
       this.handleSuccess(res, body);
     } catch (error) {
       this.handleError(error, res, 'MessagesController.react');
+    }
+  }
+
+  /**
+   * POST /messages/:id/confirm-email — resolve the email Stewra proposed on an assistant message:
+   * `send` runs the confirm-gated executor, `cancel` dismisses it. Returns the updated message and
+   * fans it out to the conversation room so the confirmation card re-renders in its terminal state.
+   */
+  async confirmEmail(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = this.userId(req);
+      const { id } = parse(idParamsSchema, req.params);
+      const { action } = parse(confirmEmailSchema, req.body);
+      const message = await messageService.confirmEmailAction(userId, id, action);
+
+      const event: ChatMessageEvent = { message };
+      emitToConversation(message.conversationId, SERVER_EVENTS.CHAT_MESSAGE, event);
+
+      const body: ConfirmEmailResponse = { message };
+      this.handleSuccess(res, body);
+    } catch (error) {
+      this.handleError(error, res, 'MessagesController.confirmEmail');
     }
   }
 

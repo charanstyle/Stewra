@@ -62,3 +62,19 @@ export interface SendMediaMessageResponse {
 export interface ListReadReceiptsResponse {
   readonly receipts: ReadonlyArray<ReadReceipt>;
 }
+
+/** Resolve a Stewra-proposed email: `send` executes the confirm-gated send, `cancel` dismisses it. */
+export type ConfirmEmailAction = 'send' | 'cancel';
+
+/**
+ * Confirm (or dismiss) the email Stewra proposed on an assistant message
+ * (POST /messages/:id/confirm-email). The stored message's `proposedEmail.status` transitions to
+ * `sent`/`failed` (on `send`) or `cancelled` (on `cancel`); the updated message is returned so the
+ * card re-renders in its terminal state, and is also pushed to the room over the chat socket.
+ */
+export interface ConfirmEmailRequest {
+  readonly action: ConfirmEmailAction;
+}
+export interface ConfirmEmailResponse {
+  readonly message: Message;
+}

@@ -338,8 +338,20 @@ export interface PasswordResetCodesTable {
   created_at: CreatedAt;
 }
 
-/** jsonb bag for message/call structured context. Never raw records or secrets. */
-export type JsonMetadata = Record<string, string | number | boolean | null>;
+/** Any JSON-representable value — scalars, arrays, or nested objects. */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ReadonlyArray<JsonValue>
+  | { readonly [key: string]: JsonValue };
+
+/**
+ * jsonb bag for message/call structured context. Never raw records or secrets. Values may be nested
+ * JSON (e.g. a message's `proposedEmail` draft), not just scalars.
+ */
+export type JsonMetadata = Record<string, JsonValue>;
 
 /**
  * A directed contact edge (migration 014). One row per direction so "is a contact" is a symmetric

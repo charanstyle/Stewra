@@ -1,7 +1,8 @@
 import { SERVER_EVENTS } from '@stewra/shared-types';
-import type { ChatDeliveredEvent, Conversation, Message, Paginated, ReactionType, ReadReceipt } from '@stewra/shared-types';
+import type { ChatDeliveredEvent, ConfirmEmailAction, Conversation, Message, Paginated, ProposedEmail, ReactionType, ReadReceipt } from '@stewra/shared-types';
 import { messageRepository, MessageRepository } from '../repositories/messageRepository';
 import { conversationService } from './conversationService';
+import { emailActionService } from './emailActionService';
 import { mediaService } from './mediaService';
 import { sttService } from './sttService';
 import { stewraConversationService } from './stewraConversationService';
@@ -199,6 +200,45 @@ class MessageService {
     const updated = await messageRepository.findById(messageId, userId);
     if (updated === undefined) throw new NotFoundError('Message not found');
     return updated;
+  }
+
+  /**
+   * Confirm (send) or dismiss (cancel) the email Stewra proposed on an assistant message. Loads the
+   * message for the caller, asserts they participate in its conversation, and requires a `pending`
+   * proposal (so a proposal can't be double-sent or acted on by a non-participant). On `send` it runs
+   * the confirm-gated executor and folds the outcome into the proposal's terminal `sent`/`failed`
+   * state; on `cancel` it marks it `cancelled`. Returns the updated message so the caller can respond
+   * and fan it out over the socket.
+   */
+  async confirmEmailAction(
+    userId: string,
+    messageId: string,
+    action: ConfirmEmailAction,
+  ): Promise<Message> {
+    const message = await messageRepository.findById(messageId, userId);
+    if (message === undefined) throw new NotFoundError('Message not found');
+    await conversationService.assertParticipant(userId, message.conversationId);
+
+    const proposal = message.proposedEmail;
+    if (proposal === null) throw new ValidationError('This message has no email to confirm');
+    if (proposal.status !== 'pending') {
+      throw new ValidationError(`This email was already ${proposal.status}`);
+    }
+
+    let updated: ProposedEmail;
+    if (action === 'cancel') {
+      updated = { ...proposal, status: 'cancelled' };
+    } else {
+      const result = await emailActionService.send(userId, proposal);
+      updated = result.ok
+        ? { ...proposal, status: 'sent', provider: result.provider, failureReason: null }
+        : { ...proposal, status: 'failed', failureReason: result.failureReason };
+    }
+
+    await messageRepository.updateProposedEmail(messageId, updated);
+    const refreshed = await messageRepository.findById(messageId, userId);
+    if (refreshed === undefined) throw new NotFoundError('Message not found');
+    return refreshed;
   }
 
   /** Soft-delete a message the caller authored. */

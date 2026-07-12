@@ -21,6 +21,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type {
   ChatDeliveredEvent,
   ChatReadEvent,
+  ConfirmEmailAction,
   Message,
   PresenceStatus,
   PresenceUpdateEvent,
@@ -37,6 +38,7 @@ import { theme } from '../../theme/colors';
 import type { IconProps } from '../../components/icons/Icons';
 import { ImageIcon, MicIcon, PhoneIcon, PhoneOffIcon, VideoIcon } from '../../components/icons/Icons';
 import { MessageStatusIndicator } from '../../components/chat/MessageStatusIndicator';
+import { ProposedEmailCard } from '../../components/chat/ProposedEmailCard';
 import { TypingIndicator } from '../../components/chat/TypingIndicator';
 import { TinyAvatar } from '../../components/chat/TinyAvatar';
 import { ReadReceiptManager } from '../../components/chat/ReadReceiptManager';
@@ -114,6 +116,8 @@ export default function ConversationScreen({ route, navigation }: Props): React.
   const [voiceState, setVoiceState] = useState<'idle' | 'recording' | 'uploading'>('idle');
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [receiptsFor, setReceiptsFor] = useState<Message | null>(null);
+  // The assistant message whose proposed-email confirm request is currently in flight (disables its card).
+  const [confirmingEmailId, setConfirmingEmailId] = useState<string | null>(null);
   const listRef = useRef<FlatList<Message> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -142,6 +146,26 @@ export default function ConversationScreen({ route, navigation }: Props): React.
       return next;
     });
   }, []);
+
+  /**
+   * Confirm (send) or dismiss (cancel) an email Stewra proposed. The backend runs the confirm-gated
+   * send and returns the updated message (its `proposedEmail.status` now terminal); we upsert it so the
+   * card re-renders. The same message also arrives over the socket — upsert-by-id makes that idempotent.
+   */
+  const handleConfirmEmail = useCallback(
+    async (messageId: string, action: ConfirmEmailAction): Promise<void> => {
+      setConfirmingEmailId(messageId);
+      try {
+        const res = await api.confirmEmail(messageId, { action });
+        upsertMessage(res.message);
+      } catch {
+        // Leave the proposal `pending` so the user can retry; a transient failure shouldn't lose the draft.
+      } finally {
+        setConfirmingEmailId((current) => (current === messageId ? null : current));
+      }
+    },
+    [upsertMessage],
+  );
 
   const isStewra = messages.length > 0 && messages[0]?.senderKind === 'assistant';
   const participantsById = useMemo(
@@ -438,6 +462,13 @@ export default function ConversationScreen({ route, navigation }: Props): React.
               ) : null}
               <Text style={styles.bubbleText}>{bubbleLabel(item)}</Text>
             </View>
+            {item.proposedEmail !== null ? (
+              <ProposedEmailCard
+                proposal={item.proposedEmail}
+                busy={confirmingEmailId === item.id}
+                onConfirm={(action) => void handleConfirmEmail(item.id, action)}
+              />
+            ) : null}
             <View style={styles.metaRow}>
               <Text style={styles.metaTime}>{time}</Text>
               {mine ? <MessageStatusIndicator status={item.status} /> : null}
@@ -453,7 +484,7 @@ export default function ConversationScreen({ route, navigation }: Props): React.
         </View>
       );
     },
-    [user?.id, messages, participantsById],
+    [user?.id, messages, participantsById, confirmingEmailId, handleConfirmEmail],
   );
 
   const peer = participants.find((p) => p.id !== user?.id) ?? null;

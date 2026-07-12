@@ -39,6 +39,10 @@ router.post('/:id/react', requireAuth, verified, (req, res) => {
   void messagesController.react(req, res);
 });
 
+router.post('/:id/confirm-email', requireAuth, verified, (req, res) => {
+  void messagesController.confirmEmail(req, res);
+});
+
 router.delete('/:id', requireAuth, verified, (req, res) => {
   void messagesController.delete(req, res);
 });

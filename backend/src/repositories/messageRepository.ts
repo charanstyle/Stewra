@@ -4,11 +4,15 @@ import type {
   MessagePreview,
   MessageStatus,
   MessageType,
+  ProposedActionStatus,
+  ProposedEmail,
   ReactionType,
   ReadReceipt,
   SenderKind,
 } from '@stewra/shared-types';
+import { PROPOSED_ACTION_STATUSES } from '@stewra/shared-types';
 import { db } from '../database/index';
+import type { JsonMetadata, JsonValue } from '../database/types';
 import { conversationRepository } from './conversationRepository';
 
 interface MessageRow {
@@ -24,6 +28,7 @@ interface MessageRow {
   readonly thumbnail_url: string | null;
   readonly audio_url: string | null;
   readonly transcript: string | null;
+  readonly metadata: JsonMetadata;
   readonly reply_to_message_id: string | null;
   readonly is_edited: boolean;
   readonly is_deleted: boolean;
@@ -57,6 +62,7 @@ const MESSAGE_COLUMNS = [
   'thumbnail_url',
   'audio_url',
   'transcript',
+  'metadata',
   'reply_to_message_id',
   'is_edited',
   'is_deleted',
@@ -102,6 +108,46 @@ function deriveStatus(
   return 'sent';
 }
 
+/** A non-null, non-array JSON object (the branch of JsonValue with string-keyed members). */
+function isJsonObject(value: JsonValue | undefined): value is { readonly [key: string]: JsonValue } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Narrow a raw string to the `ProposedActionStatus` union without a type assertion. */
+function isProposedActionStatus(value: string): value is ProposedActionStatus {
+  return PROPOSED_ACTION_STATUSES.some((status) => status === value);
+}
+
+/**
+ * Recover a `ProposedEmail` from a message's `metadata` jsonb bag (stored under the `proposedEmail`
+ * key by the compose/confirm paths). Defensive: any missing/malformed shape yields null so a message
+ * with unrelated metadata (e.g. a call marker's `call_id`) is simply treated as having no proposal.
+ */
+function parseProposedEmail(metadata: JsonMetadata | null | undefined): ProposedEmail | null {
+  const raw = metadata?.['proposedEmail'];
+  if (!isJsonObject(raw)) {
+    return null;
+  }
+  const { status, to, subject, body, provider, failureReason } = raw;
+  if (
+    typeof status !== 'string' ||
+    typeof to !== 'string' ||
+    typeof subject !== 'string' ||
+    typeof body !== 'string' ||
+    !isProposedActionStatus(status)
+  ) {
+    return null;
+  }
+  return {
+    status,
+    to,
+    subject,
+    body,
+    provider: typeof provider === 'string' ? provider : null,
+    failureReason: typeof failureReason === 'string' ? failureReason : null,
+  };
+}
+
 function toMessage(
   row: MessageRow,
   reactions: ReadonlyArray<MessageReaction>,
@@ -129,6 +175,7 @@ function toMessage(
     readReceipts: receipts,
     createdAt: row.created_at.toISOString(),
     reactions,
+    proposedEmail: parseProposedEmail(row.metadata),
   };
 }
 
@@ -192,6 +239,13 @@ export interface NewMessage {
   readonly audioUrl?: string | null;
   readonly transcript?: string | null;
   readonly replyToId?: string | null;
+  /** A Stewra-proposed email to attach to this (assistant) message; stored in the `metadata` bag. */
+  readonly proposedEmail?: ProposedEmail | null;
+}
+
+/** Serialize a proposal into the jsonb `metadata` insert/update string, or `undefined` for none. */
+function serializeMetadata(proposedEmail: ProposedEmail | null | undefined): string | undefined {
+  return proposedEmail ? JSON.stringify({ proposedEmail }) : undefined;
 }
 
 export class MessageRepository {
@@ -215,6 +269,7 @@ export class MessageRepository {
           thumbnail_url: input.thumbnailUrl ?? null,
           audio_url: input.audioUrl ?? null,
           transcript: input.transcript ?? null,
+          metadata: serializeMetadata(input.proposedEmail),
           reply_to_message_id: input.replyToId ?? null,
         })
         .returning(MESSAGE_COLUMNS)
@@ -224,6 +279,19 @@ export class MessageRepository {
       // `sent` (or `delivered` once markDeliveredToOnline stamps it and re-emits).
       return toMessage(row, [], [], input.senderId ?? '');
     });
+  }
+
+  /**
+   * Replace the proposed-email payload in a message's `metadata` bag (the confirm-gated executor's
+   * pending→sent/failed/cancelled transition). Overwrites the whole bag with the new proposal — a
+   * proposal-bearing assistant message carries no other metadata, so nothing is lost.
+   */
+  async updateProposedEmail(messageId: string, proposedEmail: ProposedEmail): Promise<void> {
+    await db
+      .updateTable('messages')
+      .set({ metadata: JSON.stringify({ proposedEmail }) })
+      .where('id', '=', messageId)
+      .execute();
   }
 
   /** A single message hydrated for `viewerId` (drives that viewer's own-message status ticks). */

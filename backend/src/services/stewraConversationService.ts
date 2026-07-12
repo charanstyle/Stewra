@@ -3,6 +3,7 @@ import type { Conversation, ConversationTurn, Message } from '@stewra/shared-typ
 import { agentRuntime } from '../agent-host/agentHost';
 import { auditWriter } from '../control-plane/audit/auditWriter';
 import { messageRepository } from '../repositories/messageRepository';
+import { emailComposeService } from './emailComposeService';
 import { mediaService } from './mediaService';
 import { ttsService } from './ttsService';
 import { logger } from '../utils/logger';
@@ -33,7 +34,14 @@ class StewraConversationService {
     const history = await this.loadHistory(conversation.id, userMessage.id);
     const latestUserText = userMessage.transcript ?? userMessage.content ?? '';
 
-    const reply = await agentRuntime.converse(userId, history, latestUserText);
+    // If the user is asking Stewra to send an email, the (trusted) compose service drafts it for the
+    // user to confirm and gives us the chat line to reply with. Otherwise we fall back to the ordinary
+    // advice-only agent turn. The agent itself never sends — the draft rides on the message as a
+    // `pending` proposal until the user taps Send (the confirm-gated executor).
+    const proposal = await emailComposeService.maybePropose(history, latestUserText);
+    const reply = proposal
+      ? proposal.reply
+      : await agentRuntime.converse(userId, history, latestUserText);
 
     const audioUrl = await this.synthesize(userId, conversation.id, reply);
 
@@ -44,6 +52,16 @@ class StewraConversationService {
       type: 'text',
       content: reply,
       audioUrl,
+      proposedEmail: proposal
+        ? {
+            status: 'pending',
+            to: proposal.draft.to,
+            subject: proposal.draft.subject,
+            body: proposal.draft.body,
+            provider: null,
+            failureReason: null,
+          }
+        : null,
     });
 
     await auditWriter.write({
@@ -53,7 +71,7 @@ class StewraConversationService {
       resourceId: conversation.id,
       summary: reply,
       success: true,
-      metadata: { spoke: audioUrl !== null },
+      metadata: { spoke: audioUrl !== null, proposedEmail: proposal !== null },
     });
 
     return assistantMessage;

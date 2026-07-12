@@ -216,6 +216,44 @@ export function gmailClient(refreshToken: string): GmailClient {
   return google.gmail({ version: 'v1', auth: client });
 }
 
+/** A minimal outbound message: the resolved sender plus recipient/subject/plain-text body. */
+export interface OutboundGmail {
+  readonly from: string;
+  readonly to: string;
+  readonly subject: string;
+  readonly body: string;
+}
+
+/** Build a raw RFC 5322 message (base64url) for the Gmail send API — a plain-text, UTF-8 body. */
+function buildRawMessage(email: OutboundGmail): string {
+  // RFC 2047 encoded-word for a non-ASCII subject; a plain ASCII subject passes through untouched.
+  const subject = /[^ -~]/.test(email.subject)
+    ? `=?UTF-8?B?${Buffer.from(email.subject, 'utf8').toString('base64')}?=`
+    : email.subject;
+  const headers = [
+    `From: ${email.from}`,
+    `To: ${email.to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+  ];
+  const message = `${headers.join('\r\n')}\r\n\r\n${email.body}`;
+  return Buffer.from(message, 'utf8').toString('base64url');
+}
+
+/**
+ * Send a plain-text email AS the connected user via the Gmail API (`users.messages.send`), using the
+ * vaulted refresh token. Requires the `gmail.send` scope on the grant. Returns Gmail's message id.
+ * This is the ONLY write helper in this file — every other Gmail call here is strictly read-only.
+ */
+export async function sendGmailMessage(refreshToken: string, email: OutboundGmail): Promise<string> {
+  const gmail = gmailClient(refreshToken);
+  const raw = buildRawMessage(email);
+  const response = await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
+  return response.data.id ?? '';
+}
+
 /** A full message pulled for the encrypted store. Unlike the minimized-facts path, this DOES carry
  * the body — it is persisted (encrypted) in the control plane and never crosses to the agent. */
 export interface FetchedMessage {
