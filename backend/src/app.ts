@@ -20,18 +20,26 @@ import usersRoutes from './routes/users';
 import callsRoutes from './routes/calls';
 import mediaRoutes from './routes/media';
 import homeRoutes from './routes/home';
+import channelsRoutes from './routes/channels';
+import whatsappWebhookRoutes from './routes/whatsappWebhook';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 
 /**
  * Builds the Express app WITHOUT starting a listener, so tests (supertest) can exercise it and
- * `index.ts` can own the lifecycle. The middleware order is: security headers -> CORS -> JSON body
- * -> routes -> not-found -> terminal error handler.
+ * `index.ts` can own the lifecycle. The middleware order is: security headers -> CORS -> the raw-body
+ * webhook -> JSON body -> routes -> not-found -> terminal error handler.
  */
 export function createApp(): Express {
   const app = express();
 
   app.use(helmet());
   app.use(cors({ origin: config.web.appUrl, credentials: false }));
+
+  // BEFORE express.json(), deliberately. Meta signs the RAW bytes (X-Hub-Signature-256), and
+  // parse-then-re-serialize is not byte-identical — so letting the JSON parser touch this body first
+  // would invalidate every signature. This router installs its own express.raw().
+  app.use('/webhooks/whatsapp', whatsappWebhookRoutes);
+
   app.use(express.json({ limit: '1mb' }));
 
   // Liveness: the process is up. Ready: the DB is reachable (checked in index.ts via a probe route).
@@ -44,6 +52,7 @@ export function createApp(): Express {
   app.use('/email-verification', emailVerificationRoutes);
   app.use('/activity', activityRoutes);
   app.use('/connections', connectionRoutes);
+  app.use('/channels', channelsRoutes);
   app.use('/insights', insightRoutes);
   app.use('/insights', feedbackRoutes);
   app.use('/memory', memoryRoutes);

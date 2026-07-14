@@ -5,6 +5,14 @@ export type { UUID, ISODateString, ApiSuccess, ApiError, ApiResponse, Paginated 
 export type { User, UserRole } from './models/user';
 export type { Connection, ConnectionProvider, ConnectionStatus } from './models/connection';
 export type {
+  MessagingChannel,
+  ChannelIdentity,
+  ChannelLinkChallenge,
+  BridgeWaState,
+  BridgeDevice,
+} from './models/channel';
+export { BRIDGE_WA_STATES } from './models/channel';
+export type {
   Suggestion,
   SuggestionKind,
   SuggestionStatus,
@@ -193,6 +201,22 @@ export type {
   ConfirmEmailResponse,
 } from './api/messages';
 export type { UploadAvatarResponse } from './api/avatar';
+export type {
+  GrantWhatsappPersonalConsentRequest,
+  GrantWhatsappPersonalConsentResponse,
+  StartBridgePairingResponse,
+  ClaimBridgeTokenRequest,
+  ClaimBridgeTokenResponse,
+  ListBridgeDevicesResponse,
+  RevokeBridgeDeviceResponse,
+  GetWhatsappPersonalResponse,
+} from './api/channels';
+export {
+  WHATSAPP_PERSONAL_CONSENT_VERSION,
+  WHATSAPP_PERSONAL_CONSENT_SENTENCE,
+  normalizeConsentSentence,
+  isConsentSentenceValid,
+} from './api/channels';
 export type {
   IceServerConfig,
   TurnCredentialsResponse,

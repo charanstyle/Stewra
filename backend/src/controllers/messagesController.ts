@@ -1,6 +1,5 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import * as Sentry from '@sentry/node';
 import {
   SERVER_EVENTS,
   type ChatDeliveredEvent,
@@ -8,27 +7,22 @@ import {
   type ChatReactionEvent,
   type ConfirmEmailAction,
   type ConfirmEmailResponse,
-  type Conversation,
   type DeleteMessageResponse,
   type ListMessagesResponse,
   type ListReadReceiptsResponse,
-  type Message,
   type MessageReaction,
   type ReactResponse,
   type ReactionType,
   type SendMessageResponse,
   type SendVoiceMessageResponse,
-  type StewraErrorEvent,
-  type StewraReplyEvent,
-  type StewraThinkingEvent,
 } from '@stewra/shared-types';
 import { BaseController } from './baseController';
 import { messageService } from '../services/messageService';
+import { stewraTurnService } from '../services/stewraTurnService';
 import { config } from '../config/unifiedConfig';
 import { emitToConversation } from '../websocket/emitter';
 import { ServiceUnavailableError, ValidationError } from '../utils/errors';
 import { parse } from '../utils/validate';
-import { logger } from '../utils/logger';
 
 // Zod enum needs a non-empty tuple; derive it from the shared REACTION_TYPES source of truth.
 const REACTION_VALUES: [ReactionType, ...ReactionType[]] = ['like', 'love', 'haha', 'wow', 'sad', 'angry'];
@@ -90,39 +84,11 @@ class MessagesController extends BaseController {
       // path (converse can take seconds) so the caller's message renders immediately; the reply arrives
       // over the socket. Emit a "thinking" ping first so the client can show an indicator.
       if (conversation.type === 'stewra_ai') {
-        this.dispatchStewraReply(userId, conversation, message);
+        stewraTurnService.dispatchReply(userId, conversation, message);
       }
     } catch (error) {
       this.handleError(error, res, 'MessagesController.send');
     }
-  }
-
-  /**
-   * Fire-and-forget the Stewra-AI reply for a text turn: emit `stewra:thinking`, run the control-plane
-   * converse, then fan out the assistant message as `stewra:reply`. Errors are captured (never crash the
-   * process on a background rejection) and surfaced to the room as a thinking-cleared ping.
-   */
-  private dispatchStewraReply(userId: string, conversation: Conversation, userMessage: Message): void {
-    const thinking: StewraThinkingEvent = { conversationId: conversation.id };
-    emitToConversation(conversation.id, SERVER_EVENTS.STEWRA_THINKING, thinking);
-    void messageService
-      .generateStewraReply(userId, conversation, userMessage)
-      .then((assistantMessage) => {
-        const reply: StewraReplyEvent = { message: assistantMessage };
-        emitToConversation(conversation.id, SERVER_EVENTS.STEWRA_REPLY, reply);
-      })
-      .catch((error) => {
-        Sentry.captureException(error);
-        logger.error('Stewra reply generation failed', {
-          conversationId: conversation.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        const failure: StewraErrorEvent = {
-          conversationId: conversation.id,
-          message: 'Stewra could not reply just now. Please try again.',
-        };
-        emitToConversation(conversation.id, SERVER_EVENTS.STEWRA_ERROR, failure);
-      });
   }
 
   /**

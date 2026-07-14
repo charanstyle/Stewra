@@ -34,10 +34,19 @@ feature violates one of these, it doesn't ship — that restraint *is* the produ
    pre-loosens it for them.
 6. **Zero security knobs.** Safety is the default, not a configuration. No permission
    matrices. One plain-language consent decision at a time, in context.
-7. **Sanctioned, revocable connections only.** Email (Gmail/Graph), Calendar
-   (Google/Microsoft), banking (via aggregator). **No gray-market clients** (no Baileys-style
-   WhatsApp Web automation — it's ToS-violating, gets users banned, and is the opposite
-   of the trust promise). WhatsApp/iMessage are known gaps in v1, not problems to hack around.
+7. **Sanctioned, revocable connections only — and gray-market NEVER on our servers.** Email
+   (Gmail/Graph), Calendar (Google/Microsoft), banking (via aggregator). The default and
+   recommended WhatsApp path is Meta's official Cloud API: the user messages Stewra's business
+   number and no user account is ever at risk.
+
+   A companion-device client (Baileys-style) is permitted **only** under all of these, together:
+   it is **experimental and opt-in**, gated behind a **typed** acknowledgement that the user's
+   WhatsApp account can be permanently banned; it is **revocable** from the user's own phone; and
+   **it runs on the user's own machine — never on Stewra's servers.** That last clause is
+   load-bearing, not a slogan. Hosting the sessions ourselves would mean (a) holding live,
+   unscoped WhatsApp credentials for every user, and (b) pairing N unrelated accounts from one
+   datacenter IP — which is precisely the shape of a spam farm and makes *our* users likelier to
+   be banned than if they'd self-hosted. We do not build detection evasion. iMessage remains a gap.
 
 ---
 
@@ -236,10 +245,12 @@ Each milestone is shippable/testable on its own. Do them in order; don't skip ah
 - **Don't lead with autonomy.** OpenClaw already has capability; your edge is *trust*. Shipping
   "it does everything for you" on day one reintroduces exactly the fear that's your opportunity.
   One wrong autonomous action = uninstall. Wrong *advice* = "hmm, not quite." Advise first.
-- **Don't touch the gray market.** No WhatsApp-Web/Baileys-style automation. It violates ToS, gets
-  *your users* banned, is structurally fragile, and torches the trust you're selling. WhatsApp is a
-  gap in v1, full stop. (Re-check the EU DMA interoperability situation yearly — it *may* open a
-  sanctioned path eventually.)
+- **Don't host the gray market.** WhatsApp-Web/Baileys-style automation violates ToS and can get
+  *your users* banned. The sanctioned Cloud API is the default path. If a companion-device channel
+  ever ships, it ships under principle 7: experimental, opt-in, typed-consent-gated, and running on
+  the **user's own machine** — so the ban risk is theirs to accept and their credentials never touch
+  our infrastructure. Never run it on our servers, and never build evasion. (Re-check the EU DMA
+  interoperability situation yearly — it *may* open a sanctioned path eventually.)
 - **Don't build a permission UI.** The moment safety looks like config, you lose the common-man user.
   Safe-by-default, one plain decision at a time.
 - **Don't read other apps' notifications.** Impossible on iOS, fragile on Android, unnecessary —

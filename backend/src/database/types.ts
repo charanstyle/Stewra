@@ -2,6 +2,7 @@ import type { ColumnType, Generated } from 'kysely';
 import type {
   AuditAction,
   AuditResourceType,
+  BridgeWaState,
   BriefingSection,
   CallEndReason,
   CallKind,
@@ -11,6 +12,7 @@ import type {
   ConversationType,
   InviteStatus,
   MessageType,
+  MessagingChannel,
   ParticipantRole,
   ProcessDomain,
   ProcessDimension,
@@ -493,6 +495,121 @@ export interface MediaAssetsTable {
   created_at: CreatedAt;
 }
 
+/**
+ * Which external channel address belongs to which Stewra user (migration 028). This map is what turns an
+ * inbound webhook — which carries only a phone number — into an authenticated userId, so a row is a
+ * security assertion and is minted ONLY by the verified link flow.
+ */
+export interface ChannelIdentitiesTable {
+  id: Generated<string>;
+  user_id: string;
+  channel: MessagingChannel;
+  /** For WhatsApp, Meta's `wa_id`: an E.164 phone number with no leading '+'. */
+  external_id: string;
+  created_at: CreatedAt;
+}
+
+/** Single-use, short-lived code proving the phone holder is also the logged-in user (migration 028). */
+export interface ChannelLinkCodesTable {
+  id: Generated<string>;
+  user_id: string;
+  channel: MessagingChannel;
+  code: string;
+  expires_at: ColumnType<Date, Date, never>;
+  consumed_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+}
+
+/** Seen provider message ids (migration 028) — the idempotency lock against Meta's 7-day webhook retries. */
+export interface ChannelInboundMessagesTable {
+  id: Generated<string>;
+  channel: MessagingChannel;
+  /** Meta's `messages[].id` (`wamid...`), stable across redeliveries of the same message. */
+  provider_message_id: string;
+  received_at: CreatedAt;
+}
+
+/**
+ * The typed, versioned consent behind the experimental companion-device channel (migration 029). Stored
+ * verbatim, never updated — it is the record of what this user actually agreed to, in their own typing.
+ */
+export interface BridgeConsentsTable {
+  id: Generated<string>;
+  user_id: string;
+  version: number;
+  sentence: string;
+  consented_at: CreatedAt;
+}
+
+/**
+ * A registered Stewra Bridge install on a user's own machine (migration 029). Note the absent
+ * `revoked_at`: revoking DELETES the row, so a revoked credential cannot linger behind a filter that
+ * some future query forgets to apply.
+ */
+export interface BridgeDevicesTable {
+  id: Generated<string>;
+  user_id: string;
+  name: string;
+  /** SHA-256 of the bridge token. The plaintext token exists only in the pairing response. */
+  token_hash: string;
+  app_version: string;
+  wa_state: BridgeWaState;
+  consent_version: number;
+  consented_at: ColumnType<Date, Date, never>;
+  last_seen_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+}
+
+/**
+ * A chat the user has ALLOWED Stewra to see (migration 029). The row's existence is the permission —
+ * every other chat is dropped on the user's own machine and never reaches this database. Scoped to the
+ * user rather than the forwarding device: replacing a laptop should not erase what you allowed.
+ */
+export interface WhatsappChatsTable {
+  id: Generated<string>;
+  user_id: string;
+  /** Keyed HMAC of the JID — a deterministic handle that a phone number's low entropy can't unmask. */
+  jid_hmac: string;
+  jid_ciphertext: string;
+  display_name_ciphertext: Generated<string>;
+  is_self_chat: Generated<boolean>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/** A message in an allowed chat, body encrypted at rest exactly as an email body is (migration 029). */
+export interface WhatsappMessagesTable {
+  id: Generated<string>;
+  user_id: string;
+  chat_id: string;
+  /** Baileys' `key.id` — unique per chat, not globally. */
+  provider_message_id: string;
+  direction: 'inbound' | 'outbound';
+  from_me: Generated<boolean>;
+  body_ciphertext: Generated<string>;
+  sent_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+}
+
+/**
+ * The confirm-gated send queue (migration 029). Enqueued first, delivered when a bridge comes online, so
+ * a shut laptop costs latency and never correctness. `device_id` is which bridge DELIVERED it — null
+ * while pending, and nulled again if that device is later revoked, so an approved send is never lost.
+ */
+export interface WhatsappOutboundTable {
+  id: Generated<string>;
+  user_id: string;
+  chat_id: string;
+  device_id: ColumnType<string | null, string | null | undefined, string | null>;
+  body_ciphertext: string;
+  status: Generated<'pending' | 'sent' | 'failed'>;
+  attempts: Generated<number>;
+  provider_message_id: ColumnType<string | null, string | null | undefined, string | null>;
+  last_error: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+  sent_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -523,4 +640,12 @@ export interface Database {
   call_participants: CallParticipantsTable;
   call_push_tokens: CallPushTokensTable;
   media_assets: MediaAssetsTable;
+  channel_identities: ChannelIdentitiesTable;
+  channel_link_codes: ChannelLinkCodesTable;
+  channel_inbound_messages: ChannelInboundMessagesTable;
+  bridge_consents: BridgeConsentsTable;
+  bridge_devices: BridgeDevicesTable;
+  whatsapp_chats: WhatsappChatsTable;
+  whatsapp_messages: WhatsappMessagesTable;
+  whatsapp_outbound: WhatsappOutboundTable;
 }

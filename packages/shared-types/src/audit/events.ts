@@ -18,7 +18,10 @@ export type AuditResourceType =
   | 'call'
   // A stored email (thread/message) synced from Gmail, and a Stewra-produced suggestion/nudge.
   | 'email'
-  | 'suggestion';
+  | 'suggestion'
+  // A messaging channel the user can reach Stewra through (e.g. WhatsApp). Linking/unlinking one is a
+  // consequential, user-visible act, so it lands in the same append-only log as everything else.
+  | 'channel';
 
 /**
  * Actions the audit log records. `read` covers brokered data access; `insight` covers an
@@ -58,6 +61,11 @@ export type AuditAction =
   | 'archive'
   | 'label'
   | 'mark_read'
+  // `consent` records the user typing an explicit, VERSIONED acknowledgement of a risk before a feature
+  // is unlocked — currently the experimental companion-device WhatsApp channel, where the risk is a
+  // permanently banned account. It is its own action, not a `connect`, precisely because what is being
+  // recorded is the acceptance of a consequence rather than the attaching of a source.
+  | 'consent'
   | 'auth.register'
   | 'auth.login'
   | 'auth.refresh'

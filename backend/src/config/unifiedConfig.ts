@@ -230,6 +230,62 @@ const EnvSchema = z.object({
   UPLOADS_DIR: z.string().min(1).optional(),
   // Hard cap on an uploaded clip/attachment size, in bytes. Bounds multer + guards disk. Default 25 MB.
   MAX_UPLOAD_BYTES: z.coerce.number().int().min(1024).max(536870912).default(26214400),
+
+  // ── WhatsApp channel (Meta's OFFICIAL Cloud API) ──────────────────────────────────────────────────
+  // Master switch. When false, /channels/whatsapp + the webhook return 503 so a dev box without a Meta
+  // app isn't blocked. The four secrets below are required only when true (checked post-parse).
+  //
+  // This is the SANCTIONED path: users message Stewra's business number from their own WhatsApp app, the
+  // way they'd message an airline. Stewra never touches a user's WhatsApp account, so no user can be
+  // banned. The separate, experimental companion-device channel (WHATSAPP_PERSONAL_*) is NOT configured
+  // here and is NOT a server-side WhatsApp client: per build-plan principle 7 it runs in the user's own
+  // Stewra Bridge app. No Baileys credential, socket, or dependency may ever land in this process.
+  WHATSAPP_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // The Cloud API sender: Meta's numeric id for Stewra's business number (NOT the number itself).
+  WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
+  // Stewra's business number in E.164 WITHOUT '+', used to build the user's wa.me link-deeplink.
+  WHATSAPP_BUSINESS_NUMBER: z.string().regex(/^\d{7,15}$/).optional(),
+  // A Meta SYSTEM-USER token (never expires). A temp token dies in ~24h — never ship one.
+  WHATSAPP_ACCESS_TOKEN: z.string().min(1).optional(),
+  // Echoed back during Meta's GET webhook handshake to prove we own the endpoint. Our own random string.
+  WHATSAPP_VERIFY_TOKEN: z.string().min(16).optional(),
+  // The Meta app secret — keys the X-Hub-Signature-256 HMAC that authenticates every inbound webhook.
+  // Without it the webhook would accept a forged POST from anyone who guessed the URL.
+  WHATSAPP_APP_SECRET: z.string().min(1).optional(),
+  // Graph API version pinned per deploy — Meta deprecates versions on a schedule, so this must be a
+  // visible, auditable bump, never a hardcoded string buried in the sender.
+  WHATSAPP_GRAPH_VERSION: z.string().regex(/^v\d+\.\d+$/).default('v21.0'),
+  // Graph API origin. Overridable so the channel can be driven end-to-end against a local stand-in
+  // (and so a regional/proxied Graph endpoint is a config change, not a code change).
+  WHATSAPP_GRAPH_BASE_URL: z.string().url().default('https://graph.facebook.com'),
+  // How long a link code stays valid. Short by design: it's a possession proof, not a password.
+  WHATSAPP_LINK_CODE_TTL_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
+
+  // ── WhatsApp PERSONAL (experimental companion device, via the user-hosted Stewra Bridge) ──────────
+  // A SECOND, separate, opt-in channel. Everything above is Meta's sanctioned Cloud API; everything here
+  // is the unofficial path, where the user links their OWN WhatsApp account and CAN be permanently
+  // banned for it. Off by default, and gated behind a typed acknowledgement of exactly that.
+  //
+  // Note what is NOT in this block: no WhatsApp credential, no session, no socket. Per build-plan
+  // principle 7 the companion-device client runs on the USER'S OWN MACHINE. The backend's entire role is
+  // to authenticate that bridge, queue confirmed sends for it, and store what it forwards.
+  WHATSAPP_PERSONAL_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // Where the user downloads the bridge app. Required when the feature is on — the web UI must never
+  // carry a hardcoded URL, and there is no sensible default to guess.
+  WHATSAPP_PERSONAL_DOWNLOAD_URL: z.string().url().optional(),
+  // The oldest bridge build allowed to connect. This is a SAFETY control, not housekeeping: if a shipped
+  // bridge turns out to reconnect too aggressively or ignore a rate limit, the accounts it burns are our
+  // users' real accounts. Being able to refuse an old build is how we stop that spreading.
+  WHATSAPP_PERSONAL_MIN_BRIDGE_VERSION: z.string().regex(/^\d+\.\d+\.\d+$/).optional(),
+  // Hard ceiling on outbound sends, enforced in the bridge and re-checked here. Send volume is the single
+  // biggest driver of WhatsApp bans, so this is a safety device rather than a nicety — keep it low.
+  WHATSAPP_PERSONAL_MAX_SENDS_PER_MINUTE: z.coerce.number().int().min(1).max(60).default(10),
+  // How long forwarded WhatsApp message bodies are kept before the retention sweep deletes them.
+  // Mirrors the email store's window; the least data we can keep and still be useful.
+  WHATSAPP_PERSONAL_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  // A bridge token is a long-lived DEVICE credential, so it is deliberately not a JWT and has no expiry
+  // baked in — revocation is by database row, which is immediate. This bounds its raw entropy instead.
+  WHATSAPP_PERSONAL_BRIDGE_TOKEN_BYTES: z.coerce.number().int().min(32).max(64).default(32),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -286,6 +342,36 @@ if (env.VOICE_ENABLED) {
   ).filter((k) => !env[k]);
   if (missing.length > 0) {
     throw new Error(`VOICE_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+}
+
+// Fail loud when the WhatsApp channel is enabled but under-configured. A missing APP_SECRET would leave
+// the webhook unable to authenticate Meta (i.e. open to a forged POST), and a missing ACCESS_TOKEN means
+// replies silently never leave the building — both are worse than refusing to boot.
+if (env.WHATSAPP_ENABLED) {
+  const missing = (
+    [
+      'WHATSAPP_PHONE_NUMBER_ID',
+      'WHATSAPP_BUSINESS_NUMBER',
+      'WHATSAPP_ACCESS_TOKEN',
+      'WHATSAPP_VERIFY_TOKEN',
+      'WHATSAPP_APP_SECRET',
+    ] as const
+  ).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`WHATSAPP_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+}
+
+// Fail loud when the experimental companion-device channel is enabled but under-configured. Without a
+// download URL the web UI would offer a consent gate leading nowhere; without a minimum bridge version
+// we would have no way to refuse a build that is getting users banned. Both are worse than not booting.
+if (env.WHATSAPP_PERSONAL_ENABLED) {
+  const missing = (
+    ['WHATSAPP_PERSONAL_DOWNLOAD_URL', 'WHATSAPP_PERSONAL_MIN_BRIDGE_VERSION'] as const
+  ).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`WHATSAPP_PERSONAL_ENABLED=true requires: ${missing.join(', ')}`);
   }
 }
 
@@ -464,6 +550,35 @@ export const config = {
     piperBin: env.PIPER_BIN ?? '',
     piperVoice: env.PIPER_VOICE ?? '',
     ffmpegBin: env.FFMPEG_BIN ?? '',
+  },
+  whatsapp: {
+    // Master switch; when false the channel routes + webhook 503. Official Meta Cloud API only —
+    // users message Stewra's business number, so no user's WhatsApp account is ever at risk.
+    enabled: env.WHATSAPP_ENABLED,
+    phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID ?? '',
+    /** Stewra's own number, E.164 without '+', for the user's wa.me deep link. */
+    businessNumber: env.WHATSAPP_BUSINESS_NUMBER ?? '',
+    accessToken: env.WHATSAPP_ACCESS_TOKEN ?? '',
+    verifyToken: env.WHATSAPP_VERIFY_TOKEN ?? '',
+    appSecret: env.WHATSAPP_APP_SECRET ?? '',
+    graphVersion: env.WHATSAPP_GRAPH_VERSION,
+    /** Graph origin. Overridable so the channel can be driven against a local stand-in, or a proxied
+     *  / regional Graph endpoint, without a code change. */
+    graphBaseUrl: env.WHATSAPP_GRAPH_BASE_URL,
+    linkCodeTtlMs: env.WHATSAPP_LINK_CODE_TTL_MINUTES * 60 * 1000,
+  },
+  whatsappPersonal: {
+    // The EXPERIMENTAL companion-device channel. Separate namespace from `whatsapp` above on purpose:
+    // these two are different products with different risk profiles, and collapsing them into one config
+    // object is how someone eventually ships the dangerous one by flipping the safe one's switch.
+    enabled: env.WHATSAPP_PERSONAL_ENABLED,
+    /** Where the user gets the Stewra Bridge app. Empty unless the feature is enabled (fail-loud above). */
+    downloadUrl: env.WHATSAPP_PERSONAL_DOWNLOAD_URL ?? '',
+    /** Oldest bridge build allowed to connect — our lever to kill a build that is burning accounts. */
+    minBridgeVersion: env.WHATSAPP_PERSONAL_MIN_BRIDGE_VERSION ?? '',
+    maxSendsPerMinute: env.WHATSAPP_PERSONAL_MAX_SENDS_PER_MINUTE,
+    retentionDays: env.WHATSAPP_PERSONAL_RETENTION_DAYS,
+    bridgeTokenBytes: env.WHATSAPP_PERSONAL_BRIDGE_TOKEN_BYTES,
   },
   uploads: {
     // Mounted volume for uploaded/synthesized media; served only via authenticated GET /media/:id.

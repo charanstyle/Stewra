@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from 'node:crypto';
 import { config } from '../../config/unifiedConfig';
 
 /**
@@ -30,6 +30,25 @@ export function encryptField(plaintext: string): string {
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const authTag = cipher.getAuthTag();
   return `${iv.toString('base64')}.${authTag.toString('base64')}.${ciphertext.toString('base64')}`;
+}
+
+/**
+ * A separate HMAC subkey, derived from the same master key rather than BEING it. Using one key for two
+ * primitives (AES-GCM and HMAC) is the kind of shortcut that is fine right up until it isn't, and HKDF
+ * costs four lines. The `info` string domain-separates this use from any future derived key.
+ */
+const HMAC_KEY = Buffer.from(hkdfSync('sha256', KEY, Buffer.alloc(0), 'stewra:field-hmac:v1', 32));
+
+/**
+ * A deterministic, keyed handle for a value we must look up by equality but should not store in the
+ * clear — currently a WhatsApp JID.
+ *
+ * This is an HMAC and NOT a bare SHA-256 for a specific reason: a phone number carries only ~10 digits
+ * of entropy, so an unkeyed hash of one is reversible by brute force in seconds and would be security
+ * theatre. Keyed with a secret the database dump does not contain, the handle is inert without the key.
+ */
+export function hmacField(plaintext: string): string {
+  return createHmac('sha256', HMAC_KEY).update(plaintext, 'utf8').digest('hex');
 }
 
 /** Decrypt an `iv.tag.ciphertext` base64 envelope produced by {@link encryptField}. */
