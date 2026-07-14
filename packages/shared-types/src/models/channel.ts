@@ -55,22 +55,17 @@ export interface ChannelLinkChallenge {
  * phone) unlinked us and can simply re-pair; the second means WhatsApp took the account, which is the
  * outcome they were warned about and must never be softened into a generic "disconnected".
  */
-export type BridgeWaState =
-  | 'disconnected'
-  | 'pairing'
-  | 'connecting'
-  | 'open'
-  | 'logged_out'
-  | 'banned';
-
-export const BRIDGE_WA_STATES: readonly BridgeWaState[] = [
+export const BRIDGE_WA_STATES = [
   'disconnected',
   'pairing',
   'connecting',
   'open',
   'logged_out',
   'banned',
-];
+] as const;
+
+/** Derived from the list above, so the runtime values and the type can never drift apart. */
+export type BridgeWaState = (typeof BRIDGE_WA_STATES)[number];
 
 /**
  * One registered Stewra Bridge install — the user's own computer, holding the WhatsApp companion

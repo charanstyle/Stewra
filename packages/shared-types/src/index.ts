@@ -260,6 +260,20 @@ export type {
   StewraErrorEvent,
 } from './realtime/payloads';
 
+// Realtime — the /bridge namespace (Stewra Bridge on the user's own machine)
+export { BRIDGE_CLIENT_EVENTS, BRIDGE_SERVER_EVENTS } from './realtime/bridge';
+export type {
+  BridgeClientEvent,
+  BridgeServerEvent,
+  BridgeHelloPayload,
+  BridgeStatePayload,
+  BridgeInboundPayload,
+  BridgeAllowedChat,
+  BridgeAllowedChatsPayload,
+  BridgeSendPayload,
+  BridgeSendAck,
+} from './realtime/bridge';
+
 // Audit
 export type { AuditResourceType, AuditAction, AuditEvent, NewAuditEvent } from './audit/events';
 

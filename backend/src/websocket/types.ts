@@ -3,6 +3,17 @@ import type { DefaultEventsMap, Server, Socket } from 'socket.io';
 /** Per-connection state set by the auth middleware. `userId` is the authenticated subject. */
 export interface SocketData {
   userId: string;
+  /**
+   * The Stewra Bridge device this socket speaks for. Present ONLY on `/bridge` sockets — never on a user
+   * client, which has no device.
+   *
+   * It lives here, optional, rather than in a `BridgeSocketData` of its own because Socket.IO pins a
+   * single `SocketData` type across every namespace of a server: `io.of('/bridge')` cannot hand back a
+   * differently-typed namespace. `registerBridgeHandler` therefore checks for it at the door and refuses
+   * the connection if it is missing, so every line of bridge code below that check has a real device id —
+   * a runtime guarantee, not a type assertion papering over the library's shape.
+   */
+  deviceId?: string;
 }
 
 /**

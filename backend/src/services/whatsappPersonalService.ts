@@ -15,6 +15,7 @@ import { config } from '../config/unifiedConfig';
 import { auditWriter } from '../control-plane/audit/auditWriter';
 import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository';
 import { channelIdentityRepository } from '../repositories/channelIdentityRepository';
+import { notifyRevoked } from '../websocket/bridgeEmitter';
 import { AuthenticationError, ForbiddenError, ServiceUnavailableError, ValidationError } from '../utils/errors';
 import { logger } from '../utils/logger';
 
@@ -234,6 +235,10 @@ class WhatsappPersonalService {
     const revoked = await bridgeDeviceRepository.revoke(userId, deviceId);
 
     if (revoked) {
+      // The token row is already gone, so the device can never reconnect. This tells it to stop NOW —
+      // and to wipe the WhatsApp session it is holding — instead of continuing on its open socket.
+      await notifyRevoked(userId, deviceId);
+
       await auditWriter.write({
         userId,
         action: 'disconnect',

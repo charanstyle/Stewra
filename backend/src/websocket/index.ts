@@ -10,8 +10,12 @@ import { socketAuthMiddleware } from './socketAuthMiddleware';
 import { PresenceHandler } from './presenceHandler';
 import { ChatHandler } from './chatHandler';
 import { CallSignalingHandler } from './callSignalingHandler';
+import { bridgeAuthMiddleware } from './bridgeAuthMiddleware';
+import { registerBridgeHandler } from './bridgeHandler';
+import { setBridgeNamespace } from './bridgeEmitter';
 import { config } from '../config/unifiedConfig';
 import type { BaseSocketHandler } from './baseSocketHandler';
+import type { BridgeNamespace, BridgeSocket } from './bridgeTypes';
 import type { AppServer, AppSocket } from './types';
 import { presenceRoom, userRoom } from './types';
 
@@ -98,7 +102,37 @@ export function initSockets(io: AppServer): void {
     });
   });
 
+  initBridgeNamespace(io);
+
   logger.info('Socket.IO realtime layer initialized');
+}
+
+/**
+ * The `/bridge` namespace: where the Stewra Bridge desktop apps live.
+ *
+ * A SEPARATE NAMESPACE, not a flag on the main one. A bridge is not a user client — it authenticates with
+ * a revocable device token rather than a JWT, it must never join a conversation or presence room, and it
+ * must never be able to emit a chat event. Isolating it means none of that is a rule someone has to
+ * remember: the machinery simply isn't reachable from here.
+ *
+ * Not mounted at all unless the operator enabled the experimental channel, so a default deploy has no
+ * bridge namespace to connect to in the first place.
+ */
+function initBridgeNamespace(io: AppServer): void {
+  if (!config.whatsappPersonal.enabled) {
+    logger.info('bridge: namespace not mounted (WHATSAPP_PERSONAL_ENABLED=false)');
+    return;
+  }
+
+  const bridge: BridgeNamespace = io.of('/bridge');
+  bridge.use(bridgeAuthMiddleware);
+  setBridgeNamespace(bridge);
+  bridge.on('connection', (socket: BridgeSocket) => {
+    logger.info('bridge: connected', { userId: socket.data.userId, deviceId: socket.data.deviceId });
+    registerBridgeHandler(socket);
+  });
+
+  logger.info('bridge: /bridge namespace mounted');
 }
 
 /** Construct the per-connection feature handlers. Extend as phases add chat / calls / stewra-voice. */
