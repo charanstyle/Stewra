@@ -194,3 +194,24 @@ export function CheckCheckIcon(props: IconProps): React.JSX.Element {
     </svg>
   );
 }
+
+/** Warning triangle — the WhatsApp-personal ban-risk notice. */
+export function AlertTriangleIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(props)}>
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+/** Laptop — a Stewra Bridge device row (the bridge runs on the user's own computer). */
+export function LaptopIcon(props: IconProps): React.JSX.Element {
+  return (
+    <svg {...svgProps(props)}>
+      <rect x="3" y="4" width="18" height="12" rx="2" ry="2" />
+      <line x1="1" y1="20" x2="23" y2="20" />
+    </svg>
+  );
+}

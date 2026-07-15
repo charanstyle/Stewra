@@ -69,6 +69,11 @@ import type {
   RequestDraftResponse,
   ChatAboutSuggestionRequest,
   ChatAboutSuggestionResponse,
+  GetWhatsappPersonalResponse,
+  GrantWhatsappPersonalConsentRequest,
+  GrantWhatsappPersonalConsentResponse,
+  StartBridgePairingResponse,
+  RevokeBridgeDeviceResponse,
 } from '@stewra/shared-types';
 
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -382,6 +387,22 @@ export const api = {
     body: ChatAboutSuggestionRequest,
   ): Promise<ChatAboutSuggestionResponse> =>
     request(`/home/suggestions/${id}/chat`, { method: 'POST', body }),
+
+  // --- WhatsApp (personal) — experimental user-hosted bridge ---
+
+  getWhatsappPersonal: (): Promise<GetWhatsappPersonalResponse> =>
+    request('/channels/whatsapp-personal'),
+
+  grantWhatsappPersonalConsent: (
+    body: GrantWhatsappPersonalConsentRequest,
+  ): Promise<GrantWhatsappPersonalConsentResponse> =>
+    request('/channels/whatsapp-personal/consent', { method: 'POST', body }),
+
+  startBridgePairing: (): Promise<StartBridgePairingResponse> =>
+    request('/channels/whatsapp-personal/pair', { method: 'POST', body: {} }),
+
+  revokeBridgeDevice: (id: string): Promise<RevokeBridgeDeviceResponse> =>
+    request(`/channels/whatsapp-personal/devices/${id}`, { method: 'DELETE' }),
 };
 
 /**
