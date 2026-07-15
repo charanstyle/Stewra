@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      The renderer needs no network of its own: everything it knows arrives over IPC from the main
+      process. `default-src 'none'` and `connect-src 'none'` say so, and mean a stray fetch is a load
+      error rather than a quiet exfiltration path out of the one window that renders WhatsApp text.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <title>Stewra Bridge</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main>
+      <header class="head">
+        <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M12 2 4 6v6c0 4.4 3.4 8.5 8 10 4.6-1.5 8-5.6 8-10V6l-8-4Z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M8.5 12.2 11 14.7l4.6-5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <div>
+          <h1>Stewra Bridge</h1>
+          <p class="sub">
+            Runs on this computer. Your WhatsApp login never leaves it.
+          </p>
+        </div>
+      </header>
+
+      <section class="status" id="status-card">
+        <span class="dot" id="dot" aria-hidden="true"></span>
+        <div>
+          <p class="status-label" id="status-label">Not paired</p>
+          <p class="status-detail" id="status-detail"></p>
+        </div>
+      </section>
+
+      <!-- The risk. Stated plainly, in the same words as the web app's consent gate. -->
+      <section class="warn" id="warn">
+        <svg class="warn-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M12 3.8 2.9 19.4h18.2L12 3.8Z"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linejoin="round"
+          />
+          <path d="M12 9.5v4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          <circle cx="12" cy="16.6" r="1.05" fill="currentColor" />
+        </svg>
+        <div>
+          <p>
+            <strong>Experimental.</strong> This links your <strong>personal</strong> WhatsApp account
+            using an unofficial method that WhatsApp does not permit.
+            <strong>Your account can be permanently banned, and bans are usually not reversible.</strong>
+            Only link an account you are willing to lose.
+          </p>
+        </div>
+      </section>
+
+      <!-- PAIRING: shown until this device holds a Stewra token and a WhatsApp session. -->
+      <section class="panel" id="pair-panel" hidden>
+        <label class="field" id="code-field">
+          <span class="field-label">Pairing code from the Stewra web app</span>
+          <input id="stewra-code" type="text" autocomplete="off" spellcheck="false" placeholder="ABCD-1234" />
+        </label>
+
+        <label class="field">
+          <span class="field-label">Your WhatsApp number, with country code</span>
+          <input id="phone" type="tel" autocomplete="off" spellcheck="false" placeholder="+44 7700 900123" />
+        </label>
+
+        <button id="pair" type="button" class="primary">Link WhatsApp</button>
+        <p class="error" id="error" hidden></p>
+      </section>
+
+      <!-- The 8 characters the user types into their phone. -->
+      <section class="panel code-panel" id="code-panel" hidden>
+        <p class="code-hint">On your phone, open</p>
+        <p class="code-path">WhatsApp → Linked Devices → Link with phone number instead</p>
+        <p class="code" id="pairing-code" aria-live="polite"></p>
+        <p class="code-hint">then type this code. It expires in a few minutes.</p>
+      </section>
+
+      <!-- LINKED: shown once WhatsApp is up. -->
+      <section class="panel" id="linked-panel" hidden>
+        <p class="linked-note">
+          You will see <strong>Stewra Bridge</strong> in WhatsApp → Linked Devices. You can remove it from
+          your phone at any time, and it will stop immediately.
+        </p>
+        <p class="linked-note">
+          Stewra only answers while this app is running. WhatsApp also unlinks companion devices if your
+          phone stays offline for about 14 days.
+        </p>
+        <button id="unpair" type="button" class="danger">Unlink this computer</button>
+      </section>
+
+      <footer class="foot">
+        <label class="check">
+          <input id="autostart" type="checkbox" />
+          <span>Start Stewra Bridge when I log in</span>
+        </label>
+        <p class="meta">
+          <span id="version"></span> · <span id="api"></span>
+        </p>
+      </footer>
+    </main>
+
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>

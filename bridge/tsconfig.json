@@ -1,0 +1,23 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+
+    // The bridge is ESM (`"type": "module"`), unlike the rest of the monorepo, which is still CommonJS.
+    // This is not a style choice. Baileys is ESM-only from 6.7.19 on, and Baileys is a reverse-engineered
+    // client of a protocol WhatsApp actively changes — pinning to the last CommonJS release (6.7.18, May
+    // 2025) would mean shipping a year-stale client version string, which is itself the kind of anomaly
+    // signal this whole user-hosted design exists to avoid. The module system follows the dependency.
+    //
+    // `nodenext` is what Node and Electron 33's main process actually implement, so the compiler sees the
+    // same resolution rules the runtime will. The visible cost: relative imports must carry a `.js`
+    // extension, even from `.ts` source.
+    "module": "nodenext",
+    "moduleResolution": "nodenext"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist", "node_modules"]
+}

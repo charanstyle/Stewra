@@ -1,0 +1,28 @@
+{
+  "name": "@stewra/bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stewra Bridge — the companion-device app that runs on the user's OWN computer. It holds the WhatsApp connection; Stewra's servers never do.",
+  "type": "module",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run && npm run test:esm-interop",
+    "test:esm-interop": "node --input-type=module -e \"import { BRIDGE_CLIENT_EVENTS } from '@stewra/shared-types'; import { DisconnectReason } from '@whiskeysockets/baileys'; if (!BRIDGE_CLIENT_EVENTS?.HELLO || !DisconnectReason?.loggedOut) { throw new Error('ESM named-export interop is broken'); }\"",
+    "start": "npm run build && electron dist/main/main.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@stewra/shared-types": "*",
+    "@whiskeysockets/baileys": "6.7.23",
+    "socket.io-client": "^4.8.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "electron": "^33.2.0",
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.0"
+  }
+}
