@@ -14,6 +14,10 @@ COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/agent-runtime/package.json packages/agent-runtime/
 COPY backend/package.json backend/
 COPY website/package.json website/
+# The bridge workspace put electron in the root lockfile; its postinstall would download the ~100MB
+# Electron binary into node_modules (which the runtime stage copies wholesale). The server never runs
+# Electron — skip the binary.
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN npm ci
 
 # Bring in the sources and build in dependency order.

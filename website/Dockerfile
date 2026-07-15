@@ -8,6 +8,9 @@ COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/agent-runtime/package.json packages/agent-runtime/
 COPY backend/package.json backend/
 COPY website/package.json website/
+# Electron entered the root lockfile via the bridge workspace; the SPA build never runs it — skip the
+# postinstall binary download.
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN npm ci
 
 COPY . .
