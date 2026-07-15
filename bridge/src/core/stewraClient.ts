@@ -84,6 +84,10 @@ export class StewraClient {
   /** Open the `/bridge` namespace with this device's token. Reconnection is Socket.IO's problem. */
   connect(token: string): void {
     const socket = io(`${this.config.apiBaseUrl}/bridge`, {
+      // Stewra's public surface mounts the backend under `/api` (this file's REST calls already assume
+      // it). The Socket.IO engine rides the same prefix; the default `/socket.io` path would hit the
+      // website, not the backend.
+      path: '/api/socket.io',
       auth: { token },
       transports: ['websocket'],
     });
