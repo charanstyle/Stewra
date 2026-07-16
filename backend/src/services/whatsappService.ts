@@ -2,6 +2,8 @@ import * as Sentry from '@sentry/node';
 import type { ChannelIdentity, ChannelLinkChallenge } from '@stewra/shared-types';
 import { channelIdentityRepository } from '../repositories/channelIdentityRepository';
 import { channelSender, WHATSAPP_CHANNEL } from './channelSenders';
+import { preferencesService } from './preferencesService';
+import { renderWhatsappEmailReply } from './whatsappEmailNotice';
 import { stewraTurnService, STEWRA_FAILURE_TEXT } from './stewraTurnService';
 import { auditWriter } from '../control-plane/audit/auditWriter';
 import { config } from '../config/unifiedConfig';
@@ -172,7 +174,15 @@ class WhatsappService {
 
     try {
       const reply = await stewraTurnService.handleUserTurn(userId, text);
-      await this.reply(message.from, this.renderReply(reply.content, reply.proposedEmail !== null));
+      // Only ask the opt-in when there's actually a draft to gate — no extra read on the common path.
+      const approveToSend =
+        reply.proposedEmail !== null
+          ? await preferencesService.sendEmailOverWhatsapp(userId)
+          : false;
+      await this.reply(
+        message.from,
+        this.renderReply(reply.content, reply.proposedEmail !== null, approveToSend),
+      );
     } catch {
       // stewraTurnService already captured to Sentry and emitted stewra:error to the app; the WhatsApp
       // user is on a different transport and would otherwise just get silence.
@@ -183,16 +193,17 @@ class WhatsappService {
   /**
    * IRREVERSIBLE ACTIONS DO NOT HAPPEN OVER WHATSAPP.
    *
-   * A reply may carry a confirm-gated email draft. On the web/mobile app the user taps Send on a card,
-   * authenticated by their JWT. A phone number is a far weaker factor (SIM-swap, a borrowed handset), so
-   * confirming a send here would widen the blast radius of the weakest identity we hold. Instead we say
-   * the draft exists and send them to the app — upholding principles 3 (irreversible = always gated) and
-   * 5 (smallest blast radius) rather than eroding them.
+   * A reply may carry a confirm-gated email draft. The send itself NEVER happens on this transport: a
+   * phone number is a far weaker factor (SIM-swap, a borrowed handset) than the user's JWT. What the
+   * opt-in changes is only the wording:
+   *  - default (`approveToSend` false): say the draft exists and send them to the app — the historical
+   *    draft-and-defer refusal.
+   *  - opt-in on: tell them to approve it in Stewra. Approval still happens on their strong-identity
+   *    surface (the app, or a notification they unlock) — this channel only asks.
+   * Either way the draft rides on the message as a `pending` proposal; nothing here can send it.
    */
-  private renderReply(content: string | null, hasProposal: boolean): string {
-    const body = content ?? STEWRA_FAILURE_TEXT;
-    if (!hasProposal) return body;
-    return `${body}\n\n📝 I've drafted that email — open Stewra to review and send it. (For your safety, I don't send email from WhatsApp.)`;
+  private renderReply(content: string | null, hasProposal: boolean, approveToSend: boolean): string {
+    return renderWhatsappEmailReply(content ?? STEWRA_FAILURE_TEXT, hasProposal, approveToSend);
   }
 
   /** Best-effort outbound. A send failure is captured, never rethrown into the webhook path. */

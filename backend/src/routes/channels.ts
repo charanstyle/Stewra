@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { whatsappController } from '../controllers/whatsappController';
 import { whatsappPersonalController } from '../controllers/whatsappPersonalController';
+import { whatsappEmailApprovalController } from '../controllers/whatsappEmailApprovalController';
 import { rateLimit } from '../middleware/rateLimit';
 import { requireAuth } from '../middleware/requireAuth';
 import { requireEmailVerification } from '../middleware/requireEmailVerification';
@@ -75,6 +76,23 @@ router.post(
 // Instant revocation — the reason a bridge token is a database row and not a JWT.
 router.delete('/whatsapp-personal/devices/:id', requireAuth, (req, res) => {
   void whatsappPersonalController.revokeDevice(req, res);
+});
+
+/**
+ * ── Approve-to-send email over WhatsApp (`whatsapp_email_approval`) ─────────────────────────────────
+ *
+ * A per-user opt-in, off by default, letting the user ask Stewra to send email from WhatsApp. It never
+ * sends on its own: Stewra drafts the mail and the user approves it on a signed-in surface. Because email
+ * is irreversible and a WhatsApp identity is a weaker factor than a login, turning the opt-in ON requires
+ * the account password (re-verified server-side, in the service). Turning it OFF removes a capability and
+ * needs no password. Verified email required to change it, like the other channel-binding acts above.
+ */
+router.get('/whatsapp-email-approval', requireAuth, (req, res) => {
+  void whatsappEmailApprovalController.status(req, res);
+});
+
+router.post('/whatsapp-email-approval', requireAuth, verified, (req, res) => {
+  void whatsappEmailApprovalController.set(req, res);
 });
 
 export default router;

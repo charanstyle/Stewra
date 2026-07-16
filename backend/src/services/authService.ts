@@ -134,6 +134,24 @@ export class AuthService {
     return { user, tokens: this.issueTokens(user.id) };
   }
 
+  /**
+   * Re-verify a signed-in user's password. Used to gate a security-relevant action (e.g. enabling
+   * approve-to-send email over WhatsApp) so that holding a session alone is not enough — the user must
+   * still know the password. Throws `AuthenticationError` on any mismatch; returns nothing on success.
+   *
+   * A pure primitive: it does NOT audit or mutate. The caller records the action it was gating. Missing
+   * user and empty/absent password both compare against a dummy hash, so this leaks neither existence nor
+   * "you didn't send a password" through timing.
+   */
+  async reverifyPassword(userId: string, password: string | undefined): Promise<void> {
+    const row = await this.users.findById(userId);
+    const hash = row?.password_hash ?? '$2a$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv';
+    const ok = await bcrypt.compare(password ?? '', hash);
+    if (!row || !ok) {
+      throw new AuthenticationError('Password is incorrect');
+    }
+  }
+
   async refresh(refreshToken: string): Promise<RefreshTokenResponse> {
     const userId = this.verifyToken(refreshToken, 'refresh');
     const row = await this.users.findById(userId);

@@ -23,6 +23,8 @@ export class PreferencesService {
       learnFromSentMail: stored?.learnFromSentMail ?? false,
       // Read receipts are on by default (WhatsApp behavior); only an explicit opt-out turns them off.
       readReceiptsEnabled: stored?.readReceiptsEnabled ?? true,
+      // Approve-to-send email over WhatsApp is off until the user turns it on (password-gated elsewhere).
+      sendEmailOverWhatsapp: stored?.sendEmailOverWhatsapp ?? false,
     };
   }
 
@@ -42,6 +44,16 @@ export class PreferencesService {
   async learnFromSentMail(userId: string): Promise<boolean> {
     const prefs = await this.getForUser(userId);
     return prefs.learnFromSentMail;
+  }
+
+  /**
+   * Whether the user opted into approve-to-send email over WhatsApp — the gate both WhatsApp channels
+   * check to decide whether to offer approval (vs. their draft-and-defer refusal). Writing this opt-in
+   * is password-gated and lives in `whatsappEmailApprovalService`, deliberately NOT in `update()`.
+   */
+  async sendEmailOverWhatsapp(userId: string): Promise<boolean> {
+    const prefs = await this.getForUser(userId);
+    return prefs.sendEmailOverWhatsapp;
   }
 
   /**

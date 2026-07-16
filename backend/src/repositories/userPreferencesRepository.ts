@@ -10,6 +10,8 @@ export interface UserPreferencesRow {
   readonly emailRetentionDays: number | null;
   /** Whether the user shares read receipts in human chats (DB default true). */
   readonly readReceiptsEnabled: boolean;
+  /** Whether the user opted into approve-to-send email over WhatsApp (DB default false). */
+  readonly sendEmailOverWhatsapp: boolean;
 }
 
 /**
@@ -20,7 +22,7 @@ export class UserPreferencesRepository {
   async findForUser(userId: string): Promise<UserPreferencesRow | undefined> {
     const row = await db
       .selectFrom('user_preferences')
-      .select(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled'])
+      .select(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
       .where('user_id', '=', userId)
       .executeTakeFirst();
     return row ? toRow(row) : undefined;
@@ -34,7 +36,7 @@ export class UserPreferencesRepository {
       .onConflict((oc) =>
         oc.column('user_id').doUpdateSet({ email_retention_days: days, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -47,7 +49,7 @@ export class UserPreferencesRepository {
       .onConflict((oc) =>
         oc.column('user_id').doUpdateSet({ gmail_lookback_days: days, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -75,7 +77,7 @@ export class UserPreferencesRepository {
           .column('user_id')
           .doUpdateSet({ learn_from_sent_mail: learn, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -99,7 +101,35 @@ export class UserPreferencesRepository {
       .onConflict((oc) =>
         oc.column('user_id').doUpdateSet({ read_receipts_enabled: enabled, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
+      .executeTakeFirstOrThrow();
+    return toRow(row);
+  }
+
+  /**
+   * Insert-or-update the approve-to-send email-over-WhatsApp opt-in. Like the other opt-ins, first write
+   * needs a concrete `gmail_lookback_days` (NOT NULL, no DB default); on conflict only the toggle and
+   * `updated_at` change. The password re-verification that gates turning this ON lives in the service,
+   * not here — this is pure storage.
+   */
+  async upsertSendEmailOverWhatsapp(
+    userId: string,
+    enabled: boolean,
+    gmailLookbackDaysForInsert: number,
+  ): Promise<UserPreferencesRow> {
+    const row = await db
+      .insertInto('user_preferences')
+      .values({
+        user_id: userId,
+        gmail_lookback_days: gmailLookbackDaysForInsert,
+        send_email_over_whatsapp: enabled,
+      })
+      .onConflict((oc) =>
+        oc
+          .column('user_id')
+          .doUpdateSet({ send_email_over_whatsapp: enabled, updated_at: new Date() }),
+      )
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -112,6 +142,7 @@ function toRow(row: {
   learn_from_sent_mail: boolean;
   email_retention_days: number | null;
   read_receipts_enabled: boolean;
+  send_email_over_whatsapp: boolean;
 }): UserPreferencesRow {
   return {
     userId: row.user_id,
@@ -119,6 +150,7 @@ function toRow(row: {
     learnFromSentMail: row.learn_from_sent_mail,
     emailRetentionDays: row.email_retention_days,
     readReceiptsEnabled: row.read_receipts_enabled,
+    sendEmailOverWhatsapp: row.send_email_over_whatsapp,
   };
 }
 

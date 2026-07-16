@@ -18,6 +18,11 @@ jest.mock('../config/unifiedConfig', () => ({
     get whatsappPersonal() {
       return whatsappPersonal;
     },
+    // `whatsappBridgeService` pulls in the real `preferencesService` (for the approve-to-send opt-in),
+    // which transitively loads the DB module. That module reads `config.database.url` at import time and
+    // constructs a lazy pg `Pool` — no connection is made unless a query runs, and none of these tests
+    // exercise the email-draft path, so this stub only has to satisfy the import.
+    database: { url: 'postgres://unused-in-this-suite' },
   },
 }));
 
@@ -376,26 +381,10 @@ describe('bridge:inbound', () => {
     ]);
   });
 
-  it('NEVER sends an email from WhatsApp — it drafts it and points the user back to Stewra', async () => {
-    // Irreversible actions do not happen over this channel. The "identity" behind it is a WhatsApp session
-    // on a laptop, which is a weaker factor than the user's login — so a draft is as far as it goes.
-    store.findChatByJid.mockResolvedValue(SELF_CHAT);
-    turns.handleUserTurn.mockResolvedValue(
-      assistantMessage("I've drafted it.", {
-        status: 'pending',
-        to: 'sarah@example.test',
-        subject: 'Thursday',
-        body: 'Works for me.',
-        provider: null,
-        failureReason: null,
-      }),
-    );
-    const bridge = connect();
-
-    await bridge.say(BRIDGE_CLIENT_EVENTS.INBOUND, inbound(SELF_JID, 'reply to sarah', 'wa-email'));
-
-    expect(bridge.sent[0]?.text).toContain('open Stewra to review and send');
-  });
+  // The email-draft copy (opt-in ON vs OFF, and the rule that neither branch claims a send) is a pure
+  // function of the reply — `renderWhatsappEmailReply` — and is pinned end-to-end, with no mocks, in
+  // whatsappEmailNotice.test.ts. The self-chat wiring that feeds it the opt-in is covered by the live
+  // WhatsApp smoke test, so it is deliberately not re-asserted through this fake-bridge harness.
 
   it('ignores a redelivery of a message it already handled', async () => {
     store.findChatByJid.mockResolvedValue(SELF_CHAT);

@@ -21,4 +21,13 @@ export interface UserPreferences {
    * sender — and, symmetrically, the user does not see others' read receipts either. Defaults to `true`.
    */
   readonly readReceiptsEnabled: boolean;
+  /**
+   * Whether Stewra may send email in response to a request made over WhatsApp — the approve-to-send
+   * opt-in. Defaults to `false` and only the user can turn it on, from a signed-in app and with their
+   * password, because a WhatsApp identity is a weaker factor than a login and email is irreversible.
+   * Even when on, WhatsApp never triggers a send directly: Stewra drafts the mail and the user approves
+   * it on their strong-identity device. Written ONLY through the password-gated channel endpoint, never
+   * the generic preferences update.
+   */
+  readonly sendEmailOverWhatsapp: boolean;
 }

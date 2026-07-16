@@ -74,6 +74,9 @@ import type {
   GrantWhatsappPersonalConsentResponse,
   StartBridgePairingResponse,
   RevokeBridgeDeviceResponse,
+  GetEmailOverWhatsappResponse,
+  SetEmailOverWhatsappRequest,
+  SetEmailOverWhatsappResponse,
 } from '@stewra/shared-types';
 
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -403,6 +406,17 @@ export const api = {
 
   revokeBridgeDevice: (id: string): Promise<RevokeBridgeDeviceResponse> =>
     request(`/channels/whatsapp-personal/devices/${id}`, { method: 'DELETE' }),
+
+  // --- Approve-to-send email over WhatsApp — the per-user opt-in ---
+
+  getEmailOverWhatsapp: (): Promise<GetEmailOverWhatsappResponse> =>
+    request('/channels/whatsapp-email-approval'),
+
+  // Turning the opt-in ON carries the account password (re-verified server-side); turning it OFF omits it.
+  setEmailOverWhatsapp: (
+    body: SetEmailOverWhatsappRequest,
+  ): Promise<SetEmailOverWhatsappResponse> =>
+    request('/channels/whatsapp-email-approval', { method: 'POST', body }),
 };
 
 /**

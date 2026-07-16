@@ -46,6 +46,7 @@ function parseServiceAccount(raw: string): ServiceAccount {
   } catch (error) {
     throw new Error(
       `FCM_SERVICE_ACCOUNT_JSON is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   if (

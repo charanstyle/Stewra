@@ -6,6 +6,8 @@ import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository';
 import { channelIdentityRepository } from '../repositories/channelIdentityRepository';
 import { whatsappStore } from '../repositories/whatsappStore';
 import { dispatchToBridge } from '../websocket/bridgeEmitter';
+import { preferencesService } from './preferencesService';
+import { renderWhatsappEmailReply } from './whatsappEmailNotice';
 import { redis } from './redisClient';
 import { STEWRA_FAILURE_TEXT, stewraTurnService } from './stewraTurnService';
 import { logger } from '../utils/logger';
@@ -14,14 +16,6 @@ const CHANNEL = 'whatsapp_personal' as const;
 
 /** How many times a queued send may be attempted before we stop and mark it visibly failed. */
 const MAX_SEND_ATTEMPTS = 3;
-
-/**
- * Appended to a reply that carries a confirm-gated email draft. Same rule as the official channel:
- * IRREVERSIBLE ACTIONS DO NOT HAPPEN OVER WHATSAPP. Here the reasoning is stronger still — the "identity"
- * behind this channel is a WhatsApp session on a laptop, which is a weaker factor than the user's JWT.
- */
-const DRAFT_NOTICE =
-  "\n\nI've drafted that email — open Stewra to review and send it. (For your safety, I don't send email from WhatsApp.)";
 
 /**
  * The experimental companion-device channel's runtime: what happens when the Stewra Bridge on a user's
@@ -112,7 +106,15 @@ class WhatsappBridgeService {
     try {
       const message = await stewraTurnService.handleUserTurn(userId, text);
       const body = message.content ?? STEWRA_FAILURE_TEXT;
-      reply = message.proposedEmail !== null ? `${body}${DRAFT_NOTICE}` : body;
+      if (message.proposedEmail !== null) {
+        // Same draft, different wording depending on the opt-in — and only the wording. With approve-to-
+        // send on we invite approval (which happens on a strong-identity surface, never here); off, we
+        // keep the historical draft-and-defer refusal. Neither path sends anything from this channel.
+        const approveToSend = await preferencesService.sendEmailOverWhatsapp(userId);
+        reply = renderWhatsappEmailReply(body, true, approveToSend);
+      } else {
+        reply = body;
+      }
     } catch {
       // `stewraTurnService` already captured to Sentry and emitted `stewra:error` to the app. The user is
       // sitting in WhatsApp, though, and would otherwise just get silence.

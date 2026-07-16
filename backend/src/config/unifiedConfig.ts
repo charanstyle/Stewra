@@ -283,6 +283,14 @@ const EnvSchema = z.object({
   // How long forwarded WhatsApp message bodies are kept before the retention sweep deletes them.
   // Mirrors the email store's window; the least data we can keep and still be useful.
   WHATSAPP_PERSONAL_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+
+  // ── WhatsApp EMAIL-APPROVAL (approve-to-send email over WhatsApp) ──────────────────────────────────
+  // A THIRD, independent switch, in its OWN namespace on purpose so it can never be turned on as a side
+  // effect of enabling either WhatsApp channel above (same reasoning as keeping `whatsapp_personal`
+  // separate). When false the per-user opt-in cannot be enabled and both WhatsApp channels keep their
+  // draft-and-defer refusal. Off by default. Phase 1 carries no dependent secrets — the Expo-push config
+  // the actionable-notification phase will need is added there, with its own required-when-enabled guard.
+  WHATSAPP_EMAIL_APPROVAL_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   // A bridge token is a long-lived DEVICE credential, so it is deliberately not a JWT and has no expiry
   // baked in — revocation is by database row, which is immediate. This bounds its raw entropy instead.
   WHATSAPP_PERSONAL_BRIDGE_TOKEN_BYTES: z.coerce.number().int().min(32).max(64).default(32),
@@ -579,6 +587,12 @@ export const config = {
     maxSendsPerMinute: env.WHATSAPP_PERSONAL_MAX_SENDS_PER_MINUTE,
     retentionDays: env.WHATSAPP_PERSONAL_RETENTION_DAYS,
     bridgeTokenBytes: env.WHATSAPP_PERSONAL_BRIDGE_TOKEN_BYTES,
+  },
+  whatsappEmailApproval: {
+    // The approve-to-send email-over-WhatsApp opt-in. Its own namespace, separate from both `whatsapp`
+    // and `whatsappPersonal`, so enabling either of those can never enable this. When false the per-user
+    // opt-in cannot be turned on and both WhatsApp channels keep refusing to send email.
+    enabled: env.WHATSAPP_EMAIL_APPROVAL_ENABLED,
   },
   uploads: {
     // Mounted volume for uploaded/synthesized media; served only via authenticated GET /media/:id.

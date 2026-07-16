@@ -210,6 +210,9 @@ export type {
   ListBridgeDevicesResponse,
   RevokeBridgeDeviceResponse,
   GetWhatsappPersonalResponse,
+  GetEmailOverWhatsappResponse,
+  SetEmailOverWhatsappRequest,
+  SetEmailOverWhatsappResponse,
 } from './api/channels';
 export {
   WHATSAPP_PERSONAL_CONSENT_VERSION,

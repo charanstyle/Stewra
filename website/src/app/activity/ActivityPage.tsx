@@ -13,6 +13,7 @@ import { api, ApiError } from '../../services/api';
 import { AppNav } from '../../components/AppNav/AppNav';
 import { FeedbackControl } from '../../components/FeedbackControl/FeedbackControl';
 import WhatsappBridgePanel from './WhatsappBridgePanel';
+import EmailOverWhatsappPanel from './EmailOverWhatsappPanel';
 import styles from './ActivityPage.module.css';
 
 function describeError(err: unknown): string {
@@ -265,6 +266,8 @@ export default function ActivityPage(): React.JSX.Element {
           </div>
 
           <WhatsappBridgePanel emailVerified={emailVerified} />
+
+          <EmailOverWhatsappPanel emailVerified={emailVerified} />
 
           <div className={styles.card}>
             <h2 className={styles.cardTitle}>Gmail window</h2>

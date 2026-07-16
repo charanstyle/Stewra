@@ -105,3 +105,36 @@ export interface GetWhatsappPersonalResponse {
   readonly devices: readonly BridgeDevice[];
   readonly downloadUrl: string;
 }
+
+/**
+ * The "send email by WhatsApp" opt-in (approve-to-send). Off by default.
+ *
+ * The whole point of the design: email is irreversible and a WhatsApp identity (a phone number, a
+ * laptop session) is a weaker proof of "it's you" than a signed-in session. So enabling this is treated
+ * as a security-relevant act — the SERVER requires the account password to turn it ON (re-verified
+ * server-side; a client "I confirmed" boolean is worthless, exactly like the typed consent above).
+ * Turning it OFF removes a capability and needs no password. Even when on, a WhatsApp message never
+ * triggers a send: Stewra drafts the mail and the user approves it on their strong-identity device.
+ */
+
+/** GET /channels/whatsapp-email-approval — state for the "Your sources" panel toggle. */
+export interface GetEmailOverWhatsappResponse {
+  /** Whether this deploy has the feature switched on at all (server kill-switch). */
+  readonly enabled: boolean;
+  /** Whether the user has opted in. */
+  readonly optedIn: boolean;
+}
+
+/** POST /channels/whatsapp-email-approval — turn the opt-in on or off. */
+export interface SetEmailOverWhatsappRequest {
+  readonly enabled: boolean;
+  /**
+   * The account password. REQUIRED to turn the opt-in on; ignored (and unnecessary) when turning it
+   * off. Re-verified server-side — the frontend checking it is a courtesy, not the control.
+   */
+  readonly password?: string;
+}
+
+export interface SetEmailOverWhatsappResponse {
+  readonly optedIn: boolean;
+}
