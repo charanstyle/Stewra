@@ -1,0 +1,110 @@
+.card {
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  min-width: 260px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+
+.headerIcon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.field {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.label {
+  color: var(--muted);
+  font-size: 13px;
+  width: 56px;
+  flex-shrink: 0;
+}
+
+.value {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.body {
+  color: var(--text);
+  font-size: 14px;
+  white-space: pre-wrap;
+  margin: 8px 0;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.busyRow {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 0;
+}
+
+.spinner {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.send,
+.cancel {
+  padding: 7px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.send {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: white;
+}
+
+.send:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cancel {
+  background: transparent;
+  color: var(--muted);
+}
+
+.status {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 4px 0 0;
+}
+
+.statusDone {
+  color: var(--success);
+}
+
+.statusFailed {
+  color: var(--danger);
+}

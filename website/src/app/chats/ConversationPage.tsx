@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { CallKind, ConversationSummary, Message, PublicUser } from '@stewra/shared-types';
+import type {
+  CallKind,
+  ConfirmEmailAction,
+  ConversationSummary,
+  Message,
+  PublicUser,
+} from '@stewra/shared-types';
 import { AppNav } from '../../components/AppNav/AppNav';
 import { Avatar } from '../../components/Avatar/Avatar';
 import { MessageStatusIndicator } from '../../components/chat/MessageStatusIndicator';
+import { ProposedEmailCard } from '../../components/chat/ProposedEmailCard';
 import { TypingIndicator } from '../../components/chat/TypingIndicator';
 import { ReadReceiptModal } from '../../components/chat/ReadReceiptModal';
 import { useAuth } from '../../hooks/useAuth';
@@ -48,12 +55,18 @@ function MessageBubble({
   isLastInGroup,
   readers,
   onOpenReceipts,
+  emailBusy,
+  onConfirmEmail,
 }: {
   message: Message;
   mine: boolean;
   isLastInGroup: boolean;
   readers: ReadonlyArray<PublicUser>;
   onOpenReceipts: (message: Message) => void;
+  /** True while this message's proposed-email confirm is in flight. */
+  emailBusy: boolean;
+  /** Resolve this message's proposed email (send/cancel). */
+  onConfirmEmail: (messageId: string, action: ConfirmEmailAction) => void;
 }): React.JSX.Element {
   const isSystem =
     message.type === 'call_start' || message.type === 'call_end' || message.type === 'system';
@@ -89,6 +102,13 @@ function MessageBubble({
             Play
           </button>
         )}
+        {message.proposedEmail && (
+          <ProposedEmailCard
+            proposal={message.proposedEmail}
+            busy={emailBusy}
+            onConfirm={(action) => onConfirmEmail(message.id, action)}
+          />
+        )}
         <span className={styles.bubbleTime}>
           {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {mine && <MessageStatusIndicator status={message.status} />}
@@ -111,11 +131,14 @@ export default function ConversationPage(): React.JSX.Element {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { startCall } = useCall();
-  const { messages, loading, error, typingUserIds, sendText, setTyping } = useChat(conversationId);
+  const { messages, loading, error, typingUserIds, sendText, setTyping, appendMessages } =
+    useChat(conversationId);
 
   const [summary, setSummary] = useState<ConversationSummary | null>(null);
   const [draft, setDraft] = useState('');
   const [receiptsFor, setReceiptsFor] = useState<Message | null>(null);
+  // The assistant message whose proposed-email confirm is currently in flight (disables its card).
+  const [confirmingEmailId, setConfirmingEmailId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -159,6 +182,26 @@ export default function ConversationPage(): React.JSX.Element {
     setTyping(false);
     await sendText(content);
   }, [draft, sendText, setTyping]);
+
+  /**
+   * Confirm (send) or dismiss (cancel) an email Stewra proposed. The backend runs the confirm-gated
+   * send and returns the updated message (its `proposedEmail.status` now terminal); we upsert it so the
+   * card re-renders. The same message also arrives over the socket — upsert-by-id makes that idempotent.
+   */
+  const handleConfirmEmail = useCallback(
+    async (messageId: string, action: ConfirmEmailAction): Promise<void> => {
+      setConfirmingEmailId(messageId);
+      try {
+        const res = await api.confirmEmail(messageId, { action });
+        appendMessages([res.message]);
+      } catch {
+        // Leave the proposal `pending` so the user can retry; a transient failure shouldn't lose the draft.
+      } finally {
+        setConfirmingEmailId((current) => (current === messageId ? null : current));
+      }
+    },
+    [appendMessages],
+  );
 
   const peer = participants[0] ?? null;
   const title =
@@ -250,6 +293,8 @@ export default function ConversationPage(): React.JSX.Element {
               isLastInGroup={isLastInGroup}
               readers={readers}
               onOpenReceipts={setReceiptsFor}
+              emailBusy={confirmingEmailId === m.id}
+              onConfirmEmail={(messageId, action) => void handleConfirmEmail(messageId, action)}
             />
           );
         })}

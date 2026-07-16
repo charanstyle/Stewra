@@ -55,6 +55,8 @@ import type {
   ReactRequest,
   ReactResponse,
   DeleteMessageResponse,
+  ConfirmEmailRequest,
+  ConfirmEmailResponse,
   SendVoiceMessageResponse,
   UploadAvatarResponse,
   TurnCredentialsResponse,
@@ -326,6 +328,14 @@ export const api = {
 
   reactToMessage: (id: string, body: ReactRequest): Promise<ReactResponse> =>
     request(`/messages/${id}/react`, { method: 'POST', body }),
+
+  /**
+   * Confirm (`send`) or dismiss (`cancel`) an email Stewra proposed on an assistant message. The send
+   * runs through the trusted confirm-gated executor server-side; the updated message (its
+   * `proposedEmail.status` now terminal) comes back so the in-chat card re-renders.
+   */
+  confirmEmail: (id: string, body: ConfirmEmailRequest): Promise<ConfirmEmailResponse> =>
+    request(`/messages/${id}/confirm-email`, { method: 'POST', body }),
 
   /** Per-participant read acknowledgements for one message (drives the read-receipt detail view). */
   listMessageReceipts: (id: string): Promise<ListReadReceiptsResponse> =>
