@@ -204,9 +204,11 @@ class MessageService {
 
   /**
    * Confirm (send) or dismiss (cancel) the email Stewra proposed on an assistant message. Loads the
-   * message for the caller, asserts they participate in its conversation, and requires a `pending`
-   * proposal (so a proposal can't be double-sent or acted on by a non-participant). On `send` it runs
-   * the confirm-gated executor and folds the outcome into the proposal's terminal `sent`/`failed`
+   * message for the caller, asserts they participate in its conversation, and requires a proposal that
+   * is still actionable — `pending` (never decided) or `failed` (a transient send error, e.g. a
+   * since-reconnected Google grant, that the user may retry or dismiss). `sent`/`cancelled` are
+   * terminal and rejected, so a proposal can't be double-sent or acted on by a non-participant. On
+   * `send` it runs the confirm-gated executor and folds the outcome into the proposal's `sent`/`failed`
    * state; on `cancel` it marks it `cancelled`. Returns the updated message so the caller can respond
    * and fan it out over the socket.
    */
@@ -221,7 +223,7 @@ class MessageService {
 
     const proposal = message.proposedEmail;
     if (proposal === null) throw new ValidationError('This message has no email to confirm');
-    if (proposal.status !== 'pending') {
+    if (proposal.status !== 'pending' && proposal.status !== 'failed') {
       throw new ValidationError(`This email was already ${proposal.status}`);
     }
 

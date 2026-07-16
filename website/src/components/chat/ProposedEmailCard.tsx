@@ -40,8 +40,10 @@ export function ProposedEmailCard({
   onConfirm,
   busy,
 }: ProposedEmailCardProps): React.JSX.Element {
-  const pending = proposal.status === 'pending';
+  // A `failed` send is transient (e.g. a since-reconnected Google grant), so it stays actionable:
+  // the user can retry or dismiss it. Only `sent`/`cancelled` collapse to a terminal status line.
   const failed = proposal.status === 'failed';
+  const actionable = proposal.status === 'pending' || failed;
 
   return (
     <div className={styles.card}>
@@ -60,7 +62,12 @@ export function ProposedEmailCard({
       </div>
       <p className={styles.body}>{proposal.body}</p>
 
-      {pending ? (
+      {/* When a send failed, show why above the buttons — then let the user retry or dismiss. */}
+      {failed && (
+        <p className={`${styles.status} ${styles.statusFailed}`}>{terminalMessage(proposal)}</p>
+      )}
+
+      {actionable ? (
         busy ? (
           <div className={styles.busyRow}>
             <span className={styles.spinner}>Sending…</span>
@@ -73,7 +80,7 @@ export function ProposedEmailCard({
               disabled={busy}
               onClick={() => onConfirm('cancel')}
             >
-              Cancel
+              {failed ? 'Dismiss' : 'Cancel'}
             </button>
             <button
               type="button"
@@ -81,14 +88,12 @@ export function ProposedEmailCard({
               disabled={busy}
               onClick={() => onConfirm('send')}
             >
-              Send
+              {failed ? 'Try again' : 'Send'}
             </button>
           </div>
         )
       ) : (
-        <p className={`${styles.status} ${failed ? styles.statusFailed : styles.statusDone}`}>
-          {terminalMessage(proposal)}
-        </p>
+        <p className={`${styles.status} ${styles.statusDone}`}>{terminalMessage(proposal)}</p>
       )}
     </div>
   );
