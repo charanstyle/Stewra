@@ -1,6 +1,6 @@
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
-import type { Database } from '../types';
+import type { Database } from '../types.js';
 
 /**
  * Messaging CHANNELS (how a user reaches Stewra) — deliberately separate from `connections` (which are

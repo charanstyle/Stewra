@@ -7,14 +7,14 @@ import type {
   RegisterCallPushTokenRequest,
 } from '@stewra/shared-types';
 import { randomUUID } from 'node:crypto';
-import { callSessionRepository } from '../repositories/callSessionRepository';
-import { callPushTokenRepository } from '../repositories/callPushTokenRepository';
-import { messageRepository, MessageRepository } from '../repositories/messageRepository';
-import { userRepository } from '../repositories/userRepository';
-import { conversationService } from './conversationService';
-import { contactService } from './contactService';
-import { fcmPushService } from './fcmPushService';
-import { ForbiddenError, ValidationError } from '../utils/errors';
+import { callSessionRepository } from '../repositories/callSessionRepository.js';
+import { callPushTokenRepository } from '../repositories/callPushTokenRepository.js';
+import { messageRepository, MessageRepository } from '../repositories/messageRepository.js';
+import { userRepository } from '../repositories/userRepository.js';
+import { conversationService } from './conversationService.js';
+import { contactService } from './contactService.js';
+import { fcmPushService } from './fcmPushService.js';
+import { ForbiddenError, ValidationError } from '../utils/errors.js';
 
 const HISTORY_LIMIT = 100;
 

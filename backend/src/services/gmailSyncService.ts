@@ -1,17 +1,17 @@
 import { createHash } from 'node:crypto';
 import * as Sentry from '@sentry/node';
-import { config } from '../config/unifiedConfig';
-import { vault } from '../control-plane/vault/vault';
-import { encryptField } from '../control-plane/vault/fieldCrypto';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { connectionRepository, type ConnectionRow } from '../repositories/connectionRepository';
-import { preferencesService } from './preferencesService';
+import { config } from '../config/unifiedConfig.js';
+import { vault } from '../control-plane/vault/vault.js';
+import { encryptField } from '../control-plane/vault/fieldCrypto.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { connectionRepository, type ConnectionRow } from '../repositories/connectionRepository.js';
+import { preferencesService } from './preferencesService.js';
 import {
   emailContactRepository,
   emailThreadRepository,
   emailMessageRepository,
   emailSyncStateRepository,
-} from '../repositories/emailStore';
+} from '../repositories/emailStore.js';
 import {
   gmailClient,
   listMessageIds,
@@ -20,9 +20,9 @@ import {
   isGoogleAuthError,
   type GmailClient,
   type FetchedMessage,
-} from './googleOAuthService';
-import { isReplyableInbound } from './emailClassification';
-import { logger } from '../utils/logger';
+} from './googleOAuthService.js';
+import { isReplyableInbound } from './emailClassification.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * The email sync engine (control plane). Pulls FULL message bodies from Gmail into the encrypted

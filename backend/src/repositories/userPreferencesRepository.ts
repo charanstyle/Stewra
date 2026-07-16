@@ -1,5 +1,5 @@
-import { db } from '../database/index';
-import { config } from '../config/unifiedConfig';
+import { db } from '../database/index.js';
+import { config } from '../config/unifiedConfig.js';
 
 /** A stored preferences row. Absent until the user changes a setting for the first time. */
 export interface UserPreferencesRow {

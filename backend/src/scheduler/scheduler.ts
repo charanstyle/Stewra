@@ -1,10 +1,10 @@
 import * as Sentry from '@sentry/node';
-import { config } from '../config/unifiedConfig';
-import { connectionRepository } from '../repositories/connectionRepository';
-import { gmailSyncService } from '../services/gmailSyncService';
-import { briefingService } from '../services/briefingService';
-import { whatsappRetentionService } from '../services/whatsappRetentionService';
-import { logger } from '../utils/logger';
+import { config } from '../config/unifiedConfig.js';
+import { connectionRepository } from '../repositories/connectionRepository.js';
+import { gmailSyncService } from '../services/gmailSyncService.js';
+import { briefingService } from '../services/briefingService.js';
+import { whatsappRetentionService } from '../services/whatsappRetentionService.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * The background heartbeat that makes Today feel alive: on an interval, for every user with an active

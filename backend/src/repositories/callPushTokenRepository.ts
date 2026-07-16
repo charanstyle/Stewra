@@ -1,5 +1,5 @@
 import type { CallPushPlatform } from '@stewra/shared-types';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 /** A stored background-ring push token: a PushKit VoIP token (iOS) or an FCM token (Android). */
 export interface CallPushToken {

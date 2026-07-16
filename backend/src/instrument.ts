@@ -1,7 +1,7 @@
 // Sentry/GlitchTip instrumentation. MUST be imported first (see index.ts) so it can
 // instrument everything that loads afterward. No-op when SENTRY_DSN is unset (M0 default).
 import * as Sentry from '@sentry/node';
-import { config } from './config/unifiedConfig';
+import { config } from './config/unifiedConfig.js';
 
 if (config.sentry.dsn) {
   Sentry.init({

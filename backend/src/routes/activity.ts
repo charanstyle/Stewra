@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { activityController } from '../controllers/activityController';
-import { requireAuth } from '../middleware/requireAuth';
+import { activityController } from '../controllers/activityController.js';
+import { requireAuth } from '../middleware/requireAuth.js';
 
 const router = Router();
 

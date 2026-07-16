@@ -8,10 +8,10 @@ import type {
   ConfirmPasswordResetResponse,
   RequestPasswordResetResponse,
 } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { authService } from '../services/authService';
-import { passwordResetService } from '../services/passwordResetService';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { authService } from '../services/authService.js';
+import { passwordResetService } from '../services/passwordResetService.js';
+import { parse } from '../utils/validate.js';
 
 const registerSchema = z.object({
   email: z.string().email(),

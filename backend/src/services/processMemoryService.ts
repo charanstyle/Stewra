@@ -9,25 +9,25 @@ import type {
 } from '@stewra/shared-types';
 import { KIND_TO_PROCESS_DOMAIN } from '@stewra/shared-types';
 import * as Sentry from '@sentry/node';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { processMemoryRepository } from '../repositories/processMemoryRepository';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { processMemoryRepository } from '../repositories/processMemoryRepository.js';
 import type {
   ListProcessRuleFilters,
   UpdateProcessRulePatch,
-} from '../repositories/processMemoryRepository';
-import { connectionRepository } from '../repositories/connectionRepository';
-import { policyEngine, KIND_TO_PROVIDER } from '../control-plane/policy/policy';
-import { vault } from '../control-plane/vault/vault';
-import { config } from '../config/unifiedConfig';
-import { NotFoundError } from '../utils/errors';
-import { extractProcessRuleCandidates } from '../utils/processRuleExtraction';
-import { preferencesService } from './preferencesService';
+} from '../repositories/processMemoryRepository.js';
+import { connectionRepository } from '../repositories/connectionRepository.js';
+import { policyEngine, KIND_TO_PROVIDER } from '../control-plane/policy/policy.js';
+import { vault } from '../control-plane/vault/vault.js';
+import { config } from '../config/unifiedConfig.js';
+import { NotFoundError } from '../utils/errors.js';
+import { extractProcessRuleCandidates } from '../utils/processRuleExtraction.js';
+import { preferencesService } from './preferencesService.js';
 import {
   fetchSentMailSamples,
   isGoogleAuthError,
   type RecurringCcContact,
-} from './googleOAuthService';
-import { observeSentMailStyle, type SentMailSample } from './sentMailStyleObserver';
+} from './googleOAuthService.js';
+import { observeSentMailStyle, type SentMailSample } from './sentMailStyleObserver.js';
 
 /** What the API accepts to create a user-STATED rule (role only; concrete-identity handling is UI-driven). */
 export interface CreateStatedRuleInput {

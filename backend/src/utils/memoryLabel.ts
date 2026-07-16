@@ -1,5 +1,5 @@
 import type { Rating, ResourceKind } from '@stewra/shared-types';
-import { keywords } from './text';
+import { keywords } from './text.js';
 
 /** Human-readable source name for a resource kind, used as the label's leading scope. */
 const KIND_TITLE: Readonly<Record<ResourceKind, string>> = {

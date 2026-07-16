@@ -1,14 +1,14 @@
 import type { AgentMemory, Rating, ResourceKind } from '@stewra/shared-types';
 import { POSITIVE_RATINGS } from '@stewra/shared-types';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { agentMemoryRepository } from '../repositories/agentMemoryRepository';
-import type { UpdateMemoryPatch } from '../repositories/agentMemoryRepository';
-import type { AgentInsightRow } from '../repositories/agentInsightRepository';
-import { config } from '../config/unifiedConfig';
-import { buildMemoryLabel } from '../utils/memoryLabel';
-import { normalizeText } from '../utils/text';
-import { NotFoundError } from '../utils/errors';
-import { policyEngine, KIND_TO_PROVIDER } from '../control-plane/policy/policy';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { agentMemoryRepository } from '../repositories/agentMemoryRepository.js';
+import type { UpdateMemoryPatch } from '../repositories/agentMemoryRepository.js';
+import type { AgentInsightRow } from '../repositories/agentInsightRepository.js';
+import { config } from '../config/unifiedConfig.js';
+import { buildMemoryLabel } from '../utils/memoryLabel.js';
+import { normalizeText } from '../utils/text.js';
+import { NotFoundError } from '../utils/errors.js';
+import { policyEngine, KIND_TO_PROVIDER } from '../control-plane/policy/policy.js';
 
 /** The connected-source kinds a learning can be scoped to (memory itself is never a scope). */
 const SCOPE_KINDS: ReadonlyArray<Exclude<ResourceKind, 'memory'>> = ['calendar', 'gmail', 'money'];

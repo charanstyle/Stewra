@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
-import { mediaController } from '../controllers/mediaController';
-import { requireAuth } from '../middleware/requireAuth';
-import { requireEmailVerification } from '../middleware/requireEmailVerification';
+import { mediaController } from '../controllers/mediaController.js';
+import { requireAuth } from '../middleware/requireAuth.js';
+import { requireEmailVerification } from '../middleware/requireEmailVerification.js';
 
 const router = Router();
 

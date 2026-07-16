@@ -11,9 +11,9 @@ import type {
   SenderKind,
 } from '@stewra/shared-types';
 import { PROPOSED_ACTION_STATUSES } from '@stewra/shared-types';
-import { db } from '../database/index';
-import type { JsonMetadata, JsonValue } from '../database/types';
-import { conversationRepository } from './conversationRepository';
+import { db } from '../database/index.js';
+import type { JsonMetadata, JsonValue } from '../database/types.js';
+import { conversationRepository } from './conversationRepository.js';
 
 interface MessageRow {
   readonly id: string;

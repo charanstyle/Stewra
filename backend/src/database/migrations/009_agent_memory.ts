@@ -1,6 +1,6 @@
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
-import type { Database } from '../types';
+import type { Database } from '../types.js';
 
 /**
  * The user-owned, named, searchable memory. Each row is a "learning" the control plane derives

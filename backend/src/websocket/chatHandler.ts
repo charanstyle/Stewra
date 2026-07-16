@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { CLIENT_EVENTS, SERVER_EVENTS } from '@stewra/shared-types';
 import type { ChatReadEvent, ChatTypingEvent } from '@stewra/shared-types';
-import { conversationService } from '../services/conversationService';
-import { BaseSocketHandler } from './baseSocketHandler';
-import { conversationRoom } from './types';
+import { conversationService } from '../services/conversationService.js';
+import { BaseSocketHandler } from './baseSocketHandler.js';
+import { conversationRoom } from './types.js';
 
 const JoinSchema = z.object({ conversationId: z.string().uuid() });
 const TypingSchema = z.object({

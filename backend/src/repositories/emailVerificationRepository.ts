@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 /** A single issued verification code, as stored. */
 export interface EmailVerificationCodeRow {

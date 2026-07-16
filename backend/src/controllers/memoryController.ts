@@ -5,9 +5,9 @@ import type {
   ListMemoriesResponse,
   UpdateMemoryResponse,
 } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { memoryService } from '../services/memoryService';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { memoryService } from '../services/memoryService.js';
+import { parse } from '../utils/validate.js';
 
 // Memory is scoped to a connected source kind (memory itself is never a scope of a memory).
 const kindSchema = z.enum(['calendar', 'gmail', 'money']);

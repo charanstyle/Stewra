@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { processRulesController } from '../controllers/processRulesController';
-import { requireAuth } from '../middleware/requireAuth';
-import { requireEmailVerification } from '../middleware/requireEmailVerification';
+import { processRulesController } from '../controllers/processRulesController.js';
+import { requireAuth } from '../middleware/requireAuth.js';
+import { requireEmailVerification } from '../middleware/requireEmailVerification.js';
 
 const router = Router();
 

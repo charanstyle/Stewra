@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
-import { redis } from '../services/redisClient';
-import { RateLimitError } from '../utils/errors';
-import { logger } from '../utils/logger';
+import { redis } from '../services/redisClient.js';
+import { RateLimitError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * A fixed-window rate limiter, counted in Redis so the budget is shared across replicas — a per-process

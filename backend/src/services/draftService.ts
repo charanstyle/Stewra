@@ -1,10 +1,10 @@
 import type { ModelMessage } from '@stewra/shared-types';
-import { modelClient } from '../agent-host/modelClient';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { emailThreadRepository, emailMessageRepository } from '../repositories/emailStore';
-import { processMemoryService } from './processMemoryService';
-import { memoryService } from './memoryService';
-import { NotFoundError } from '../utils/errors';
+import { modelClient } from '../agent-host/modelClient.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { emailThreadRepository, emailMessageRepository } from '../repositories/emailStore.js';
+import { processMemoryService } from './processMemoryService.js';
+import { memoryService } from './memoryService.js';
+import { NotFoundError } from '../utils/errors.js';
 
 /** Cap the thread context fed to the model when drafting. */
 const THREAD_CONTEXT_LIMIT = 20;

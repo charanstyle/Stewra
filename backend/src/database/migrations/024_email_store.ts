@@ -1,6 +1,6 @@
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
-import type { Database } from '../types';
+import type { Database } from '../types.js';
 
 /**
  * The email store: the first place Stewra persists real inbox content, so it can summarise the inbox,

@@ -1,9 +1,9 @@
 import type { MessagingChannel } from '@stewra/shared-types';
-import type { ChannelSender } from './types';
-import { WHATSAPP_CHANNEL, whatsappCloudSender } from './whatsappCloudSender';
+import type { ChannelSender } from './types.js';
+import { WHATSAPP_CHANNEL, whatsappCloudSender } from './whatsappCloudSender.js';
 
-export type { ChannelSender } from './types';
-export { WHATSAPP_CHANNEL, splitForWhatsapp } from './whatsappCloudSender';
+export type { ChannelSender } from './types.js';
+export { WHATSAPP_CHANNEL, splitForWhatsapp } from './whatsappCloudSender.js';
 
 /**
  * The registry of channels Stewra's SERVER can send on — the single place a new server-side messaging

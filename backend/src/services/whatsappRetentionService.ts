@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/node';
-import { config } from '../config/unifiedConfig';
-import { whatsappStore } from '../repositories/whatsappStore';
-import { logger } from '../utils/logger';
+import { config } from '../config/unifiedConfig.js';
+import { whatsappStore } from '../repositories/whatsappStore.js';
+import { logger } from '../utils/logger.js';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 

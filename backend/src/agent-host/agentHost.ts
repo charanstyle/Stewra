@@ -1,6 +1,6 @@
 import { AgentRuntime } from '@stewra/agent-runtime';
-import { broker } from '../control-plane/broker/broker';
-import { modelClient } from './modelClient';
+import { broker } from '../control-plane/broker/broker.js';
+import { modelClient } from './modelClient.js';
 
 /**
  * The ONE place the two planes meet: the control-plane broker (trusted, holds db/vault/policy) and

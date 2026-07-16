@@ -1,7 +1,7 @@
 import type { ExtendedError } from 'socket.io';
-import { authService } from '../services/authService';
-import { logger } from '../utils/logger';
-import type { AppSocket } from './types';
+import { authService } from '../services/authService.js';
+import { logger } from '../utils/logger.js';
+import type { AppSocket } from './types.js';
 
 /**
  * Socket.IO handshake auth. Reads the access token from `handshake.auth.token` (the idiomatic client

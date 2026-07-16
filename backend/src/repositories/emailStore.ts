@@ -1,5 +1,5 @@
-import { db } from '../database/index';
-import { decryptField } from '../control-plane/vault/fieldCrypto';
+import { db } from '../database/index.js';
+import { decryptField } from '../control-plane/vault/fieldCrypto.js';
 
 /**
  * Data access for the encrypted email store (migration 024). Message bodies are stored as fieldCrypto

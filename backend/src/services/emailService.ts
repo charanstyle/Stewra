@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
-import { config } from '../config/unifiedConfig';
-import { logger } from '../utils/logger';
+import { config } from '../config/unifiedConfig.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Thin wrapper over a Mailu/SMTP transport (nodemailer), mirroring the pattern the other apps on the

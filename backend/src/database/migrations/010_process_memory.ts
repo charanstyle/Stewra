@@ -1,6 +1,6 @@
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
-import type { Database } from '../types';
+import type { Database } from '../types.js';
 
 /**
  * Process & style memory — the user-owned store of *how* they like work done (the "process"),

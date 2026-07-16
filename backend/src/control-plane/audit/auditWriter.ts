@@ -1,5 +1,5 @@
 import type { AuditEvent, NewAuditEvent } from '@stewra/shared-types';
-import { db } from '../../database/index';
+import { db } from '../../database/index.js';
 
 /**
  * Appends to the immutable audit log. For a trust-first product there are NO unaudited actions:

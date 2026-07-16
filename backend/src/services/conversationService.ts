@@ -5,12 +5,12 @@ import type {
   PublicUser,
   ReadReceipt,
 } from '@stewra/shared-types';
-import { conversationRepository } from '../repositories/conversationRepository';
-import { messageRepository } from '../repositories/messageRepository';
-import { userRepository } from '../repositories/userRepository';
-import { contactService } from './contactService';
-import { preferencesService } from './preferencesService';
-import { ForbiddenError, NotFoundError, ValidationError } from '../utils/errors';
+import { conversationRepository } from '../repositories/conversationRepository.js';
+import { messageRepository } from '../repositories/messageRepository.js';
+import { userRepository } from '../repositories/userRepository.js';
+import { contactService } from './contactService.js';
+import { preferencesService } from './preferencesService.js';
+import { ForbiddenError, NotFoundError, ValidationError } from '../utils/errors.js';
 
 /**
  * Conversations: 1:1 (`direct`), group, and the singleton Stewra-AI thread. This is the authorization

@@ -1,5 +1,5 @@
 import type { AuditEvent, ListActivityResponse } from '@stewra/shared-types';
-import { db } from '../../database/index';
+import { db } from '../../database/index.js';
 
 const MAX_LIMIT = 100;
 

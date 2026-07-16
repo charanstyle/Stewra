@@ -1,6 +1,6 @@
 import type { AgentInsight, ResourceKind } from '@stewra/shared-types';
 import { sql } from 'kysely';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 /** A persisted insight row. `factsUsed` is reserved (null for now). */
 export interface AgentInsightRow {

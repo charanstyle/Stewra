@@ -11,10 +11,10 @@ import {
   type ListConversationsResponse,
   type MarkReadResponse,
 } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { conversationService } from '../services/conversationService';
-import { emitToConversation } from '../websocket/emitter';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { conversationService } from '../services/conversationService.js';
+import { emitToConversation } from '../websocket/emitter.js';
+import { parse } from '../utils/validate.js';
 
 const createSchema = z.object({
   type: z.enum(['direct', 'group']),

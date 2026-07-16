@@ -2,7 +2,8 @@
   "name": "backend",
   "version": "0.0.0",
   "private": true,
-  "description": "Stewra backend — control plane + agent host + HTTP API",
+  "description": "Stewra backend \u2014 control plane + agent host + HTTP API",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -10,7 +11,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:migrate": "tsx src/database/migrate.ts",
-    "test": "jest --runInBand"
+    "test": "vitest run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.107.0",
@@ -41,16 +42,14 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
-    "@types/jest": "^29.5.14",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/multer": "^2.2.0",
     "@types/node": "^20.17.6",
     "@types/pg": "^8.11.10",
     "@types/supertest": "^6.0.2",
-    "jest": "^29.7.0",
     "supertest": "^7.0.0",
-    "ts-jest": "^29.2.5",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.0"
   }
 }

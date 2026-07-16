@@ -1,6 +1,6 @@
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
-import type { Database } from '../types';
+import type { Database } from '../types.js';
 
 /**
  * The EXPERIMENTAL `whatsapp_personal` channel — the user's OWN WhatsApp account, reached through the

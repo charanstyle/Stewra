@@ -6,23 +6,23 @@ import type {
   ListConnectionsResponse,
   ConnectionResponse,
 } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { config } from '../config/unifiedConfig';
-import { connectionRepository } from '../repositories/connectionRepository';
-import { vault } from '../control-plane/vault/vault';
-import { auditWriter } from '../control-plane/audit/auditWriter';
+import { BaseController } from './baseController.js';
+import { config } from '../config/unifiedConfig.js';
+import { connectionRepository } from '../repositories/connectionRepository.js';
+import { vault } from '../control-plane/vault/vault.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
 import {
   buildGoogleConsent,
   verifyCalendarState,
   exchangeCodeForRefreshToken,
   fetchAccountEmail,
   revokeRefreshToken,
-} from '../services/googleOAuthService';
-import { memoryService } from '../services/memoryService';
-import { processMemoryService } from '../services/processMemoryService';
-import { emailRetentionService } from '../services/emailRetentionService';
-import { parse } from '../utils/validate';
-import { NotFoundError } from '../utils/errors';
+} from '../services/googleOAuthService.js';
+import { memoryService } from '../services/memoryService.js';
+import { processMemoryService } from '../services/processMemoryService.js';
+import { emailRetentionService } from '../services/emailRetentionService.js';
+import { parse } from '../utils/validate.js';
+import { NotFoundError } from '../utils/errors.js';
 
 // The OAuth callback Google redirects the browser to — carries the code and our signed state.
 const callbackSchema = z.object({

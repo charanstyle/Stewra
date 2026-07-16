@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { feedbackController } from '../controllers/feedbackController';
-import { requireAuth } from '../middleware/requireAuth';
-import { requireEmailVerification } from '../middleware/requireEmailVerification';
+import { feedbackController } from '../controllers/feedbackController.js';
+import { requireAuth } from '../middleware/requireAuth.js';
+import { requireEmailVerification } from '../middleware/requireEmailVerification.js';
 
 const router = Router();
 

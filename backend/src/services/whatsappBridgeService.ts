@@ -1,16 +1,16 @@
 import * as Sentry from '@sentry/node';
 import type { BridgeAllowedChat, BridgeInboundPayload, BridgeWaState } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { hmacField } from '../control-plane/vault/fieldCrypto';
-import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository';
-import { channelIdentityRepository } from '../repositories/channelIdentityRepository';
-import { whatsappStore } from '../repositories/whatsappStore';
-import { dispatchToBridge } from '../websocket/bridgeEmitter';
-import { preferencesService } from './preferencesService';
-import { renderWhatsappEmailReply } from './whatsappEmailNotice';
-import { redis } from './redisClient';
-import { STEWRA_FAILURE_TEXT, stewraTurnService } from './stewraTurnService';
-import { logger } from '../utils/logger';
+import { config } from '../config/unifiedConfig.js';
+import { hmacField } from '../control-plane/vault/fieldCrypto.js';
+import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository.js';
+import { channelIdentityRepository } from '../repositories/channelIdentityRepository.js';
+import { whatsappStore } from '../repositories/whatsappStore.js';
+import { dispatchToBridge } from '../websocket/bridgeEmitter.js';
+import { preferencesService } from './preferencesService.js';
+import { renderWhatsappEmailReply } from './whatsappEmailNotice.js';
+import { redis } from './redisClient.js';
+import { STEWRA_FAILURE_TEXT, stewraTurnService } from './stewraTurnService.js';
+import { logger } from '../utils/logger.js';
 
 const CHANNEL = 'whatsapp_personal' as const;
 

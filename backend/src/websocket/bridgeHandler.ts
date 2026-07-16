@@ -1,10 +1,10 @@
 import * as Sentry from '@sentry/node';
 import { z } from 'zod';
 import { BRIDGE_CLIENT_EVENTS, BRIDGE_WA_STATES } from '@stewra/shared-types';
-import { whatsappBridgeService } from '../services/whatsappBridgeService';
-import { logger } from '../utils/logger';
-import { bridgeUserRoom } from './bridgeTypes';
-import type { BridgeSocketLike } from './bridgeTypes';
+import { whatsappBridgeService } from '../services/whatsappBridgeService.js';
+import { logger } from '../utils/logger.js';
+import { bridgeUserRoom } from './bridgeTypes.js';
+import type { BridgeSocketLike } from './bridgeTypes.js';
 
 /**
  * Every payload below arrives from a desktop app on someone else's machine. It is parsed, never trusted:

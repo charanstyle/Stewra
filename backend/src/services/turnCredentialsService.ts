@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import type { TurnCredentialsResponse } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
+import { config } from '../config/unifiedConfig.js';
 
 /**
  * Mints ephemeral TURN credentials for the coturn running in `use-auth-secret` (RFC 5766 REST) mode on

@@ -1,5 +1,5 @@
 import type { CallEndReason, CallKind, CallSession, CallStatus } from '@stewra/shared-types';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 interface CallSessionRow {
   readonly id: string;

@@ -1,9 +1,9 @@
 import type { Request, Response } from 'express';
 import type { UploadAvatarResponse } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { mediaService } from '../services/mediaService';
-import { userRepository } from '../repositories/userRepository';
-import { ValidationError } from '../utils/errors';
+import { BaseController } from './baseController.js';
+import { mediaService } from '../services/mediaService.js';
+import { userRepository } from '../repositories/userRepository.js';
+import { ValidationError } from '../utils/errors.js';
 
 /** Accepted profile-photo mimes. Kept in lockstep with mediaService's image extension table. */
 const ALLOWED_AVATAR_MIMES: ReadonlySet<string> = new Set([

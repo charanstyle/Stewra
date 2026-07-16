@@ -1,9 +1,9 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type { SubmitFeedbackResponse } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { feedbackService } from '../services/feedbackService';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { feedbackService } from '../services/feedbackService.js';
+import { parse } from '../utils/validate.js';
 
 const submitSchema = z.object({
   rating: z.enum(['poor', 'average', 'good', 'excellent', 'outstanding']),

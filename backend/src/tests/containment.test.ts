@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { AgentRuntime } from '@stewra/agent-runtime';
 import type {
   BrokerRequest,
@@ -98,7 +99,9 @@ describe('agent containment', () => {
   it('the agent-runtime package declares NO runtime dependency except @stewra/shared-types', () => {
     // Structural guarantee backing the dependency-cruiser CI gate: the untrusted plane has no db,
     // vault, or network library available to it at all.
-    const pkgPath = join(__dirname, '../../../packages/agent-runtime/package.json');
+    // ESM has no `__dirname`; derive it from this module's own URL.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkgPath = join(here, '../../../packages/agent-runtime/package.json');
     const pkg: { dependencies?: Record<string, string> } = JSON.parse(
       readFileSync(pkgPath, 'utf8'),
     );

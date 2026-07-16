@@ -1,5 +1,5 @@
 import type { Kysely } from 'kysely';
-import type { Database } from '../types';
+import type { Database } from '../types.js';
 
 export async function up(db: Kysely<Database>): Promise<void> {
   // Sending email in response to a WhatsApp request is a NEW, security-relevant capability: email is

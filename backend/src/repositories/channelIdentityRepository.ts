@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 import type { ChannelIdentity, MessagingChannel } from '@stewra/shared-types';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 /**
  * Ambiguity-free alphabet for the link code: no O/0, I/1, S/5, B/8. The user retypes this into WhatsApp

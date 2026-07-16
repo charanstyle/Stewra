@@ -6,9 +6,9 @@ import type {
   ListProcessRulesResponse,
   UpdateProcessRuleResponse,
 } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { processMemoryService } from '../services/processMemoryService';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { processMemoryService } from '../services/processMemoryService.js';
+import { parse } from '../utils/validate.js';
 
 // Controlled vocabularies mirror the shared-types unions — the API only ever accepts a known axis.
 const domainSchema = z.enum(['email', 'advice', 'inbox', 'calendar']);

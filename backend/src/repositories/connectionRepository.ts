@@ -3,8 +3,8 @@ import type {
   ConnectionProvider,
   ConnectionStatus,
 } from '@stewra/shared-types';
-import { db } from '../database/index';
-import { config } from '../config/unifiedConfig';
+import { db } from '../database/index.js';
+import { config } from '../config/unifiedConfig.js';
 
 /** A connection row as the control plane needs it internally (includes the vault handle). */
 export interface ConnectionRow {

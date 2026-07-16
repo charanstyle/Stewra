@@ -1,6 +1,6 @@
 import express, { Router } from 'express';
-import { whatsappController } from '../controllers/whatsappController';
-import { verifyWhatsappSignature } from '../middleware/verifyWhatsappSignature';
+import { whatsappController } from '../controllers/whatsappController.js';
+import { verifyWhatsappSignature } from '../middleware/verifyWhatsappSignature.js';
 
 const router = Router();
 

@@ -1,5 +1,5 @@
 import { createLogger, format, transports } from 'winston';
-import { config } from '../config/unifiedConfig';
+import { config } from '../config/unifiedConfig.js';
 
 export const logger = createLogger({
   level: config.isProduction ? 'info' : 'debug',

@@ -1,5 +1,5 @@
-import { sendGmailMessage } from '../googleOAuthService';
-import type { EmailSender, OutboundEmail, SentReceipt } from './types';
+import { sendGmailMessage } from '../googleOAuthService.js';
+import type { EmailSender, OutboundEmail, SentReceipt } from './types.js';
 
 /** Stable provider code for a Google/Gmail-backed send (matches the connection's `provider` column). */
 export const GMAIL_PROVIDER = 'google';

@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
-import { config } from '../config/unifiedConfig';
-import { conversationRepository } from '../repositories/conversationRepository';
+import { config } from '../config/unifiedConfig.js';
+import { conversationRepository } from '../repositories/conversationRepository.js';
 import {
   mediaAssetRepository,
   type MediaAsset,
   type MediaAssetKind,
-} from '../repositories/mediaAssetRepository';
-import { ForbiddenError, NotFoundError } from '../utils/errors';
+} from '../repositories/mediaAssetRepository.js';
+import { ForbiddenError, NotFoundError } from '../utils/errors.js';
 
 /** Fallback extensions per common audio/image mime so a stored binary keeps a sensible suffix on disk. */
 const EXT_BY_MIME: Readonly<Record<string, string>> = {

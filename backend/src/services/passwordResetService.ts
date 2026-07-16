@@ -1,13 +1,13 @@
 import { randomInt } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { PASSWORD_RESET_CODE_LENGTH, PASSWORD_RESET_MIN_PASSWORD_LENGTH } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { RateLimitError, ValidationError } from '../utils/errors';
-import { passwordResetRepository } from '../repositories/passwordResetRepository';
-import { userRepository } from '../repositories/userRepository';
-import { emailService } from './emailService';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { logger } from '../utils/logger';
+import { config } from '../config/unifiedConfig.js';
+import { RateLimitError, ValidationError } from '../utils/errors.js';
+import { passwordResetRepository } from '../repositories/passwordResetRepository.js';
+import { userRepository } from '../repositories/userRepository.js';
+import { emailService } from './emailService.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { logger } from '../utils/logger.js';
 
 /** A wrong code and a nonexistent account return the SAME message so neither reveals the other. */
 const GENERIC_CODE_ERROR = 'That code is invalid or has expired. Request a new one.';

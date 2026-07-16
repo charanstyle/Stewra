@@ -1,5 +1,5 @@
 import type { ResourceKind } from '@stewra/shared-types';
-import { db } from '../../database/index';
+import { db } from '../../database/index.js';
 
 /** A deterministic allow/deny decision. The model is NEVER consulted here. */
 export interface PolicyDecision {

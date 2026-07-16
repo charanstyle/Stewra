@@ -11,13 +11,13 @@ import {
   WHATSAPP_PERSONAL_CONSENT_VERSION,
   isConsentSentenceValid,
 } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository';
-import { channelIdentityRepository } from '../repositories/channelIdentityRepository';
-import { notifyRevoked } from '../websocket/bridgeEmitter';
-import { AuthenticationError, ForbiddenError, ServiceUnavailableError, ValidationError } from '../utils/errors';
-import { logger } from '../utils/logger';
+import { config } from '../config/unifiedConfig.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository.js';
+import { channelIdentityRepository } from '../repositories/channelIdentityRepository.js';
+import { notifyRevoked } from '../websocket/bridgeEmitter.js';
+import { AuthenticationError, ForbiddenError, ServiceUnavailableError, ValidationError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
 
 const CHANNEL = 'whatsapp_personal' as const;
 

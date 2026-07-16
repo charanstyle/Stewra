@@ -1,8 +1,8 @@
 import { createAdapter } from '@socket.io/redis-adapter';
-import { createRedisClient } from '../services/redisClient';
-import { config } from '../config/unifiedConfig';
-import { logger } from '../utils/logger';
-import type { AppServer } from './types';
+import { createRedisClient } from '../services/redisClient.js';
+import { config } from '../config/unifiedConfig.js';
+import { logger } from '../utils/logger.js';
+import type { AppServer } from './types.js';
 
 /**
  * Wire the Socket.IO Redis adapter so rooms and broadcasts fan out across every backend instance (a

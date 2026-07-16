@@ -1,7 +1,7 @@
 import { JWT } from 'google-auth-library';
 import type { CallKind } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { logger } from '../utils/logger';
+import { config } from '../config/unifiedConfig.js';
+import { logger } from '../utils/logger.js';
 
 const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 

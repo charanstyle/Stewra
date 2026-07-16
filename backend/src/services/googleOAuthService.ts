@@ -2,10 +2,10 @@ import { randomBytes } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { google, type gmail_v1 } from 'googleapis';
 import * as Sentry from '@sentry/node';
-import { config } from '../config/unifiedConfig';
-import type { CalendarEvent } from './calendarFacts';
-import type { EmailSummary } from './gmailFacts';
-import { classifySentMessage, type SentMailSample } from './sentMailStyleObserver';
+import { config } from '../config/unifiedConfig.js';
+import type { CalendarEvent } from './calendarFacts.js';
+import type { EmailSummary } from './gmailFacts.js';
+import { classifySentMessage, type SentMailSample } from './sentMailStyleObserver.js';
 
 /** The OAuth `state` is a short-lived signed token tying the credential-less callback to the user. */
 const STATE_TTL = '10m';

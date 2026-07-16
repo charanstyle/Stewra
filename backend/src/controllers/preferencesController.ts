@@ -6,9 +6,9 @@ import {
   type GetPreferencesResponse,
   type UpdatePreferencesResponse,
 } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { preferencesService } from '../services/preferencesService';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { preferencesService } from '../services/preferencesService.js';
+import { parse } from '../utils/validate.js';
 
 // Every field optional (a partial update); the lookback is bounded to the shared contract limits.
 const updateSchema = z.object({

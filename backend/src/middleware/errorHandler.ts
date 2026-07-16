@@ -1,8 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import * as Sentry from '@sentry/node';
 import type { ApiResponse } from '@stewra/shared-types';
-import { AppError, ValidationError } from '../utils/errors';
-import { logger } from '../utils/logger';
+import { AppError, ValidationError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
 
 export function notFoundHandler(_req: Request, res: Response): void {
   const body: ApiResponse<never> = {

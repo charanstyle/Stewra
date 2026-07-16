@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/node';
 import type { ZodType } from 'zod';
-import { logger } from '../utils/logger';
-import type { AppServer, AppSocket } from './types';
+import { logger } from '../utils/logger.js';
+import type { AppServer, AppSocket } from './types.js';
 
 /** Max events a single socket may emit inside one rolling window before we start dropping them. */
 const RATE_LIMIT_MAX_EVENTS = 60;

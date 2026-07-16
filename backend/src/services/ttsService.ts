@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { config } from '../config/unifiedConfig';
+import { config } from '../config/unifiedConfig.js';
 
 /**
  * Text-to-speech via a locally installed Piper binary, invoked with `execFile` (args array, NO shell)

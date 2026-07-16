@@ -1,5 +1,5 @@
 import type { Briefing, BriefingSection } from '@stewra/shared-types';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 interface BriefingDbRow {
   id: string;

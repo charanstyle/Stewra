@@ -1,5 +1,5 @@
 import type { PublicUser, User, UserRole } from '@stewra/shared-types';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 export interface UserRow {
   readonly id: string;

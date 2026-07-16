@@ -3,7 +3,19 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "types": ["node", "jest", "multer"]
+
+    // The backend is ESM (`"type": "module"` in package.json), like the bridge and unlike the rest of
+    // the monorepo. `nodenext` is what node:20 actually implements, so the compiler resolves modules the
+    // same way the runtime will. The base config stays `commonjs` (`moduleResolution: "node"`), so
+    // website/shared-types/agent-runtime are untouched — only this workspace flips.
+    //
+    // The visible cost of nodenext: relative imports must carry a `.js` extension even from `.ts` source.
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+
+    // Vitest supplies the ambient describe/it/expect/vi (globals: true in vitest.config.ts); `multer`
+    // augments the Express request type used across controllers.
+    "types": ["node", "vitest/globals", "multer"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

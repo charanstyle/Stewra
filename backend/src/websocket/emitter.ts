@@ -1,5 +1,5 @@
-import type { AppServer } from './types';
-import { conversationRoom, userRoom } from './types';
+import type { AppServer } from './types.js';
+import { conversationRoom, userRoom } from './types.js';
 
 /**
  * The bridge that lets the REST layer (controllers) notify sockets after a write commits, WITHOUT

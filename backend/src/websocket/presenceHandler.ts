@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { CLIENT_EVENTS } from '@stewra/shared-types';
 import type { PresenceUpdateEvent } from '@stewra/shared-types';
-import { presenceService } from '../services/presenceService';
-import { BaseSocketHandler } from './baseSocketHandler';
-import { presenceRoom } from './types';
+import { presenceService } from '../services/presenceService.js';
+import { BaseSocketHandler } from './baseSocketHandler.js';
+import { presenceRoom } from './types.js';
 
 const PresenceSubscribeSchema = z.object({
   userIds: z.array(z.string().uuid()).max(500),

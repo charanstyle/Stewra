@@ -1,4 +1,4 @@
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 /** The kinds of stored binary a media_assets row can hold (matches the migration CHECK). */
 export type MediaAssetKind = 'voice_in' | 'tts_out' | 'image' | 'video' | 'audio' | 'file' | 'avatar';

@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { BaseController } from './baseController';
-import { whatsappPersonalService } from '../services/whatsappPersonalService';
+import { BaseController } from './baseController.js';
+import { whatsappPersonalService } from '../services/whatsappPersonalService.js';
 
 /**
  * `sentence` is capped at a sane length rather than left unbounded: it is echoed back into an audit row,

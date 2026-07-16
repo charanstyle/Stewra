@@ -1,15 +1,15 @@
 // Sentry must be the FIRST import so it instruments everything loaded afterwards.
-import './instrument';
+import './instrument.js';
 
 import { createServer, type Server } from 'node:http';
 import { Server as SocketIOServer } from 'socket.io';
-import { createApp } from './app';
-import { config } from './config/unifiedConfig';
-import { assertDbConnection, closeDb } from './database/index';
-import { logger } from './utils/logger';
-import { initSockets } from './websocket';
-import { startScheduler } from './scheduler/scheduler';
-import type { AppServer } from './websocket/types';
+import { createApp } from './app.js';
+import { config } from './config/unifiedConfig.js';
+import { assertDbConnection, closeDb } from './database/index.js';
+import { logger } from './utils/logger.js';
+import { initSockets } from './websocket/index.js';
+import { startScheduler } from './scheduler/scheduler.js';
+import type { AppServer } from './websocket/types.js';
 
 /**
  * Process entry point. Owns the lifecycle that `app.ts` deliberately doesn't: it proves the DB is

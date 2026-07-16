@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { emailVerificationController } from '../controllers/emailVerificationController';
-import { requireAuth } from '../middleware/requireAuth';
+import { emailVerificationController } from '../controllers/emailVerificationController.js';
+import { requireAuth } from '../middleware/requireAuth.js';
 
 const router = Router();
 

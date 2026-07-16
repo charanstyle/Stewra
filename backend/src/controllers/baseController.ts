@@ -1,8 +1,8 @@
 import type { Response } from 'express';
 import * as Sentry from '@sentry/node';
 import type { ApiResponse } from '@stewra/shared-types';
-import { AppError, ValidationError } from '../utils/errors';
-import { logger } from '../utils/logger';
+import { AppError, ValidationError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
 
 /** Base for all controllers: uniform success/error rendering, with Sentry capture on failure. */
 export abstract class BaseController {

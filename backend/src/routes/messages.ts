@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import multer from 'multer';
-import { messagesController } from '../controllers/messagesController';
-import { requireAuth } from '../middleware/requireAuth';
-import { requireEmailVerification } from '../middleware/requireEmailVerification';
-import { config } from '../config/unifiedConfig';
+import { messagesController } from '../controllers/messagesController.js';
+import { requireAuth } from '../middleware/requireAuth.js';
+import { requireEmailVerification } from '../middleware/requireEmailVerification.js';
+import { config } from '../config/unifiedConfig.js';
 
 const router = Router();
 

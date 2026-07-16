@@ -7,7 +7,7 @@ import type {
   ProcessTier,
 } from '@stewra/shared-types';
 import { sql } from 'kysely';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 /** The columns that reconstruct a client-facing `ProcessRule` (never the vault ref or provider). */
 const MODEL_COLUMNS = [

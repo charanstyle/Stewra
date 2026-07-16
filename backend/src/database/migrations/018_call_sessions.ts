@@ -1,6 +1,6 @@
 import type { Kysely } from 'kysely';
 import { sql } from 'kysely';
-import type { Database } from '../types';
+import type { Database } from '../types.js';
 
 export async function up(db: Kysely<Database>): Promise<void> {
   // One row per call attempt, scoped to a conversation. `status` tracks the lifecycle

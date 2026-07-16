@@ -1,4 +1,4 @@
-import { buildEmailSender, sendableProviders, GMAIL_PROVIDER } from '../services/emailSenders';
+import { buildEmailSender, sendableProviders, GMAIL_PROVIDER } from '../services/emailSenders/index.js';
 
 /**
  * The provider registry is the seam that keeps the send tool from being Gmail-only: the confirm-gated

@@ -5,7 +5,7 @@ import type {
   SuggestionSourceRef,
   SuggestionStatus,
 } from '@stewra/shared-types';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 /** Input to create/refresh a nudge, keyed by a stable `dedupKey` (e.g. "needs_reply:<threadId>"). */
 export interface UpsertSuggestionInput {

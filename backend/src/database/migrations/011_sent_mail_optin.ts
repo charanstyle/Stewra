@@ -1,5 +1,5 @@
 import type { Kysely } from 'kysely';
-import type { Database } from '../types';
+import type { Database } from '../types.js';
 
 export async function up(db: Kysely<Database>): Promise<void> {
   // Reading the user's Sent mail to learn their writing style is a NEW data use, so it is strictly

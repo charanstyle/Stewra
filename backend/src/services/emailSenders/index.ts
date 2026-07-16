@@ -1,8 +1,8 @@
-import { GMAIL_PROVIDER, GmailSender } from './gmailSender';
-import type { EmailSender } from './types';
+import { GMAIL_PROVIDER, GmailSender } from './gmailSender.js';
+import type { EmailSender } from './types.js';
 
-export type { EmailSender, OutboundEmail, SentReceipt } from './types';
-export { GMAIL_PROVIDER } from './gmailSender';
+export type { EmailSender, OutboundEmail, SentReceipt } from './types.js';
+export { GMAIL_PROVIDER } from './gmailSender.js';
 
 /** Build a sender for a provider from its vaulted credential (e.g. a Gmail refresh token). */
 type SenderFactory = (credential: string) => EmailSender;

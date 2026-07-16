@@ -7,24 +7,24 @@ import type {
   SuggestionOption,
   SuggestionSourceRef,
 } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { modelClient } from '../agent-host/modelClient';
-import { vault } from '../control-plane/vault/vault';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { connectionRepository } from '../repositories/connectionRepository';
-import { fetchUpcomingEvents } from './googleOAuthService';
-import { extractCalendarFacts } from './calendarFacts';
+import { config } from '../config/unifiedConfig.js';
+import { modelClient } from '../agent-host/modelClient.js';
+import { vault } from '../control-plane/vault/vault.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { connectionRepository } from '../repositories/connectionRepository.js';
+import { fetchUpcomingEvents } from './googleOAuthService.js';
+import { extractCalendarFacts } from './calendarFacts.js';
 import {
   emailThreadRepository,
   emailMessageRepository,
   emailContactRepository,
   type EmailThreadRow,
-} from '../repositories/emailStore';
-import { briefingRepository } from '../repositories/briefingRepository';
-import { suggestionRepository } from '../repositories/suggestionRepository';
-import { isReplyableInbound } from './emailClassification';
-import { processMemoryService } from './processMemoryService';
-import { logger } from '../utils/logger';
+} from '../repositories/emailStore.js';
+import { briefingRepository } from '../repositories/briefingRepository.js';
+import { suggestionRepository } from '../repositories/suggestionRepository.js';
+import { isReplyableInbound } from './emailClassification.js';
+import { processMemoryService } from './processMemoryService.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Builds the proactive briefing + nudges (control plane, trusted — a peer of insightService). It reads

@@ -2,8 +2,8 @@ import { execFile, execFileSync } from 'node:child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import type { IModelClient, ModelMessage } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { chooseModelProvider } from './modelProvider';
+import { config } from '../config/unifiedConfig.js';
+import { chooseModelProvider } from './modelProvider.js';
 
 /** A short advisory insight never needs many tokens; bound the API call. */
 const MAX_OUTPUT_TOKENS = 1024;

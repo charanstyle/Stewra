@@ -5,9 +5,9 @@ import type {
   ResendVerificationResponse,
   VerifyEmailResponse,
 } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { emailVerificationService } from '../services/emailVerificationService';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { emailVerificationService } from '../services/emailVerificationService.js';
+import { parse } from '../utils/validate.js';
 
 // The code is exactly N digits — reject anything else before it reaches the service.
 const verifySchema = z.object({

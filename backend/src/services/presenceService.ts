@@ -1,7 +1,7 @@
-import type Redis from 'ioredis';
+import type { Redis } from 'ioredis';
 import type { PresenceStatus } from '@stewra/shared-types';
-import { redis } from './redisClient';
-import { config } from '../config/unifiedConfig';
+import { redis } from './redisClient.js';
+import { config } from '../config/unifiedConfig.js';
 
 /** Narrow an ioredis pipeline reply element (unknown) to a string, or null when absent/other. */
 function asStringOrNull(value: unknown): string | null {

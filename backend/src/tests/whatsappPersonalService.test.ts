@@ -1,20 +1,24 @@
+import type { Mocked } from 'vitest';
 import { WHATSAPP_PERSONAL_CONSENT_SENTENCE } from '@stewra/shared-types';
-import { AuthenticationError, ForbiddenError, ServiceUnavailableError, ValidationError } from '../utils/errors';
-
-const MIN_BRIDGE_VERSION = '1.2.0';
+import { AuthenticationError, ForbiddenError, ServiceUnavailableError, ValidationError } from '../utils/errors.js';
 
 // The feature is off by default in every real deploy, so it must be pinned ON here or every test would
 // pass for the wrong reason (a 503 is not the same as a rejection).
-const whatsappPersonal = {
-  enabled: true,
-  downloadUrl: 'https://downloads.example.test/stewra-bridge',
-  minBridgeVersion: MIN_BRIDGE_VERSION,
-  maxSendsPerMinute: 10,
-  retentionDays: 30,
-  bridgeTokenBytes: 32,
-};
+// `vi.hoisted` because Vitest lifts the `vi.mock` factory below above the module body: a plain `const`
+// would still be in its temporal dead zone when the factory runs. The object identity is preserved, so
+// `beforeEach` mutating `.enabled` still reaches the config the service reads.
+const { whatsappPersonal } = vi.hoisted(() => ({
+  whatsappPersonal: {
+    enabled: true,
+    downloadUrl: 'https://downloads.example.test/stewra-bridge',
+    minBridgeVersion: '1.2.0',
+    maxSendsPerMinute: 10,
+    retentionDays: 30,
+    bridgeTokenBytes: 32,
+  },
+}));
 
-jest.mock('../config/unifiedConfig', () => ({
+vi.mock('../config/unifiedConfig.js', () => ({
   config: {
     whatsapp: { linkCodeTtlMs: 600000 },
     get whatsappPersonal() {
@@ -24,36 +28,36 @@ jest.mock('../config/unifiedConfig', () => ({
 }));
 
 // The repositories reach Postgres on import; stub them so this exercises the GATE, not the storage.
-jest.mock('../repositories/bridgeDeviceRepository', () => ({
+vi.mock('../repositories/bridgeDeviceRepository.js', () => ({
   bridgeDeviceRepository: {
-    recordConsent: jest.fn(),
-    latestConsentVersion: jest.fn(),
-    findConsent: jest.fn(),
-    registerDevice: jest.fn(),
-    findByToken: jest.fn(),
-    listByUser: jest.fn(),
-    revoke: jest.fn(),
+    recordConsent: vi.fn(),
+    latestConsentVersion: vi.fn(),
+    findConsent: vi.fn(),
+    registerDevice: vi.fn(),
+    findByToken: vi.fn(),
+    listByUser: vi.fn(),
+    revoke: vi.fn(),
   },
 }));
-jest.mock('../repositories/channelIdentityRepository', () => ({
-  channelIdentityRepository: { createLinkCode: jest.fn(), consumeCode: jest.fn() },
+vi.mock('../repositories/channelIdentityRepository.js', () => ({
+  channelIdentityRepository: { createLinkCode: vi.fn(), consumeCode: vi.fn() },
 }));
-jest.mock('../control-plane/audit/auditWriter', () => ({ auditWriter: { write: jest.fn() } }));
+vi.mock('../control-plane/audit/auditWriter.js', () => ({ auditWriter: { write: vi.fn() } }));
 
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository';
-import { channelIdentityRepository } from '../repositories/channelIdentityRepository';
-import { whatsappPersonalService } from '../services/whatsappPersonalService';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository.js';
+import { channelIdentityRepository } from '../repositories/channelIdentityRepository.js';
+import { whatsappPersonalService } from '../services/whatsappPersonalService.js';
 
-const devices = bridgeDeviceRepository as jest.Mocked<typeof bridgeDeviceRepository>;
-const codes = channelIdentityRepository as jest.Mocked<typeof channelIdentityRepository>;
-const audit = auditWriter as jest.Mocked<typeof auditWriter>;
+const devices = bridgeDeviceRepository as Mocked<typeof bridgeDeviceRepository>;
+const codes = channelIdentityRepository as Mocked<typeof channelIdentityRepository>;
+const audit = auditWriter as Mocked<typeof auditWriter>;
 
 const CONSENTED_AT = new Date('2026-07-14T10:00:00.000Z');
 const USER = 'user-1';
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  vi.clearAllMocks();
   whatsappPersonal.enabled = true;
 });
 

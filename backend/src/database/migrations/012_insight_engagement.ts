@@ -1,5 +1,5 @@
 import type { Kysely } from 'kysely';
-import type { Database } from '../types';
+import type { Database } from '../types.js';
 
 export async function up(db: Kysely<Database>): Promise<void> {
   // Implicit engagement telemetry on each insight. Today only an ACTIVELY-rated insight leaves a

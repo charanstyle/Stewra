@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
-import { userRepository } from '../repositories/userRepository';
-import { ForbiddenError } from '../utils/errors';
+import { userRepository } from '../repositories/userRepository.js';
+import { ForbiddenError } from '../utils/errors.js';
 
 /**
  * Gate for features that must wait until the user has confirmed their email. Runs AFTER requireAuth

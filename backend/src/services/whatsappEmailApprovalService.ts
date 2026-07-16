@@ -2,12 +2,12 @@ import type {
   GetEmailOverWhatsappResponse,
   SetEmailOverWhatsappResponse,
 } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { userPreferencesRepository } from '../repositories/userPreferencesRepository';
-import { authService } from './authService';
-import { preferencesService } from './preferencesService';
-import { ServiceUnavailableError } from '../utils/errors';
+import { config } from '../config/unifiedConfig.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { userPreferencesRepository } from '../repositories/userPreferencesRepository.js';
+import { authService } from './authService.js';
+import { preferencesService } from './preferencesService.js';
+import { ServiceUnavailableError } from '../utils/errors.js';
 
 /**
  * A feature id, not a `MessagingChannel`. Approve-to-send is a capability layered over the existing

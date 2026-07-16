@@ -1,8 +1,8 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
-import { config } from '../config/unifiedConfig';
-import { AuthenticationError } from '../utils/errors';
-import { logger } from '../utils/logger';
+import { config } from '../config/unifiedConfig.js';
+import { AuthenticationError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
 
 const SIGNATURE_HEADER = 'x-hub-signature-256';
 const SIGNATURE_PREFIX = 'sha256=';

@@ -8,10 +8,10 @@ import {
   type StewraReplyEvent,
   type StewraThinkingEvent,
 } from '@stewra/shared-types';
-import { conversationRepository } from '../repositories/conversationRepository';
-import { messageService } from './messageService';
-import { emitToConversation } from '../websocket/emitter';
-import { logger } from '../utils/logger';
+import { conversationRepository } from '../repositories/conversationRepository.js';
+import { messageService } from './messageService.js';
+import { emitToConversation } from '../websocket/emitter.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * What the user sees in chat when a turn fails; the real cause goes to Sentry, never to the user.

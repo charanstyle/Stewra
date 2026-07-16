@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { homeController } from '../controllers/homeController';
-import { requireAuth } from '../middleware/requireAuth';
-import { requireEmailVerification } from '../middleware/requireEmailVerification';
+import { homeController } from '../controllers/homeController.js';
+import { requireAuth } from '../middleware/requireAuth.js';
+import { requireEmailVerification } from '../middleware/requireEmailVerification.js';
 
 const router = Router();
 

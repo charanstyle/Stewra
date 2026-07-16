@@ -1,9 +1,9 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type { GenerateInsightResponse, InsightEngagementResponse } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { insightService } from '../services/insightService';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { insightService } from '../services/insightService.js';
+import { parse } from '../utils/validate.js';
 
 const generateSchema = z.object({
   kind: z.enum(['calendar', 'gmail', 'money', 'memory']),

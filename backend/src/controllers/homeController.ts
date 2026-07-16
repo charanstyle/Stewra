@@ -9,17 +9,17 @@ import type {
   RequestDraftResponse,
   ChatAboutSuggestionResponse,
 } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { parse } from '../utils/validate';
-import { NotFoundError, ValidationError } from '../utils/errors';
-import { briefingRepository } from '../repositories/briefingRepository';
-import { suggestionRepository } from '../repositories/suggestionRepository';
-import { suggestionService } from '../services/suggestionService';
-import { draftService } from '../services/draftService';
-import { briefingService } from '../services/briefingService';
-import { gmailSyncService } from '../services/gmailSyncService';
-import { conversationService } from '../services/conversationService';
-import { messageService } from '../services/messageService';
+import { BaseController } from './baseController.js';
+import { parse } from '../utils/validate.js';
+import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { briefingRepository } from '../repositories/briefingRepository.js';
+import { suggestionRepository } from '../repositories/suggestionRepository.js';
+import { suggestionService } from '../services/suggestionService.js';
+import { draftService } from '../services/draftService.js';
+import { briefingService } from '../services/briefingService.js';
+import { gmailSyncService } from '../services/gmailSyncService.js';
+import { conversationService } from '../services/conversationService.js';
+import { messageService } from '../services/messageService.js';
 
 const idParamsSchema = z.object({ id: z.string().uuid() });
 const snoozeBodySchema = z.object({ until: z.string().datetime() });

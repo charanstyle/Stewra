@@ -1,6 +1,6 @@
-import { db } from '../../database/index';
-import { config } from '../../config/unifiedConfig';
-import { encryptField, decryptField } from './fieldCrypto';
+import { db } from '../../database/index.js';
+import { config } from '../../config/unifiedConfig.js';
+import { encryptField, decryptField } from './fieldCrypto.js';
 
 /**
  * The vault: the ONLY place secrets (e.g. OAuth tokens) live, encrypted at rest. Callers store a

@@ -1,14 +1,14 @@
 import type { ResourceKind } from '@stewra/shared-types';
 import * as Sentry from '@sentry/node';
-import { connectionRepository } from '../repositories/connectionRepository';
-import { vault } from '../control-plane/vault/vault';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { preferencesService } from './preferencesService';
-import { processMemoryService } from './processMemoryService';
-import { extractCalendarFacts } from './calendarFacts';
-import { extractGmailFacts } from './gmailFacts';
-import { fetchUpcomingEvents, fetchRecentEmails, isGoogleAuthError } from './googleOAuthService';
-import type { ConnectionRow } from '../repositories/connectionRepository';
+import { connectionRepository } from '../repositories/connectionRepository.js';
+import { vault } from '../control-plane/vault/vault.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { preferencesService } from './preferencesService.js';
+import { processMemoryService } from './processMemoryService.js';
+import { extractCalendarFacts } from './calendarFacts.js';
+import { extractGmailFacts } from './gmailFacts.js';
+import { fetchUpcomingEvents, fetchRecentEmails, isGoogleAuthError } from './googleOAuthService.js';
+import type { ConnectionRow } from '../repositories/connectionRepository.js';
 
 /**
  * Fetches MINIMIZED DERIVED FACTS for a connected source, server-side, using a token read from the

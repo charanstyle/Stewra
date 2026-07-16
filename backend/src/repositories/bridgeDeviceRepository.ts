@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { BridgeDevice, BridgeWaState } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { db } from '../database/index';
-import type { BridgeDevicesTable } from '../database/types';
+import { config } from '../config/unifiedConfig.js';
+import { db } from '../database/index.js';
+import type { BridgeDevicesTable } from '../database/types.js';
 import type { Selectable } from 'kysely';
 
 /**

@@ -5,16 +5,16 @@ import type {
   ProcessDomain,
   ResourceKind,
 } from '@stewra/shared-types';
-import type { PolicyEngine} from '../policy/policy';
-import { policyEngine } from '../policy/policy';
-import type { AuditWriter} from '../audit/auditWriter';
-import { auditWriter } from '../audit/auditWriter';
-import type { ConnectionService} from '../../services/connectionService';
-import { connectionService } from '../../services/connectionService';
-import type { MemoryService } from '../../services/memoryService';
-import { memoryService } from '../../services/memoryService';
-import type { ProcessMemoryService } from '../../services/processMemoryService';
-import { processMemoryService } from '../../services/processMemoryService';
+import type { PolicyEngine} from '../policy/policy.js';
+import { policyEngine } from '../policy/policy.js';
+import type { AuditWriter} from '../audit/auditWriter.js';
+import { auditWriter } from '../audit/auditWriter.js';
+import type { ConnectionService} from '../../services/connectionService.js';
+import { connectionService } from '../../services/connectionService.js';
+import type { MemoryService } from '../../services/memoryService.js';
+import { memoryService } from '../../services/memoryService.js';
+import type { ProcessMemoryService } from '../../services/processMemoryService.js';
+import { processMemoryService } from '../../services/processMemoryService.js';
 
 /** The connected-source kinds a memory slice can be scoped to (memory itself is not a scope). */
 type ScopeKind = Exclude<ResourceKind, 'memory'>;

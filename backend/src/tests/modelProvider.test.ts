@@ -1,4 +1,4 @@
-import { chooseModelProvider } from '../agent-host/modelProvider';
+import { chooseModelProvider } from '../agent-host/modelProvider.js';
 
 /**
  * Pure selection logic: the local Claude CLI is preferred whenever it's runnable; every API provider

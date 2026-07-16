@@ -1,5 +1,5 @@
 import type { DefaultEventsMap, Namespace, Socket } from 'socket.io';
-import type { SocketData } from './types';
+import type { SocketData } from './types.js';
 
 /**
  * A connected Stewra Bridge, and the namespace they live in.

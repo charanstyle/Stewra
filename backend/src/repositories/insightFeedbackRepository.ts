@@ -1,6 +1,6 @@
 import type { InsightFeedback, Rating } from '@stewra/shared-types';
 import { sql } from 'kysely';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 export interface InsightFeedbackRow {
   readonly id: string;

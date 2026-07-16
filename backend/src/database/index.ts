@@ -1,7 +1,7 @@
 import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
-import { config } from '../config/unifiedConfig';
-import type { Database } from './types';
+import { config } from '../config/unifiedConfig.js';
+import type { Database } from './types.js';
 
 const pool = new Pool({
   connectionString: config.database.url,

@@ -1,4 +1,4 @@
-import { extractCalendarFacts, type CalendarEvent } from '../services/calendarFacts';
+import { extractCalendarFacts, type CalendarEvent } from '../services/calendarFacts.js';
 
 /** Pure unit tests — no DB, no network. Fixtures in, derived fact strings out. */
 

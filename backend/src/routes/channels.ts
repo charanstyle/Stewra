@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
-import { whatsappController } from '../controllers/whatsappController';
-import { whatsappPersonalController } from '../controllers/whatsappPersonalController';
-import { whatsappEmailApprovalController } from '../controllers/whatsappEmailApprovalController';
-import { rateLimit } from '../middleware/rateLimit';
-import { requireAuth } from '../middleware/requireAuth';
-import { requireEmailVerification } from '../middleware/requireEmailVerification';
+import { whatsappController } from '../controllers/whatsappController.js';
+import { whatsappPersonalController } from '../controllers/whatsappPersonalController.js';
+import { whatsappEmailApprovalController } from '../controllers/whatsappEmailApprovalController.js';
+import { rateLimit } from '../middleware/rateLimit.js';
+import { requireAuth } from '../middleware/requireAuth.js';
+import { requireEmailVerification } from '../middleware/requireEmailVerification.js';
 
 const router = Router();
 

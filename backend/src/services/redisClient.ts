@@ -1,6 +1,6 @@
-import Redis from 'ioredis';
-import { config } from '../config/unifiedConfig';
-import { logger } from '../utils/logger';
+import { Redis } from 'ioredis';
+import { config } from '../config/unifiedConfig.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Redis is a required dependency (realtime layer). This module owns connection creation so the URL is

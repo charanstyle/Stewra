@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from 'node:crypto';
-import { config } from '../../config/unifiedConfig';
+import { config } from '../../config/unifiedConfig.js';
 
 /**
  * Field-level authenticated encryption, at the SAME AES-256-GCM strength as the vault, but stored

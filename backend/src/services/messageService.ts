@@ -1,14 +1,14 @@
 import { SERVER_EVENTS } from '@stewra/shared-types';
 import type { ChatDeliveredEvent, ConfirmEmailAction, Conversation, Message, Paginated, ProposedEmail, ReactionType, ReadReceipt } from '@stewra/shared-types';
-import { messageRepository, MessageRepository } from '../repositories/messageRepository';
-import { conversationService } from './conversationService';
-import { emailActionService } from './emailActionService';
-import { mediaService } from './mediaService';
-import { sttService } from './sttService';
-import { stewraConversationService } from './stewraConversationService';
-import { presenceService } from './presenceService';
-import { emitToUser } from '../websocket/emitter';
-import { ForbiddenError, NotFoundError, ValidationError } from '../utils/errors';
+import { messageRepository, MessageRepository } from '../repositories/messageRepository.js';
+import { conversationService } from './conversationService.js';
+import { emailActionService } from './emailActionService.js';
+import { mediaService } from './mediaService.js';
+import { sttService } from './sttService.js';
+import { stewraConversationService } from './stewraConversationService.js';
+import { presenceService } from './presenceService.js';
+import { emitToUser } from '../websocket/emitter.js';
+import { ForbiddenError, NotFoundError, ValidationError } from '../utils/errors.js';
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;

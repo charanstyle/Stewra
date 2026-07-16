@@ -1,6 +1,6 @@
 import type { Kysely} from 'kysely';
 import { sql } from 'kysely';
-import type { Database } from '../types';
+import type { Database } from '../types.js';
 
 export async function up(db: Kysely<Database>): Promise<void> {
   // The vault's backing store. Holds only AES-256-GCM ciphertext envelopes, keyed by an opaque

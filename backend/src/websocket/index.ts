@@ -1,23 +1,23 @@
 import * as Sentry from '@sentry/node';
 import { SERVER_EVENTS } from '@stewra/shared-types';
 import type { PresenceUpdateEvent } from '@stewra/shared-types';
-import { presenceService } from '../services/presenceService';
-import { messageService } from '../services/messageService';
-import { logger } from '../utils/logger';
-import { attachRedisAdapter } from './socketAdapter';
-import { setIo } from './emitter';
-import { socketAuthMiddleware } from './socketAuthMiddleware';
-import { PresenceHandler } from './presenceHandler';
-import { ChatHandler } from './chatHandler';
-import { CallSignalingHandler } from './callSignalingHandler';
-import { bridgeAuthMiddleware } from './bridgeAuthMiddleware';
-import { registerBridgeHandler } from './bridgeHandler';
-import { setBridgeNamespace } from './bridgeEmitter';
-import { config } from '../config/unifiedConfig';
-import type { BaseSocketHandler } from './baseSocketHandler';
-import type { BridgeNamespace, BridgeSocket } from './bridgeTypes';
-import type { AppServer, AppSocket } from './types';
-import { presenceRoom, userRoom } from './types';
+import { presenceService } from '../services/presenceService.js';
+import { messageService } from '../services/messageService.js';
+import { logger } from '../utils/logger.js';
+import { attachRedisAdapter } from './socketAdapter.js';
+import { setIo } from './emitter.js';
+import { socketAuthMiddleware } from './socketAuthMiddleware.js';
+import { PresenceHandler } from './presenceHandler.js';
+import { ChatHandler } from './chatHandler.js';
+import { CallSignalingHandler } from './callSignalingHandler.js';
+import { bridgeAuthMiddleware } from './bridgeAuthMiddleware.js';
+import { registerBridgeHandler } from './bridgeHandler.js';
+import { setBridgeNamespace } from './bridgeEmitter.js';
+import { config } from '../config/unifiedConfig.js';
+import type { BaseSocketHandler } from './baseSocketHandler.js';
+import type { BridgeNamespace, BridgeSocket } from './bridgeTypes.js';
+import type { AppServer, AppSocket } from './types.js';
+import { presenceRoom, userRoom } from './types.js';
 
 /** Broadcast a user's presence transition to everyone watching them (subscribers of `presence_{id}`). */
 function broadcastPresence(io: AppServer, userId: string, online: boolean, lastActiveAt: string): void {

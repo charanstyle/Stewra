@@ -1,12 +1,12 @@
 import { randomInt } from 'node:crypto';
 import { EMAIL_VERIFICATION_CODE_LENGTH } from '@stewra/shared-types';
 import type { User } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { ConflictError, NotFoundError, RateLimitError, ValidationError } from '../utils/errors';
-import { emailVerificationRepository } from '../repositories/emailVerificationRepository';
-import { userRepository, toUserModel } from '../repositories/userRepository';
-import { emailService } from './emailService';
-import { auditWriter } from '../control-plane/audit/auditWriter';
+import { config } from '../config/unifiedConfig.js';
+import { ConflictError, NotFoundError, RateLimitError, ValidationError } from '../utils/errors.js';
+import { emailVerificationRepository } from '../repositories/emailVerificationRepository.js';
+import { userRepository, toUserModel } from '../repositories/userRepository.js';
+import { emailService } from './emailService.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
 
 /**
  * Generate a uniformly-random numeric code with no leading-zero loss. `randomInt` (CSPRNG) over

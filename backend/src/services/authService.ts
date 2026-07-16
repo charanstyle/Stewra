@@ -10,14 +10,14 @@ import type {
   RegisterResponse,
   User,
 } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { logger } from '../utils/logger';
-import { AuthenticationError, ConflictError, NotFoundError } from '../utils/errors';
-import type { UserRepository } from '../repositories/userRepository';
-import { userRepository, toUserModel } from '../repositories/userRepository';
-import type { AuditWriter } from '../control-plane/audit/auditWriter';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { emailVerificationService } from './emailVerificationService';
+import { config } from '../config/unifiedConfig.js';
+import { logger } from '../utils/logger.js';
+import { AuthenticationError, ConflictError, NotFoundError } from '../utils/errors.js';
+import type { UserRepository } from '../repositories/userRepository.js';
+import { userRepository, toUserModel } from '../repositories/userRepository.js';
+import type { AuditWriter } from '../control-plane/audit/auditWriter.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { emailVerificationService } from './emailVerificationService.js';
 
 const TokenClaimsSchema = z.object({
   sub: z.string().min(1),

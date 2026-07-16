@@ -1,6 +1,6 @@
 import { RATING_REWARD, POSITIVE_RATINGS, RATINGS } from '@stewra/shared-types';
-import { buildMemoryLabel } from '../utils/memoryLabel';
-import { normalizeText, keywords } from '../utils/text';
+import { buildMemoryLabel } from '../utils/memoryLabel.js';
+import { normalizeText, keywords } from '../utils/text.js';
 
 /**
  * Pure unit tests for the feedback + learning loop's deterministic core — the reward signal, the

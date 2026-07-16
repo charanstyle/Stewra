@@ -1,6 +1,6 @@
 import type { Kysely} from 'kysely';
 import { sql } from 'kysely';
-import type { Database } from '../types';
+import type { Database } from '../types.js';
 
 export async function up(db: Kysely<Database>): Promise<void> {
   // Connections hold only a VAULT REFERENCE, never a token. The connection service stores the

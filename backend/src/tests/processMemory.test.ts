@@ -1,13 +1,13 @@
 import type { ProcessRuleStatus } from '@stewra/shared-types';
 import { RATING_REWARD } from '@stewra/shared-types';
-import { isSilentClobber, reinforcementDeltas } from '../services/processMemoryService';
-import { extractProcessRuleCandidates } from '../utils/processRuleExtraction';
+import { isSilentClobber, reinforcementDeltas } from '../services/processMemoryService.js';
+import { extractProcessRuleCandidates } from '../utils/processRuleExtraction.js';
 import {
   classifySentMessage,
   hourBucketFromHeader,
   observeSentMailStyle,
   type SentMailSample,
-} from '../services/sentMailStyleObserver';
+} from '../services/sentMailStyleObserver.js';
 
 /**
  * Pure unit test for the process/style store's governing invariant (memory-and-learning.md §3): a

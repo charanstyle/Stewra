@@ -1,7 +1,7 @@
 import type { Suggestion } from '@stewra/shared-types';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { suggestionRepository } from '../repositories/suggestionRepository';
-import { NotFoundError } from '../utils/errors';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { suggestionRepository } from '../repositories/suggestionRepository.js';
+import { NotFoundError } from '../utils/errors.js';
 
 /**
  * The nudge lifecycle service — the propose→confirm surface generalized from process rules. The

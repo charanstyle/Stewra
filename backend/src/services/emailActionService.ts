@@ -1,11 +1,11 @@
 import * as Sentry from '@sentry/node';
 import type { ProposedEmail } from '@stewra/shared-types';
-import { connectionRepository } from '../repositories/connectionRepository';
-import { vault } from '../control-plane/vault/vault';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { buildEmailSender, sendableProviders } from './emailSenders';
-import { isGoogleAuthError } from './googleOAuthService';
-import { logger } from '../utils/logger';
+import { connectionRepository } from '../repositories/connectionRepository.js';
+import { vault } from '../control-plane/vault/vault.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { buildEmailSender, sendableProviders } from './emailSenders/index.js';
+import { isGoogleAuthError } from './googleOAuthService.js';
+import { logger } from '../utils/logger.js';
 
 /** Google's send scope — a grant must carry this before Stewra can send AS the user. */
 const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';

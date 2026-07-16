@@ -1,11 +1,11 @@
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import type { Request, Response } from 'express';
-import { BaseController } from './baseController';
-import { mediaService } from '../services/mediaService';
-import { NotFoundError } from '../utils/errors';
-import { parse } from '../utils/validate';
-import { logger } from '../utils/logger';
+import { BaseController } from './baseController.js';
+import { mediaService } from '../services/mediaService.js';
+import { NotFoundError } from '../utils/errors.js';
+import { parse } from '../utils/validate.js';
+import { logger } from '../utils/logger.js';
 import { z } from 'zod';
 
 const idParamsSchema = z.object({ id: z.string().uuid() });

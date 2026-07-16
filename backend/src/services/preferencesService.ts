@@ -3,9 +3,9 @@ import {
   GMAIL_LOOKBACK_MAX_DAYS,
   type UserPreferences,
 } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { userPreferencesRepository } from '../repositories/userPreferencesRepository';
-import { ValidationError } from '../utils/errors';
+import { config } from '../config/unifiedConfig.js';
+import { userPreferencesRepository } from '../repositories/userPreferencesRepository.js';
+import { ValidationError } from '../utils/errors.js';
 
 /**
  * Resolves and updates durable per-user preferences. Reads always return a fully-resolved

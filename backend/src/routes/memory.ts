@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { memoryController } from '../controllers/memoryController';
-import { requireAuth } from '../middleware/requireAuth';
-import { requireEmailVerification } from '../middleware/requireEmailVerification';
+import { memoryController } from '../controllers/memoryController.js';
+import { requireAuth } from '../middleware/requireAuth.js';
+import { requireEmailVerification } from '../middleware/requireEmailVerification.js';
 
 const router = Router();
 

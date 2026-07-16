@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { BaseController } from './baseController';
-import { whatsappEmailApprovalService } from '../services/whatsappEmailApprovalService';
+import { BaseController } from './baseController.js';
+import { whatsappEmailApprovalService } from '../services/whatsappEmailApprovalService.js';
 
 /**
  * `password` is optional at the schema level because it is only needed to turn the opt-in ON; the

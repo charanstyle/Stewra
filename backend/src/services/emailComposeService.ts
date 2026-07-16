@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { ConversationTurn, ModelMessage } from '@stewra/shared-types';
-import { modelClient } from '../agent-host/modelClient';
-import { logger } from '../utils/logger';
+import { modelClient } from '../agent-host/modelClient.js';
+import { logger } from '../utils/logger.js';
 
 /** The extracted draft the user will confirm before anything is sent. */
 export interface EmailProposalDraft {

@@ -1,7 +1,7 @@
 import type { MessagingChannel } from '@stewra/shared-types';
-import type { ChannelSender } from './types';
-import { config } from '../../config/unifiedConfig';
-import { logger } from '../../utils/logger';
+import type { ChannelSender } from './types.js';
+import { config } from '../../config/unifiedConfig.js';
+import { logger } from '../../utils/logger.js';
 
 export const WHATSAPP_CHANNEL: MessagingChannel = 'whatsapp';
 

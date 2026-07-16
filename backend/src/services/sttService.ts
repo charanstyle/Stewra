@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { readFile, unlink } from 'node:fs/promises';
-import { config } from '../config/unifiedConfig';
-import { logger } from '../utils/logger';
+import { config } from '../config/unifiedConfig.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Speech-to-text via a locally installed whisper.cpp binary, invoked with `execFile` (args array, NO

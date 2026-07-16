@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { BaseController } from './baseController';
-import { auditReader } from '../control-plane/audit/auditReader';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { auditReader } from '../control-plane/audit/auditReader.js';
+import { parse } from '../utils/validate.js';
 
 const querySchema = z.object({
   cursor: z.string().min(1).nullable().default(null),

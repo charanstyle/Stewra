@@ -1,13 +1,13 @@
 import * as Sentry from '@sentry/node';
 import type { ChannelIdentity, ChannelLinkChallenge } from '@stewra/shared-types';
-import { channelIdentityRepository } from '../repositories/channelIdentityRepository';
-import { channelSender, WHATSAPP_CHANNEL } from './channelSenders';
-import { preferencesService } from './preferencesService';
-import { renderWhatsappEmailReply } from './whatsappEmailNotice';
-import { stewraTurnService, STEWRA_FAILURE_TEXT } from './stewraTurnService';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { config } from '../config/unifiedConfig';
-import { logger } from '../utils/logger';
+import { channelIdentityRepository } from '../repositories/channelIdentityRepository.js';
+import { channelSender, WHATSAPP_CHANNEL } from './channelSenders/index.js';
+import { preferencesService } from './preferencesService.js';
+import { renderWhatsappEmailReply } from './whatsappEmailNotice.js';
+import { stewraTurnService, STEWRA_FAILURE_TEXT } from './stewraTurnService.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { config } from '../config/unifiedConfig.js';
+import { logger } from '../utils/logger.js';
 
 /** A link code as it appears in a message body. Case-insensitive; users retype these by hand. */
 const LINK_CODE_PATTERN = /STEWRA-[A-Z0-9]{6}/i;

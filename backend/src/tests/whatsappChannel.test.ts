@@ -1,11 +1,15 @@
 import { createHmac } from 'node:crypto';
+import type { Mock } from 'vitest';
 import type { NextFunction, Request, Response } from 'express';
 
-const APP_SECRET = 'test-app-secret';
+// Vitest hoists `vi.mock` above the module body, so a factory that closed over a plain `const` would
+// read it as undefined. `vi.hoisted` lifts the value with it — and hands the same binding back here, so
+// the tests below sign with exactly the secret the mocked config serves.
+const { APP_SECRET } = vi.hoisted(() => ({ APP_SECRET: 'test-app-secret' }));
 
 // The middleware and sender read the master switch + secrets from config; pin them so these tests don't
 // depend on whatever the developer's .env happens to say.
-jest.mock('../config/unifiedConfig', () => ({
+vi.mock('../config/unifiedConfig.js', () => ({
   config: {
     whatsapp: {
       enabled: true,
@@ -21,10 +25,10 @@ jest.mock('../config/unifiedConfig', () => ({
   },
 }));
 
-import { verifyWhatsappSignature } from '../middleware/verifyWhatsappSignature';
-import { splitForWhatsapp } from '../services/channelSenders';
-import { whatsappCloudSender } from '../services/channelSenders/whatsappCloudSender';
-import { AuthenticationError } from '../utils/errors';
+import { verifyWhatsappSignature } from '../middleware/verifyWhatsappSignature.js';
+import { splitForWhatsapp } from '../services/channelSenders/index.js';
+import { whatsappCloudSender } from '../services/channelSenders/whatsappCloudSender.js';
+import { AuthenticationError } from '../utils/errors.js';
 
 /** Build a request carrying `body` and the signature Meta would have sent for it. */
 function signedRequest(body: string, secretUsedToSign: string = APP_SECRET): Request {
@@ -53,13 +57,13 @@ describe('verifyWhatsappSignature', () => {
   const payload = JSON.stringify({ object: 'whatsapp_business_account', entry: [] });
 
   it('calls next() for a body signed with the app secret', () => {
-    const next = jest.fn<void, []>() as unknown as NextFunction;
+    const next = vi.fn<() => void>() as unknown as NextFunction;
     verifyWhatsappSignature(signedRequest(payload), noopResponse, next);
     expect(next).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a body signed with the WRONG secret (a forged request)', () => {
-    const next = jest.fn<void, []>() as unknown as NextFunction;
+    const next = vi.fn<() => void>() as unknown as NextFunction;
     expect(() =>
       verifyWhatsappSignature(signedRequest(payload, 'attacker-guess'), noopResponse, next),
     ).toThrow(AuthenticationError);
@@ -72,24 +76,24 @@ describe('verifyWhatsappSignature', () => {
       JSON.stringify({ object: 'whatsapp_business_account', entry: ['injected'] }),
       original.get('x-hub-signature-256'),
     );
-    expect(() => verifyWhatsappSignature(tampered, noopResponse, jest.fn() as unknown as NextFunction)).toThrow(
+    expect(() => verifyWhatsappSignature(tampered, noopResponse, vi.fn() as unknown as NextFunction)).toThrow(
       AuthenticationError,
     );
   });
 
   it('rejects a request with no signature header at all', () => {
     expect(() =>
-      verifyWhatsappSignature(requestWith(payload, undefined), noopResponse, jest.fn() as unknown as NextFunction),
+      verifyWhatsappSignature(requestWith(payload, undefined), noopResponse, vi.fn() as unknown as NextFunction),
     ).toThrow(AuthenticationError);
   });
 
   it('rejects a malformed signature header rather than crashing on it', () => {
     expect(() =>
-      verifyWhatsappSignature(requestWith(payload, 'garbage'), noopResponse, jest.fn() as unknown as NextFunction),
+      verifyWhatsappSignature(requestWith(payload, 'garbage'), noopResponse, vi.fn() as unknown as NextFunction),
     ).toThrow(AuthenticationError);
     // A short/odd-length hex digest must not blow up timingSafeEqual's length precondition.
     expect(() =>
-      verifyWhatsappSignature(requestWith(payload, 'sha256=abcd'), noopResponse, jest.fn() as unknown as NextFunction),
+      verifyWhatsappSignature(requestWith(payload, 'sha256=abcd'), noopResponse, vi.fn() as unknown as NextFunction),
     ).toThrow(AuthenticationError);
   });
 
@@ -101,7 +105,7 @@ describe('verifyWhatsappSignature', () => {
     // A misordered router (express.json() before the webhook) must break the build/boot, never
     // "authenticate" a body it can't actually verify.
     expect(() =>
-      verifyWhatsappSignature(parsed, noopResponse, jest.fn() as unknown as NextFunction),
+      verifyWhatsappSignature(parsed, noopResponse, vi.fn() as unknown as NextFunction),
     ).toThrow(/raw body unavailable/);
   });
 });
@@ -152,10 +156,10 @@ describe('splitForWhatsapp', () => {
  */
 describe('whatsappCloudSender endpoint', () => {
   const okResponse = { ok: true, status: 200, text: async (): Promise<string> => '' };
-  let fetchMock: jest.Mock;
+  let fetchMock: Mock;
 
   beforeEach(() => {
-    fetchMock = jest.fn().mockResolvedValue(okResponse);
+    fetchMock = vi.fn().mockResolvedValue(okResponse);
     globalThis.fetch = fetchMock as unknown as typeof fetch;
   });
 

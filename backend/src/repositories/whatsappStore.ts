@@ -1,5 +1,5 @@
-import { db } from '../database/index';
-import { decryptField, encryptField, hmacField } from '../control-plane/vault/fieldCrypto';
+import { db } from '../database/index.js';
+import { decryptField, encryptField, hmacField } from '../control-plane/vault/fieldCrypto.js';
 
 /** A chat the user has allowed, as the server holds it. */
 export interface StoredChat {

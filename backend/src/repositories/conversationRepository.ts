@@ -5,8 +5,8 @@ import type {
   ParticipantRole,
 } from '@stewra/shared-types';
 import type { Transaction } from 'kysely';
-import { db } from '../database/index';
-import type { Database } from '../database/types';
+import { db } from '../database/index.js';
+import type { Database } from '../database/types.js';
 
 interface ConversationRow {
   readonly id: string;

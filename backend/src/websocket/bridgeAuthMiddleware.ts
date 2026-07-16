@@ -1,7 +1,7 @@
 import type { ExtendedError } from 'socket.io';
-import { whatsappPersonalService } from '../services/whatsappPersonalService';
-import { logger } from '../utils/logger';
-import type { BridgeHandshakeSocketLike } from './bridgeTypes';
+import { whatsappPersonalService } from '../services/whatsappPersonalService.js';
+import { logger } from '../utils/logger.js';
+import type { BridgeHandshakeSocketLike } from './bridgeTypes.js';
 
 /**
  * Handshake auth for the `/bridge` namespace.

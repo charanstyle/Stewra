@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { BRIDGE_SERVER_EVENTS } from '@stewra/shared-types';
 import type { BridgeSendAck, BridgeSendPayload } from '@stewra/shared-types';
-import type { BridgeNamespaceLike } from './bridgeTypes';
-import { bridgeUserRoom } from './bridgeTypes';
-import { logger } from '../utils/logger';
+import type { BridgeNamespaceLike } from './bridgeTypes.js';
+import { bridgeUserRoom } from './bridgeTypes.js';
+import { logger } from '../utils/logger.js';
 
 /** How long we wait for a bridge to confirm it actually put the message on WhatsApp. */
 const SEND_ACK_TIMEOUT_MS = 20_000;

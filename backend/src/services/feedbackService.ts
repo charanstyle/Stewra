@@ -1,14 +1,14 @@
 import type { InsightFeedback, Rating } from '@stewra/shared-types';
 import { RATING_REWARD } from '@stewra/shared-types';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { agentInsightRepository } from '../repositories/agentInsightRepository';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { agentInsightRepository } from '../repositories/agentInsightRepository.js';
 import {
   insightFeedbackRepository,
   toFeedbackModel,
-} from '../repositories/insightFeedbackRepository';
-import { memoryService } from './memoryService';
-import { processMemoryService } from './processMemoryService';
-import { NotFoundError } from '../utils/errors';
+} from '../repositories/insightFeedbackRepository.js';
+import { memoryService } from './memoryService.js';
+import { processMemoryService } from './processMemoryService.js';
+import { NotFoundError } from '../utils/errors.js';
 
 /**
  * Records the user's verdict on an insight (the reward signal) and — because the user AUTHORED it —

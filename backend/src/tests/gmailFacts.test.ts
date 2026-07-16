@@ -1,4 +1,4 @@
-import { extractGmailFacts, type EmailSummary } from '../services/gmailFacts';
+import { extractGmailFacts, type EmailSummary } from '../services/gmailFacts.js';
 
 /** Pure unit tests — no DB, no network. Email summaries in, derived fact strings out. */
 

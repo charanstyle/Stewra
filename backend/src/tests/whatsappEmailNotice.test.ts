@@ -2,7 +2,7 @@ import {
   EMAIL_DRAFT_NOTICE,
   EMAIL_PENDING_APPROVAL_NOTICE,
   renderWhatsappEmailReply,
-} from '../services/whatsappEmailNotice';
+} from '../services/whatsappEmailNotice.js';
 
 /**
  * The WhatsApp email-notice copy is a SECURITY control, so it is pinned here with real inputs — no mocks,

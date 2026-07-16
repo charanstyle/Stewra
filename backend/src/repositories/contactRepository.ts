@@ -1,7 +1,7 @@
 import type { Contact, ContactInvite, ContactStatus, InviteStatus } from '@stewra/shared-types';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 import type { Kysely, Transaction } from 'kysely';
-import type { Database } from '../database/types';
+import type { Database } from '../database/types.js';
 
 interface ContactRow {
   readonly id: string;

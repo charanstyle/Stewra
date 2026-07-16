@@ -1,6 +1,6 @@
 import type { AgentMemory, Rating, ResourceKind } from '@stewra/shared-types';
 import { sql } from 'kysely';
-import { db } from '../database/index';
+import { db } from '../database/index.js';
 
 interface MemoryRow {
   readonly id: string;

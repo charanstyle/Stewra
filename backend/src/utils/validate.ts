@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import { ValidationError } from './errors';
+import { ValidationError } from './errors.js';
 
 /** Parse untrusted input against a schema; throw a ValidationError (400) on failure. Fail-fast. */
 export function parse<S extends z.ZodTypeAny>(schema: S, data: unknown): z.infer<S> {

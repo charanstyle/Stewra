@@ -14,11 +14,11 @@ import type {
   CallStatus,
   ChatMessageEvent,
 } from '@stewra/shared-types';
-import { AppError } from '../utils/errors';
-import { logger } from '../utils/logger';
-import { callService } from '../services/callService';
-import { BaseSocketHandler } from './baseSocketHandler';
-import { conversationRoom, userRoom } from './types';
+import { AppError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
+import { callService } from '../services/callService.js';
+import { BaseSocketHandler } from './baseSocketHandler.js';
+import { conversationRoom, userRoom } from './types.js';
 
 /** How long an unanswered call rings before it auto-ends as a missed call. */
 const RING_TIMEOUT_MS = 60_000;

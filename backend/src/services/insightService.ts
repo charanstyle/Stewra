@@ -1,13 +1,13 @@
 import type { InsightEngagementResponse, ResourceKind } from '@stewra/shared-types';
-import { agentRuntime } from '../agent-host/agentHost';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { config } from '../config/unifiedConfig';
-import { agentInsightRepository } from '../repositories/agentInsightRepository';
-import type { InsightEngagement, RecordedInsight } from '../repositories/agentInsightRepository';
-import { insightFeedbackRepository } from '../repositories/insightFeedbackRepository';
-import { processMemoryService } from './processMemoryService';
-import { NotFoundError } from '../utils/errors';
-import { normalizeText } from '../utils/text';
+import { agentRuntime } from '../agent-host/agentHost.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { config } from '../config/unifiedConfig.js';
+import { agentInsightRepository } from '../repositories/agentInsightRepository.js';
+import type { InsightEngagement, RecordedInsight } from '../repositories/agentInsightRepository.js';
+import { insightFeedbackRepository } from '../repositories/insightFeedbackRepository.js';
+import { processMemoryService } from './processMemoryService.js';
+import { NotFoundError } from '../utils/errors.js';
+import { normalizeText } from '../utils/text.js';
 
 /**
  * Runs the agent's advice-only loop and then — in the CONTROL PLANE, not the agent — PERSISTS the

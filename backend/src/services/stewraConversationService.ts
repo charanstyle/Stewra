@@ -1,12 +1,12 @@
 import { stat } from 'node:fs/promises';
 import type { Conversation, ConversationTurn, Message } from '@stewra/shared-types';
-import { agentRuntime } from '../agent-host/agentHost';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { messageRepository } from '../repositories/messageRepository';
-import { emailComposeService } from './emailComposeService';
-import { mediaService } from './mediaService';
-import { ttsService } from './ttsService';
-import { logger } from '../utils/logger';
+import { agentRuntime } from '../agent-host/agentHost.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { messageRepository } from '../repositories/messageRepository.js';
+import { emailComposeService } from './emailComposeService.js';
+import { mediaService } from './mediaService.js';
+import { ttsService } from './ttsService.js';
+import { logger } from '../utils/logger.js';
 
 /** How many recent turns to hand the agent as conversation context (bounds the prompt). */
 const HISTORY_LIMIT = 20;

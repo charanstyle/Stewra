@@ -5,12 +5,12 @@ import type {
   RegisterCallPushTokenResponse,
   TurnCredentialsResponse,
 } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { callService } from '../services/callService';
-import { turnCredentialsService } from '../services/turnCredentialsService';
-import { config } from '../config/unifiedConfig';
-import { ServiceUnavailableError } from '../utils/errors';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { callService } from '../services/callService.js';
+import { turnCredentialsService } from '../services/turnCredentialsService.js';
+import { config } from '../config/unifiedConfig.js';
+import { ServiceUnavailableError } from '../utils/errors.js';
+import { parse } from '../utils/validate.js';
 
 // A device is exactly one platform; the required token is tied to it (discriminated on `platform`).
 const pushTokenSchema = z.discriminatedUnion('platform', [

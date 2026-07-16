@@ -2,11 +2,11 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import * as Sentry from '@sentry/node';
 import type { ChannelIdentity, ChannelLinkChallenge } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { whatsappService, type InboundWhatsappMessage } from '../services/whatsappService';
-import { config } from '../config/unifiedConfig';
-import { ServiceUnavailableError } from '../utils/errors';
-import { logger } from '../utils/logger';
+import { BaseController } from './baseController.js';
+import { whatsappService, type InboundWhatsappMessage } from '../services/whatsappService.js';
+import { config } from '../config/unifiedConfig.js';
+import { ServiceUnavailableError } from '../utils/errors.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Meta's inbound envelope. Everything is optional-by-shape because the SAME subscription also delivers

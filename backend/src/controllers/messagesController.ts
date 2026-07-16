@@ -16,13 +16,13 @@ import {
   type SendMessageResponse,
   type SendVoiceMessageResponse,
 } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { messageService } from '../services/messageService';
-import { stewraTurnService } from '../services/stewraTurnService';
-import { config } from '../config/unifiedConfig';
-import { emitToConversation } from '../websocket/emitter';
-import { ServiceUnavailableError, ValidationError } from '../utils/errors';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { messageService } from '../services/messageService.js';
+import { stewraTurnService } from '../services/stewraTurnService.js';
+import { config } from '../config/unifiedConfig.js';
+import { emitToConversation } from '../websocket/emitter.js';
+import { ServiceUnavailableError, ValidationError } from '../utils/errors.js';
+import { parse } from '../utils/validate.js';
 
 // Zod enum needs a non-empty tuple; derive it from the shared REACTION_TYPES source of truth.
 const REACTION_VALUES: [ReactionType, ...ReactionType[]] = ['like', 'love', 'haha', 'wow', 'sad', 'angry'];

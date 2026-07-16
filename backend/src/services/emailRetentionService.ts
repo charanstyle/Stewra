@@ -1,9 +1,9 @@
 import * as Sentry from '@sentry/node';
-import { vault } from '../control-plane/vault/vault';
-import { auditWriter } from '../control-plane/audit/auditWriter';
-import { preferencesService } from './preferencesService';
-import { emailMessageRepository, purgeConnectionEmailData } from '../repositories/emailStore';
-import { logger } from '../utils/logger';
+import { vault } from '../control-plane/vault/vault.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { preferencesService } from './preferencesService.js';
+import { emailMessageRepository, purgeConnectionEmailData } from '../repositories/emailStore.js';
+import { logger } from '../utils/logger.js';
 
 /** A retention window at or above this many days is treated as "keep everything" — no sweep. */
 const KEEP_ALL_THRESHOLD_DAYS = 36500;

@@ -11,10 +11,10 @@ import type {
   SendInviteResponse,
 } from '@stewra/shared-types';
 import { SERVER_EVENTS } from '@stewra/shared-types';
-import { BaseController } from './baseController';
-import { contactService } from '../services/contactService';
-import { emitToUser } from '../websocket/emitter';
-import { parse } from '../utils/validate';
+import { BaseController } from './baseController.js';
+import { contactService } from '../services/contactService.js';
+import { emitToUser } from '../websocket/emitter.js';
+import { parse } from '../utils/validate.js';
 
 const searchSchema = z.object({ query: z.string().min(1).max(200) });
 const inviteSchema = z.object({ inviteeEmail: z.string().email() });

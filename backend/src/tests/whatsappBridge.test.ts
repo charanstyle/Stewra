@@ -1,19 +1,28 @@
+import type { Mocked } from 'vitest';
 import { BRIDGE_CLIENT_EVENTS, BRIDGE_SERVER_EVENTS } from '@stewra/shared-types';
 import type { BridgeSendPayload, Message, ProposedEmail } from '@stewra/shared-types';
-import type { SocketData } from '../websocket/types';
+import type { SocketData } from '../websocket/types.js';
 
-const MAX_SENDS_PER_MINUTE = 3;
+// `vi.hoisted` because Vitest lifts the `vi.mock` factory below above the module body, so a plain `const`
+// would still be in its temporal dead zone when the factory runs. Both bindings come back out: the config
+// stub needs `whatsappPersonal` (and keeps its identity, so `beforeEach` mutating `.enabled` still reaches
+// the service), and the rate-limit test below asserts against `MAX_SENDS_PER_MINUTE` directly.
+const { whatsappPersonal, MAX_SENDS_PER_MINUTE } = vi.hoisted(() => {
+  const MAX_SENDS_PER_MINUTE = 3;
+  return {
+    MAX_SENDS_PER_MINUTE,
+    whatsappPersonal: {
+      enabled: true,
+      downloadUrl: 'https://downloads.example.test/stewra-bridge',
+      minBridgeVersion: '1.0.0',
+      maxSendsPerMinute: MAX_SENDS_PER_MINUTE,
+      retentionDays: 30,
+      bridgeTokenBytes: 32,
+    },
+  };
+});
 
-const whatsappPersonal = {
-  enabled: true,
-  downloadUrl: 'https://downloads.example.test/stewra-bridge',
-  minBridgeVersion: '1.0.0',
-  maxSendsPerMinute: MAX_SENDS_PER_MINUTE,
-  retentionDays: 30,
-  bridgeTokenBytes: 32,
-};
-
-jest.mock('../config/unifiedConfig', () => ({
+vi.mock('../config/unifiedConfig.js', () => ({
   config: {
     get whatsappPersonal() {
       return whatsappPersonal;
@@ -28,59 +37,59 @@ jest.mock('../config/unifiedConfig', () => ({
 
 // A stand-in for the real HMAC: this suite is about the dedupe/allowlist LOGIC, not the crypto (which the
 // vault's own tests cover). It only has to be deterministic, which is the property the dedupe key needs.
-jest.mock('../control-plane/vault/fieldCrypto', () => ({
+vi.mock('../control-plane/vault/fieldCrypto.js', () => ({
   hmacField: (plaintext: string): string => `hmac(${plaintext})`,
 }));
 
-jest.mock('../repositories/whatsappStore', () => ({
+vi.mock('../repositories/whatsappStore.js', () => ({
   whatsappStore: {
-    replaceAllowedChats: jest.fn(),
-    findChatByJid: jest.fn(),
-    findChatById: jest.fn(),
-    recordMessage: jest.fn(),
-    enqueueSend: jest.fn(),
-    pendingSends: jest.fn(),
-    markSent: jest.fn(),
-    markAttemptFailed: jest.fn(),
-    markFailed: jest.fn(),
+    replaceAllowedChats: vi.fn(),
+    findChatByJid: vi.fn(),
+    findChatById: vi.fn(),
+    recordMessage: vi.fn(),
+    enqueueSend: vi.fn(),
+    pendingSends: vi.fn(),
+    markSent: vi.fn(),
+    markAttemptFailed: vi.fn(),
+    markFailed: vi.fn(),
   },
 }));
-jest.mock('../repositories/bridgeDeviceRepository', () => ({
+vi.mock('../repositories/bridgeDeviceRepository.js', () => ({
   bridgeDeviceRepository: {
-    markSeen: jest.fn(),
-    findByToken: jest.fn(),
-    revoke: jest.fn(),
+    markSeen: vi.fn(),
+    findByToken: vi.fn(),
+    revoke: vi.fn(),
   },
 }));
-jest.mock('../repositories/channelIdentityRepository', () => ({
-  channelIdentityRepository: { claimInboundMessage: jest.fn() },
+vi.mock('../repositories/channelIdentityRepository.js', () => ({
+  channelIdentityRepository: { claimInboundMessage: vi.fn() },
 }));
-jest.mock('../control-plane/audit/auditWriter', () => ({ auditWriter: { write: jest.fn() } }));
-jest.mock('../services/stewraTurnService', () => ({
+vi.mock('../control-plane/audit/auditWriter.js', () => ({ auditWriter: { write: vi.fn() } }));
+vi.mock('../services/stewraTurnService.js', () => ({
   STEWRA_FAILURE_TEXT: 'Stewra could not reply just now. Please try again.',
-  stewraTurnService: { handleUserTurn: jest.fn() },
+  stewraTurnService: { handleUserTurn: vi.fn() },
 }));
-jest.mock('../services/redisClient', () => ({
-  redis: { incr: jest.fn(), expire: jest.fn() },
+vi.mock('../services/redisClient.js', () => ({
+  redis: { incr: vi.fn(), expire: vi.fn() },
 }));
 
-import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository';
-import { channelIdentityRepository } from '../repositories/channelIdentityRepository';
-import { whatsappStore } from '../repositories/whatsappStore';
-import { redis } from '../services/redisClient';
-import { stewraTurnService } from '../services/stewraTurnService';
-import { whatsappPersonalService } from '../services/whatsappPersonalService';
-import { bridgeAuthMiddleware } from '../websocket/bridgeAuthMiddleware';
-import { notifyRevoked, setBridgeNamespace } from '../websocket/bridgeEmitter';
-import { registerBridgeHandler } from '../websocket/bridgeHandler';
-import { bridgeUserRoom } from '../websocket/bridgeTypes';
-import type { BridgeRemoteSocketLike } from '../websocket/bridgeTypes';
+import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository.js';
+import { channelIdentityRepository } from '../repositories/channelIdentityRepository.js';
+import { whatsappStore } from '../repositories/whatsappStore.js';
+import { redis } from '../services/redisClient.js';
+import { stewraTurnService } from '../services/stewraTurnService.js';
+import { whatsappPersonalService } from '../services/whatsappPersonalService.js';
+import { bridgeAuthMiddleware } from '../websocket/bridgeAuthMiddleware.js';
+import { notifyRevoked, setBridgeNamespace } from '../websocket/bridgeEmitter.js';
+import { registerBridgeHandler } from '../websocket/bridgeHandler.js';
+import { bridgeUserRoom } from '../websocket/bridgeTypes.js';
+import type { BridgeRemoteSocketLike } from '../websocket/bridgeTypes.js';
 
-const store = whatsappStore as jest.Mocked<typeof whatsappStore>;
-const devices = bridgeDeviceRepository as jest.Mocked<typeof bridgeDeviceRepository>;
-const identities = channelIdentityRepository as jest.Mocked<typeof channelIdentityRepository>;
-const turns = stewraTurnService as jest.Mocked<typeof stewraTurnService>;
-const cache = redis as jest.Mocked<typeof redis>;
+const store = whatsappStore as Mocked<typeof whatsappStore>;
+const devices = bridgeDeviceRepository as Mocked<typeof bridgeDeviceRepository>;
+const identities = channelIdentityRepository as Mocked<typeof channelIdentityRepository>;
+const turns = stewraTurnService as Mocked<typeof stewraTurnService>;
+const cache = redis as Mocked<typeof redis>;
 
 const USER = 'user-1';
 const DEVICE = 'device-1';
@@ -179,7 +188,7 @@ function connect(deviceId = DEVICE): FakeBridge {
 }
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  vi.clearAllMocks();
   whatsappPersonal.enabled = true;
   bridges = [];
 
@@ -259,7 +268,7 @@ describe('bridge handshake auth', () => {
     devices.findByToken.mockResolvedValue({ deviceId: DEVICE, userId: USER });
     const socket = handshake('stwbr_good');
 
-    const next = jest.fn();
+    const next = vi.fn();
     bridgeAuthMiddleware(socket, next);
     await settle();
 
@@ -271,7 +280,7 @@ describe('bridge handshake auth', () => {
     // `findByToken` hashes what it is given and looks for a row. A JWT has no row, so it can never pass.
     devices.findByToken.mockResolvedValue(null);
 
-    const next = jest.fn();
+    const next = vi.fn();
     bridgeAuthMiddleware(handshake('eyJhbGciOiJIUzI1NiJ9.fake.jwt'), next);
     await settle();
 
@@ -281,7 +290,7 @@ describe('bridge handshake auth', () => {
   it('REFUSES a revoked token instantly — the row is gone, so the next connect dies', async () => {
     devices.findByToken.mockResolvedValue(null);
 
-    const next = jest.fn();
+    const next = vi.fn();
     bridgeAuthMiddleware(handshake('stwbr_revoked'), next);
     await settle();
 
@@ -291,7 +300,7 @@ describe('bridge handshake auth', () => {
   it('refuses everyone when the experimental channel is switched off for the deploy', async () => {
     whatsappPersonal.enabled = false;
 
-    const next = jest.fn();
+    const next = vi.fn();
     bridgeAuthMiddleware(handshake('stwbr_good'), next);
     await settle();
 
@@ -300,7 +309,7 @@ describe('bridge handshake auth', () => {
   });
 
   it('refuses a socket with no token at all', () => {
-    const next = jest.fn();
+    const next = vi.fn();
     bridgeAuthMiddleware(handshake(), next);
     expect(next).toHaveBeenCalledWith(expect.any(Error));
   });

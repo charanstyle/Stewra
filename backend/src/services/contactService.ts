@@ -5,18 +5,18 @@ import type {
   ContactWithUser,
   PublicUser,
 } from '@stewra/shared-types';
-import { config } from '../config/unifiedConfig';
-import { contactRepository } from '../repositories/contactRepository';
-import { userRepository, toPublicUser } from '../repositories/userRepository';
-import { emailService } from './emailService';
-import { logger } from '../utils/logger';
+import { config } from '../config/unifiedConfig.js';
+import { contactRepository } from '../repositories/contactRepository.js';
+import { userRepository, toPublicUser } from '../repositories/userRepository.js';
+import { emailService } from './emailService.js';
+import { logger } from '../utils/logger.js';
 import * as Sentry from '@sentry/node';
 import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
   ValidationError,
-} from '../utils/errors';
+} from '../utils/errors.js';
 
 const SEARCH_LIMIT = 20;
 

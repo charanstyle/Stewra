@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { connectionController } from '../controllers/connectionController';
-import { requireAuth } from '../middleware/requireAuth';
-import { requireEmailVerification } from '../middleware/requireEmailVerification';
+import { connectionController } from '../controllers/connectionController.js';
+import { requireAuth } from '../middleware/requireAuth.js';
+import { requireEmailVerification } from '../middleware/requireEmailVerification.js';
 
 const router = Router();
 
