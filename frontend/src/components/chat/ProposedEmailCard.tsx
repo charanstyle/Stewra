@@ -31,10 +31,14 @@ function terminalMessage(proposal: ProposedEmail): string {
  * The in-chat confirmation card for an email Stewra drafted. While `pending` it shows the draft
  * (to/subject/body) with Send / Cancel; once resolved it collapses to a short status line. Purely
  * presentational — the screen owns the API call and re-renders this from the updated message.
+ *
+ * A `failed` send is transient (e.g. a since-reconnected Google grant), so it stays actionable: the
+ * user can retry (Try again) or discard (Dismiss). Only `sent`/`cancelled` collapse to a terminal
+ * status line. This mirrors the web `ProposedEmailCard`.
  */
 export const ProposedEmailCard: React.FC<Props> = React.memo(({ proposal, onConfirm, busy }) => {
-  const pending = proposal.status === 'pending';
   const failed = proposal.status === 'failed';
+  const actionable = proposal.status === 'pending' || failed;
   return (
     <View style={styles.card}>
       <Text style={styles.header}>Draft email</Text>
@@ -49,7 +53,14 @@ export const ProposedEmailCard: React.FC<Props> = React.memo(({ proposal, onConf
       </View>
       <Text style={styles.body}>{proposal.body}</Text>
 
-      {pending ? (
+      {/* When a send failed, show why above the buttons — then let the user retry or dismiss. */}
+      {failed && (
+        <Text style={[styles.status, styles.statusFailed, styles.failedReason]}>
+          {terminalMessage(proposal)}
+        </Text>
+      )}
+
+      {actionable ? (
         busy ? (
           <View style={styles.busyRow}>
             <ActivityIndicator size="small" color={theme.colors.primary} />
@@ -65,7 +76,7 @@ export const ProposedEmailCard: React.FC<Props> = React.memo(({ proposal, onConf
                 pressed && styles.cancelPressed,
               ]}
             >
-              <Text style={styles.cancelText}>Cancel</Text>
+              <Text style={styles.cancelText}>{failed ? 'Dismiss' : 'Cancel'}</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -76,14 +87,12 @@ export const ProposedEmailCard: React.FC<Props> = React.memo(({ proposal, onConf
                 pressed && styles.sendPressed,
               ]}
             >
-              <Text style={styles.sendText}>Send</Text>
+              <Text style={styles.sendText}>{failed ? 'Try again' : 'Send'}</Text>
             </Pressable>
           </View>
         )
       ) : (
-        <Text style={[styles.status, failed ? styles.statusFailed : styles.statusDone]}>
-          {terminalMessage(proposal)}
-        </Text>
+        <Text style={[styles.status, styles.statusDone]}>{terminalMessage(proposal)}</Text>
       )}
     </View>
   );
@@ -165,6 +174,9 @@ const styles = StyleSheet.create({
   status: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  failedReason: {
+    marginBottom: theme.spacing.sm,
   },
   statusDone: {
     color: theme.colors.success,
