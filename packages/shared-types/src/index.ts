@@ -228,6 +228,11 @@ export type {
   RegisterCallPushTokenResponse,
   ListCallHistoryResponse,
 } from './api/calls';
+export type {
+  PushPlatform,
+  RegisterPushTokenRequest,
+  RegisterPushTokenResponse,
+} from './api/push';
 
 // Realtime (Socket.IO) contract
 export { CLIENT_EVENTS, SERVER_EVENTS } from './realtime/events';

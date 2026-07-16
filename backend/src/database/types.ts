@@ -14,6 +14,7 @@ import type {
   MessageType,
   MessagingChannel,
   ParticipantRole,
+  PushPlatform,
   ProcessDomain,
   ProcessDimension,
   ProcessRuleSource,
@@ -486,6 +487,16 @@ export interface CallPushTokensTable {
   updated_at: ColumnType<Date, Date | undefined, Date>;
 }
 
+/** General Expo push routing (migration 031) — actionable notifications. One row per (user, platform). */
+export interface PushTokensTable {
+  id: Generated<string>;
+  user_id: string;
+  platform: PushPlatform;
+  expo_token: string;
+  created_at: ColumnType<Date, Date | undefined, Date>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
 /** One stored binary (migration 021), owner-scoped so `GET /media/:id` can authorize before streaming. */
 export interface MediaAssetsTable {
   id: Generated<string>;
@@ -642,6 +653,7 @@ export interface Database {
   call_sessions: CallSessionsTable;
   call_participants: CallParticipantsTable;
   call_push_tokens: CallPushTokensTable;
+  push_tokens: PushTokensTable;
   media_assets: MediaAssetsTable;
   channel_identities: ChannelIdentitiesTable;
   channel_link_codes: ChannelLinkCodesTable;

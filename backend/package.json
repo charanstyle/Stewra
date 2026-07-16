@@ -23,6 +23,7 @@
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "expo-server-sdk": "^5.0.0",
     "express": "^4.21.1",
     "google-auth-library": "^10.9.0",
     "googleapis": "^173.0.0",

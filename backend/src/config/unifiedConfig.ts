@@ -212,6 +212,11 @@ const EnvSchema = z.object({
   APNS_BUNDLE_ID: z.string().min(1).optional(),
   APNS_KEY_P8: z.string().min(1).optional(),
   FCM_SERVICE_ACCOUNT_JSON: z.string().min(1).optional(),
+  // Expo push access token — authorizes THIS backend to send through Expo's push service under Expo's
+  // "Enhanced Security" (which rejects unauthenticated sends). OPTIONAL here; REQUIRED (checked
+  // post-parse) only when WHATSAPP_EMAIL_APPROVAL_ENABLED is true, since the approve-to-send actionable
+  // notification is delivered over Expo push. Distinct from the call-ring FCM/APNs creds above.
+  EXPO_ACCESS_TOKEN: z.string().min(1).optional(),
   // Master switch for talk-to-Stewra voice (STT/TTS). When false, /messages/voice returns 503 so a dev
   // box without whisper.cpp/Piper isn't blocked. The WHISPER_*/PIPER_*/UPLOADS_* knobs are required
   // only when this is true (checked post-parse). Binaries are invoked via execFile (no shell) like the
@@ -288,8 +293,8 @@ const EnvSchema = z.object({
   // A THIRD, independent switch, in its OWN namespace on purpose so it can never be turned on as a side
   // effect of enabling either WhatsApp channel above (same reasoning as keeping `whatsapp_personal`
   // separate). When false the per-user opt-in cannot be enabled and both WhatsApp channels keep their
-  // draft-and-defer refusal. Off by default. Phase 1 carries no dependent secrets — the Expo-push config
-  // the actionable-notification phase will need is added there, with its own required-when-enabled guard.
+  // draft-and-defer refusal. Off by default. Phase 2 (actionable push) depends on
+  // EXPO_ACCESS_TOKEN, enforced by the required-when-enabled guard below.
   WHATSAPP_EMAIL_APPROVAL_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   // A bridge token is a long-lived DEVICE credential, so it is deliberately not a JWT and has no expiry
   // baked in — revocation is by database row, which is immediate. This bounds its raw entropy instead.
@@ -380,6 +385,18 @@ if (env.WHATSAPP_PERSONAL_ENABLED) {
   ).filter((k) => !env[k]);
   if (missing.length > 0) {
     throw new Error(`WHATSAPP_PERSONAL_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+}
+
+// Fail loud when approve-to-send email over WhatsApp is enabled but its Expo push credential is missing.
+// The actionable Approve/Deny prompt is delivered via Expo push; without the access token the prompt
+// would silently never reach the user's device, leaving the feature advertised but inert — worse than
+// refusing to boot. (Phase 1's web approve card still works without push, but enabling the switch now
+// means the full approve-to-send experience, so we require the credential unconditionally when on.)
+if (env.WHATSAPP_EMAIL_APPROVAL_ENABLED) {
+  const missing = (['EXPO_ACCESS_TOKEN'] as const).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`WHATSAPP_EMAIL_APPROVAL_ENABLED=true requires: ${missing.join(', ')}`);
   }
 }
 
@@ -549,6 +566,9 @@ export const config = {
     apnsKeyP8: env.APNS_KEY_P8 ?? '',
     // FCM service-account JSON (raw string) for Android data pushes; '' when unset.
     fcmServiceAccountJson: env.FCM_SERVICE_ACCOUNT_JSON ?? '',
+    // Expo push access token for the general actionable-notification channel (approve-to-send email).
+    // '' when unset; the required-when-enabled guard above blocks boot if the feature is on without it.
+    expoAccessToken: env.EXPO_ACCESS_TOKEN ?? '',
   },
   voice: {
     // Master switch; when false /messages/voice 503s. STT/TTS binaries invoked via execFile.
