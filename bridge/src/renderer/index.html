@@ -80,21 +80,16 @@
           <input id="stewra-code" type="text" autocomplete="off" spellcheck="false" placeholder="ABCD-1234" />
         </label>
 
-        <label class="field">
-          <span class="field-label">Your WhatsApp number, with country code</span>
-          <input id="phone" type="tel" autocomplete="off" spellcheck="false" placeholder="+44 7700 900123" />
-        </label>
-
         <button id="pair" type="button" class="primary">Link WhatsApp</button>
         <p class="error" id="error" hidden></p>
       </section>
 
-      <!-- The 8 characters the user types into their phone. -->
-      <section class="panel code-panel" id="code-panel" hidden>
+      <!-- The QR the user scans from their phone. -->
+      <section class="panel qr-panel" id="qr-panel" hidden>
         <p class="code-hint">On your phone, open</p>
-        <p class="code-path">WhatsApp → Linked Devices → Link with phone number instead</p>
-        <p class="code" id="pairing-code" aria-live="polite"></p>
-        <p class="code-hint">then type this code. It expires in a few minutes.</p>
+        <p class="code-path">WhatsApp → Linked Devices → Link a device</p>
+        <img id="pairing-qr" class="qr" alt="QR code to link WhatsApp" width="240" height="240" />
+        <p class="code-hint">then point your phone at this code. It refreshes every few minutes.</p>
       </section>
 
       <!-- LINKED: shown once WhatsApp is up. -->

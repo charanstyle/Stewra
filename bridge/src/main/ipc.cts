@@ -30,8 +30,8 @@ export interface BridgeUiState {
   readonly waState: BridgeWaState;
   /** The human reason behind a terminal state — a ban, a logout. Shown verbatim, never softened. */
   readonly detail: string | null;
-  /** The 8 characters the user types into WhatsApp → Linked Devices. Null unless we are pairing. */
-  readonly pairingCode: string | null;
+  /** A QR code (PNG `data:` URL) to scan from WhatsApp → Linked Devices. Null unless we are pairing. */
+  readonly qrDataUrl: string | null;
   readonly autostart: boolean;
   readonly appVersion: string;
   /** Shown in the UI so the user can see which server this bridge talks to. It is never guessed. */
@@ -45,8 +45,6 @@ export interface PairRequest {
    * asking them to fix something that is not broken.
    */
   readonly stewraCode: string | null;
-  /** The user's WhatsApp number. Only ever used to ask WhatsApp for a pairing code. */
-  readonly phoneNumber: string;
 }
 
 export interface PairResult {

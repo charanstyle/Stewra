@@ -29,6 +29,13 @@
   box-sizing: border-box;
 }
 
+/* The renderer drives visibility through the `hidden` attribute. Any `display:` rule below (`.panel`,
+   `.field`, …) would silently defeat the browser's own `[hidden] { display: none }`, showing every
+   panel at once — this rule keeps `hidden` meaning hidden. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -207,18 +214,18 @@ button:disabled {
   font-size: 12.5px;
 }
 
-.code-panel {
+.qr-panel {
   align-items: center;
   text-align: center;
 }
 
-.code {
-  margin: 2px 0;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 27px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  user-select: text;
+.qr {
+  /* The QR is black-on-white; a white mat keeps it scannable on the dark card and squares the corners. */
+  margin: 4px 0;
+  padding: 10px;
+  background: #fff;
+  border-radius: 8px;
+  image-rendering: pixelated;
 }
 
 .code-hint {

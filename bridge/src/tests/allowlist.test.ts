@@ -2,11 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { AllowlistGate, normalizeJid } from '../core/allowlist.js';
 
 const OWN = '447700900123@s.whatsapp.net';
+const OWN_LID = '100000000000001@lid';
 const SARAH = '447700900999@s.whatsapp.net';
 const STRANGER = '447700900777@s.whatsapp.net';
 
-const gateWith = (ticked: Array<{ jid: string; displayName: string }> = []): AllowlistGate => {
-  const gate = new AllowlistGate(OWN);
+const gateWith = (
+  ticked: Array<{ jid: string; displayName: string }> = [],
+  ownLid?: string,
+): AllowlistGate => {
+  const gate = new AllowlistGate(OWN, ownLid);
   gate.setAllowed(ticked.map((c) => ({ ...c, isSelfChat: false })));
   return gate;
 };
@@ -32,6 +36,7 @@ describe('the allowlist gate', () => {
     expect(gateWith().decide({ remoteJid: OWN, fromMe: true })).toEqual({
       forward: true,
       isSelfChat: true,
+      jid: OWN,
     });
   });
 
@@ -39,6 +44,33 @@ describe('the allowlist gate', () => {
     expect(gateWith().decide({ remoteJid: '447700900123:47@s.whatsapp.net', fromMe: true })).toEqual({
       forward: true,
       isSelfChat: true,
+      jid: OWN,
+    });
+  });
+
+  it('recognises the self-chat when it arrives as a LID, and forwards it under the phone JID', () => {
+    // The real bug: WhatsApp addressed "Message yourself" by LID, the gate did not know the LID, and the
+    // message was dropped as "not_allowed" so Stewra never answered. It must match — AND canonicalise to
+    // the phone JID, because the server's lookup, dedupe, and echo-suppression all key on that one address.
+    const gate = gateWith([], OWN_LID);
+    expect(gate.decide({ remoteJid: OWN_LID, fromMe: true })).toEqual({
+      forward: true,
+      isSelfChat: true,
+      jid: OWN,
+    });
+    // Even with a device suffix on the LID.
+    expect(gate.decide({ remoteJid: '100000000000001:12@lid', fromMe: true })).toEqual({
+      forward: true,
+      isSelfChat: true,
+      jid: OWN,
+    });
+  });
+
+  it('does NOT treat a LID as the self-chat when no own-LID was supplied', () => {
+    // Without the LID, an unknown @lid address is just an unticked chat — dropped, never leaked.
+    expect(gateWith().decide({ remoteJid: OWN_LID, fromMe: true })).toEqual({
+      forward: false,
+      reason: 'not_allowed',
     });
   });
 
@@ -55,6 +87,7 @@ describe('the allowlist gate', () => {
     expect(gate.decide({ remoteJid: SARAH, fromMe: false })).toEqual({
       forward: true,
       isSelfChat: false,
+      jid: SARAH,
     });
     // The user's own half of the conversation. Stewra was asked to read what Sarah says, not to keep a
     // copy of everything the user says to her.

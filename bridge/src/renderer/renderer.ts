@@ -10,9 +10,28 @@ import type { BridgeUiState, StewraBridgeApi } from '../main/ipc.cjs';
  */
 declare global {
   interface Window {
-    readonly stewra: StewraBridgeApi;
+    /** `undefined` when the preload script failed to load — a mis-built app, not a state to limp through. */
+    readonly stewra: StewraBridgeApi | undefined;
   }
 }
+
+/**
+ * If the preload died, every button in this window is a lie — clicking "Link WhatsApp" would show
+ * "Linking…" forever while doing nothing at all (which is exactly what happened before this guard
+ * existed). Refuse to render the UI and say why, in the window and on stderr.
+ */
+function requireStewraApi(): StewraBridgeApi {
+  if (window.stewra === undefined) {
+    const message =
+      'Stewra Bridge is broken: its preload script failed to load, so this window cannot talk to the ' +
+      'app. Rebuild or reinstall Stewra Bridge.';
+    document.body.textContent = message;
+    throw new Error(message);
+  }
+  return window.stewra;
+}
+
+const stewra = requireStewraApi();
 
 /** Look-ups that fail loudly at startup rather than silently no-op'ing later against a null. */
 function el(id: string): HTMLElement {
@@ -33,17 +52,22 @@ function buttonEl(id: string): HTMLButtonElement {
   return node;
 }
 
+function imgEl(id: string): HTMLImageElement {
+  const node = el(id);
+  if (!(node instanceof HTMLImageElement)) throw new Error(`Stewra Bridge: #${id} is not an image`);
+  return node;
+}
+
 const dot = el('dot');
 const statusLabel = el('status-label');
 const statusDetail = el('status-detail');
 const pairPanel = el('pair-panel');
 const codeField = el('code-field');
-const codePanel = el('code-panel');
+const qrPanel = el('qr-panel');
 const linkedPanel = el('linked-panel');
-const pairingCode = el('pairing-code');
+const pairingQr = imgEl('pairing-qr');
 const errorText = el('error');
 const stewraCodeInput = inputEl('stewra-code');
-const phoneInput = inputEl('phone');
 const pairButton = buttonEl('pair');
 const unpairButton = buttonEl('unpair');
 const autostartInput = inputEl('autostart');
@@ -79,17 +103,18 @@ function render(state: BridgeUiState): void {
   statusDetail.textContent = state.detail ?? '';
 
   const linked = state.paired && state.waState === 'open';
-  const showingCode = state.pairingCode !== null;
+  const showingQr = state.qrDataUrl !== null;
 
-  // Already paired to Stewra but WhatsApp needs re-linking: ask for the phone number, not for a fresh
-  // pairing code. The token is still perfectly valid, and making them re-fetch one implies otherwise.
+  // Already paired to Stewra but WhatsApp needs re-linking: don't ask for a fresh Stewra code. The token
+  // is still perfectly valid, and making them re-fetch one implies otherwise.
   codeField.hidden = state.paired;
 
-  pairPanel.hidden = linked || showingCode;
-  codePanel.hidden = !showingCode;
+  pairPanel.hidden = linked || showingQr;
+  qrPanel.hidden = !showingQr;
   linkedPanel.hidden = !linked;
 
-  pairingCode.textContent = state.pairingCode ?? '';
+  // Only touch the src when there is a QR; assigning '' would fire a broken-image request under the CSP.
+  if (state.qrDataUrl !== null) pairingQr.src = state.qrDataUrl;
   autostartInput.checked = state.autostart;
   versionText.textContent = `v${state.appVersion}`;
   apiText.textContent = state.apiBaseUrl;
@@ -101,12 +126,6 @@ function showError(message: string | null): void {
 }
 
 pairButton.addEventListener('click', () => {
-  const phoneNumber = phoneInput.value.trim();
-  if (phoneNumber === '') {
-    showError('Enter the phone number of the WhatsApp account you want to link.');
-    return;
-  }
-
   const typedCode = stewraCodeInput.value.trim();
   if (!codeField.hidden && typedCode === '') {
     showError('Enter the pairing code shown in the Stewra web app.');
@@ -117,8 +136,8 @@ pairButton.addEventListener('click', () => {
   pairButton.disabled = true;
   pairButton.textContent = 'Linking…';
 
-  void window.stewra
-    .pair({ stewraCode: codeField.hidden ? null : typedCode, phoneNumber })
+  void stewra
+    .pair({ stewraCode: codeField.hidden ? null : typedCode })
     .then((result) => {
       if (!result.ok) showError(result.error);
     })
@@ -129,12 +148,12 @@ pairButton.addEventListener('click', () => {
 });
 
 unpairButton.addEventListener('click', () => {
-  void window.stewra.unpair();
+  void stewra.unpair();
 });
 
 autostartInput.addEventListener('change', () => {
-  void window.stewra.setAutostart(autostartInput.checked);
+  void stewra.setAutostart(autostartInput.checked);
 });
 
-window.stewra.onStateChanged(render);
-void window.stewra.getState().then(render);
+stewra.onStateChanged(render);
+void stewra.getState().then(render);

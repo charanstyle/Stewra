@@ -9,7 +9,8 @@ import type { WhatsappMessage } from './whatsapp.js';
 export interface BridgeEvents {
   /** Surfaced in the app window and the tray. `message` is the human reason, when there is one. */
   onState(state: BridgeWaState, message?: string): void;
-  onPairingCode(code: string): void;
+  /** A QR code (PNG `data:` URL) for the user to scan from WhatsApp → Linked Devices → Link a device. */
+  onQr(qrDataUrl: string): void;
   /** The WhatsApp session is gone (logged out or banned) and its local credentials have been wiped. */
   onSessionDestroyed(): void;
   /**
@@ -47,10 +48,11 @@ export class Bridge {
     this.whatsapp = new WhatsappClient({
       authDir: options.authDir,
       secretStore: options.secretStore,
+      appVersion: options.config.appVersion,
       events: {
         onState: (state, message) => this.handleWaState(state, message),
         onMessage: (message) => this.handleMessage(message),
-        onPairingCode: (code) => options.events.onPairingCode(code),
+        onQr: (qrDataUrl) => options.events.onQr(qrDataUrl),
         onSessionDestroyed: () => options.events.onSessionDestroyed(),
       },
     });
@@ -75,9 +77,9 @@ export class Bridge {
   }
 
   /** Start: connect to Stewra with the saved token, then bring up WhatsApp. */
-  async start(token: string, phoneNumber?: string): Promise<void> {
+  async start(token: string): Promise<void> {
     this.stewra.connect(token);
-    await this.whatsapp.connect(phoneNumber);
+    await this.whatsapp.connect();
   }
 
   stop(): void {
@@ -98,7 +100,13 @@ export class Bridge {
     if (state === 'open') {
       const ownJid = this.whatsapp.ownJid;
       if (ownJid !== null) {
-        this.gate = new AllowlistGate(ownJid);
+        const ownLid = this.whatsapp.ownLid;
+        // The LID matters because WhatsApp addresses the self-chat by it on some clients; logging both here
+        // is what let us diagnose a self-message being dropped as "not_allowed" when it arrived as a LID.
+        console.error(
+          `Stewra Bridge: WhatsApp open as ${ownJid}${ownLid !== null ? ` (lid ${ownLid})` : ''}.`,
+        );
+        this.gate = new AllowlistGate(ownJid, ownLid ?? undefined);
         this.gate.setAllowed(this.tickedChats);
         this.syncAllowedChats();
       }
@@ -124,14 +132,29 @@ export class Bridge {
    * `fetch` on this path to accidentally leave in — that is what makes the promise checkable.
    */
   private handleMessage(message: WhatsappMessage): void {
-    if (this.gate === null) return;
+    if (this.gate === null) {
+      console.error('Stewra Bridge: a message arrived before WhatsApp finished connecting; dropped.');
+      return;
+    }
 
     const decision = this.gate.decide({ remoteJid: message.remoteJid, fromMe: message.fromMe });
-    if (!decision.forward) return;
+    if (!decision.forward) {
+      console.error(
+        `Stewra Bridge: ${message.remoteJid} is not ticked (${decision.reason}); the message stays on ` +
+          'this computer — Stewra never sees it.',
+      );
+      return;
+    }
 
+    // `decision.jid` is the canonical address, which may differ from `message.remoteJid` (a self-chat that
+    // arrived as a LID is forwarded under the phone JID). The server keys everything on this one identity.
+    console.error(
+      `Stewra Bridge: forwarding a message on ${message.remoteJid} as ${decision.jid} ` +
+        `(selfChat=${decision.isSelfChat}) to Stewra.`,
+    );
     this.stewra.inbound({
       providerMessageId: message.providerMessageId,
-      jid: message.remoteJid,
+      jid: decision.jid,
       isSelfChat: decision.isSelfChat,
       fromMe: message.fromMe,
       text: message.text,
@@ -141,13 +164,17 @@ export class Bridge {
 
   /** Stewra approved a send. We deliver it and report back honestly, including when we failed. */
   private async handleSend(payload: BridgeSendPayload): Promise<BridgeSendAck> {
+    console.error(`Stewra Bridge: Stewra asked to send a reply to ${payload.jid}.`);
     if (this.waState !== 'open') {
+      console.error('Stewra Bridge: WhatsApp is not connected; the reply could not be delivered.');
       return { ok: false, error: 'whatsapp_not_connected' };
     }
     try {
       const providerMessageId = await this.whatsapp.sendText(payload.jid, payload.text);
+      console.error(`Stewra Bridge: delivered Stewra's reply to ${payload.jid} (id ${providerMessageId}).`);
       return { ok: true, providerMessageId };
     } catch (error) {
+      console.error('Stewra Bridge: failed to deliver Stewra\'s reply:', error);
       return { ok: false, error: error instanceof Error ? error.message : 'send_failed' };
     }
   }

@@ -1,6 +1,21 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC } from './ipc.cjs';
+import type { IPC as IPC_CONTRACT } from './ipc.cjs';
 import type { BridgeUiState, PairRequest, PairResult, StewraBridgeApi } from './ipc.cjs';
+
+/**
+ * ⚠️ A sandboxed preload cannot `require` sibling files — only Electron's polyfilled builtins. A value
+ * import of `IPC` from `./ipc.cjs` compiles, then dies at runtime with "module not found", taking
+ * `window.stewra` with it. So the channel names are written out again here, pinned to the contract by
+ * `typeof IPC_CONTRACT` (a type-only import, erased at compile time): rename a channel in ipc.cts and
+ * this object stops compiling.
+ */
+const IPC: typeof IPC_CONTRACT = {
+  GET_STATE: 'stewra:get-state',
+  PAIR: 'stewra:pair',
+  UNPAIR: 'stewra:unpair',
+  SET_AUTOSTART: 'stewra:set-autostart',
+  STATE_CHANGED: 'stewra:state-changed',
+};
 
 /**
  * The only bridge between the renderer and Node — and it is a keyhole, not a door.

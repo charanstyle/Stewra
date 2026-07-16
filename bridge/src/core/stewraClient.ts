@@ -65,6 +65,8 @@ export class StewraClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, deviceName, appVersion: this.config.appVersion }),
+      // Without this, a hung connection leaves the pairing UI on "Linking…" forever with no error.
+      signal: AbortSignal.timeout(15_000),
     });
 
     if (!response.ok) {
@@ -93,8 +95,19 @@ export class StewraClient {
     });
     this.socket = socket;
 
-    socket.on('connect', () => this.events.onConnected());
-    socket.on('disconnect', () => this.events.onDisconnected());
+    socket.on('connect', () => {
+      console.error('Stewra Bridge: connected to Stewra.');
+      this.events.onConnected();
+    });
+    socket.on('disconnect', (reason) => {
+      console.error(`Stewra Bridge: disconnected from Stewra (${reason}).`);
+      this.events.onDisconnected();
+    });
+    // Without this, a rejected bridge token (or an unreachable server) retries forever with nothing on
+    // screen and no log — the message loop would look dead for a reason nobody could see.
+    socket.on('connect_error', (error: Error) => {
+      console.error('Stewra Bridge: could not connect to Stewra:', error.message);
+    });
 
     socket.on(BRIDGE_SERVER_EVENTS.REVOKED, () => this.events.onRevoked());
 
@@ -126,7 +139,14 @@ export class StewraClient {
   }
 
   inbound(payload: BridgeInboundPayload): void {
-    this.socket?.emit(BRIDGE_CLIENT_EVENTS.INBOUND, payload);
+    if (this.socket === null || this.socket.connected !== true) {
+      console.error(
+        'Stewra Bridge: a message was ready to forward but the Stewra socket is down; it was not sent.',
+      );
+      return;
+    }
+    console.error(`Stewra Bridge: → bridge:inbound (${payload.jid}, selfChat=${payload.isSelfChat}).`);
+    this.socket.emit(BRIDGE_CLIENT_EVENTS.INBOUND, payload);
   }
 
   /** The ticked chats. Never called with an empty list — the server refuses one, and rightly. */

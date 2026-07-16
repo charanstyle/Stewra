@@ -16,11 +16,13 @@
   "dependencies": {
     "@stewra/shared-types": "*",
     "@whiskeysockets/baileys": "6.7.23",
+    "qrcode": "^1.5.4",
     "socket.io-client": "^4.8.3",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.17.6",
+    "@types/qrcode": "^1.5.6",
     "electron": "^33.2.0",
     "typescript": "^5.6.3",
     "vitest": "^3.2.0"

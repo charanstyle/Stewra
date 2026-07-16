@@ -6,9 +6,17 @@ export interface IncomingMessage {
   readonly fromMe: boolean;
 }
 
-/** What the gate decided, and why — the reason exists so the app can show the user what it dropped. */
+/**
+ * What the gate decided, and why — the reason exists so the app can show the user what it dropped.
+ *
+ * On a forward, `jid` is the CANONICAL address the server should key on, which is not always the address
+ * the message arrived under: WhatsApp addresses the self-chat by LID on some clients and by phone-number
+ * JID on others, and both are the same conversation. The gate resolves that here so everything downstream
+ * — the server's allowlist lookup, its dedupe, its echo-suppression, and the reply it sends back — agrees
+ * on one identity. Get this wrong and each of those keys on a different string, and the loop breaks.
+ */
 export type GateDecision =
-  | { readonly forward: true; readonly isSelfChat: boolean }
+  | { readonly forward: true; readonly isSelfChat: boolean; readonly jid: string }
   | { readonly forward: false; readonly reason: 'not_allowed' | 'not_from_user' };
 
 /**
@@ -48,7 +56,17 @@ export class AllowlistGate {
   /** Normalised JID → the chat the user ticked. The self-chat is not in here; it is unconditional. */
   private allowed = new Map<string, BridgeAllowedChat>();
 
-  constructor(private readonly ownJid: string) {}
+  /**
+   * @param ownJid the account's phone-number JID (`me@s.whatsapp.net`) — the canonical self identity.
+   * @param ownLid the account's LID (`…@lid`), when WhatsApp has assigned one. The self-chat can arrive
+   *   addressed by EITHER, so the gate must recognise both; without this, a self-message that comes in as
+   *   a LID is silently dropped as "not_allowed" and Stewra never answers. The canonical address it is
+   *   forwarded under is always the phone JID, so the server only ever sees one identity for the chat.
+   */
+  constructor(
+    private readonly ownJid: string,
+    private readonly ownLid?: string,
+  ) {}
 
   /** Replace the ticked set. The user unticking a chat must take effect at once, not on next launch. */
   setAllowed(chats: readonly BridgeAllowedChat[]): void {
@@ -66,7 +84,12 @@ export class AllowlistGate {
   }
 
   isSelfChat(jid: string): boolean {
-    return normalizeJid(jid) === normalizeJid(this.ownJid);
+    const normalized = normalizeJid(jid);
+    if (normalized === normalizeJid(this.ownJid)) return true;
+    // WhatsApp addresses the user's own "Message yourself" chat by LID on some clients. That is still the
+    // self-chat, and must be recognised as one — or the whole v1 product (message yourself, Stewra answers)
+    // silently does nothing.
+    return this.ownLid !== undefined && normalized === normalizeJid(this.ownLid);
   }
 
   /** May this message leave the user's computer? Everything else in the app asks this first. */
@@ -75,8 +98,9 @@ export class AllowlistGate {
 
     if (this.isSelfChat(jid)) {
       // In the self-chat every message is `fromMe` — it is the user, talking to themself, which is exactly
-      // the conversation Stewra is here to have.
-      return { forward: true, isSelfChat: true };
+      // the conversation Stewra is here to have. Forward it under the PHONE jid regardless of whether it
+      // arrived as a LID: the self-chat is one conversation, and the server must key on one address for it.
+      return { forward: true, isSelfChat: true, jid: normalizeJid(this.ownJid) };
     }
 
     if (!this.allowed.has(jid)) {
@@ -89,6 +113,6 @@ export class AllowlistGate {
       return { forward: false, reason: 'not_from_user' };
     }
 
-    return { forward: true, isSelfChat: false };
+    return { forward: true, isSelfChat: false, jid };
   }
 }

@@ -37,7 +37,7 @@ let uiState: BridgeUiState = {
   paired: false,
   waState: 'disconnected',
   detail: null,
-  pairingCode: null,
+  qrDataUrl: null,
   autostart: false,
   appVersion: '0.0.0',
   apiBaseUrl: '',
@@ -156,19 +156,19 @@ function createBridge(activeConfig: BridgeConfig, secrets: SecretStore): Bridge 
         publish({
           waState,
           detail: message ?? null,
-          // A code is only meaningful while pairing; leaving a stale one on screen invites the user to
-          // type an expired code into their phone and conclude that we are broken.
-          pairingCode: waState === 'pairing' ? uiState.pairingCode : null,
+          // A QR is only meaningful while pairing; leaving a stale one on screen invites the user to scan
+          // an expired code and conclude that we are broken.
+          qrDataUrl: waState === 'pairing' ? uiState.qrDataUrl : null,
         });
       },
-      onPairingCode: (code) => publish({ pairingCode: code }),
+      onQr: (qrDataUrl) => publish({ qrDataUrl }),
       onSessionDestroyed: () => {
         // WhatsApp ended it, not Stewra. The device token is still good — the user only needs to re-link.
-        publish({ pairingCode: null });
+        publish({ qrDataUrl: null });
       },
       onRevoked: () => {
         void tokenStore?.clear();
-        publish({ paired: false, waState: 'disconnected', pairingCode: null, detail: null });
+        publish({ paired: false, waState: 'disconnected', qrDataUrl: null, detail: null });
       },
     },
   });
@@ -178,11 +178,10 @@ async function startBridge(
   activeConfig: BridgeConfig,
   secrets: SecretStore,
   token: string,
-  phoneNumber?: string,
 ): Promise<void> {
   bridge?.stop();
   bridge = createBridge(activeConfig, secrets);
-  await bridge.start(token, phoneNumber);
+  await bridge.start(token);
 }
 
 function registerIpc(activeConfig: BridgeConfig, secrets: SecretStore, store: TokenStore): void {
@@ -206,11 +205,11 @@ function registerIpc(activeConfig: BridgeConfig, secrets: SecretStore, store: To
         return { ok: false, error: 'This device is not paired with Stewra yet. Enter a pairing code.' };
       }
 
-      await startBridge(activeConfig, secrets, token, request.phoneNumber);
+      await startBridge(activeConfig, secrets, token);
       return { ok: true, error: null };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Stewra Bridge could not pair.';
-      publish({ waState: 'disconnected', detail: message, pairingCode: null });
+      publish({ waState: 'disconnected', detail: message, qrDataUrl: null });
       return { ok: false, error: message };
     }
   });
@@ -221,7 +220,7 @@ function registerIpc(activeConfig: BridgeConfig, secrets: SecretStore, store: To
     bridge?.stop();
     bridge = null;
     await store.clear();
-    publish({ paired: false, waState: 'disconnected', pairingCode: null, detail: null });
+    publish({ paired: false, waState: 'disconnected', qrDataUrl: null, detail: null });
   });
 }
 
