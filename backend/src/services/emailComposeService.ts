@@ -43,8 +43,9 @@ const SYSTEM_PROMPT = [
   '  explicit email address, set isSendEmailRequest to false.',
   '- "subject": a short, fitting subject line; synthesize one if the user did not give it.',
   '- "body": the message to send, in the user\'s voice (e.g. if they said "saying hi", the body is "Hi").',
-  '- "reply": ONE short, warm sentence telling the user you have drafted the email and asking them to',
-  '  confirm before you send. NEVER claim you already sent it.',
+  '- "reply": ONE short, warm sentence telling the user you have prepared the draft for THEM to review',
+  '  and send. Frame the user as the one who sends it. NEVER offer to send it yourself, NEVER ask',
+  '  "want me to send it", and NEVER claim you already sent it.',
   '- If it is not an email-send request, set isSendEmailRequest false and leave the other fields empty.',
 ].join('\n');
 
@@ -120,7 +121,7 @@ class EmailComposeService {
     const reply =
       data.reply.trim().length > 0
         ? data.reply.trim()
-        : `I've drafted an email to ${to}. Want me to send it?`;
+        : `Here's a draft email to ${to} for you to review and send.`;
     return { reply, draft: { to, subject, body } };
   }
 }
