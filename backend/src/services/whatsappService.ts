@@ -2,7 +2,7 @@ import * as Sentry from '@sentry/node';
 import type { ChannelIdentity, ChannelLinkChallenge } from '@stewra/shared-types';
 import { channelIdentityRepository } from '../repositories/channelIdentityRepository.js';
 import { channelSender, WHATSAPP_CHANNEL } from './channelSenders/index.js';
-import { preferencesService } from './preferencesService.js';
+import { whatsappEmailApprovalService } from './whatsappEmailApprovalService.js';
 import { expoPushService } from './expoPushService.js';
 import { renderWhatsappEmailReply } from './whatsappEmailNotice.js';
 import { stewraTurnService, STEWRA_FAILURE_TEXT } from './stewraTurnService.js';
@@ -175,11 +175,11 @@ class WhatsappService {
 
     try {
       const reply = await stewraTurnService.handleUserTurn(userId, text);
-      // Only ask the opt-in when there's actually a draft to gate — no extra read on the common path.
+      // Only ask when there's actually a draft to gate — no extra read on the common path. `isActiveFor`
+      // answers for the kill-switch AND the opt-in, so retracting the feature in prod also retracts it
+      // from users who already opted in.
       const approveToSend =
-        reply.proposedEmail !== null
-          ? await preferencesService.sendEmailOverWhatsapp(userId)
-          : false;
+        reply.proposedEmail !== null ? await whatsappEmailApprovalService.isActiveFor(userId) : false;
       if (approveToSend) {
         // Push the actionable Approve/Deny prompt to the user's strong-identity device. Fire-and-forget
         // and best-effort: it never sends the email (approval still flows through confirm-email) and a

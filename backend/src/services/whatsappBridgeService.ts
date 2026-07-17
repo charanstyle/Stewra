@@ -6,7 +6,7 @@ import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository.j
 import { channelIdentityRepository } from '../repositories/channelIdentityRepository.js';
 import { whatsappStore } from '../repositories/whatsappStore.js';
 import { dispatchToBridge } from '../websocket/bridgeEmitter.js';
-import { preferencesService } from './preferencesService.js';
+import { whatsappEmailApprovalService } from './whatsappEmailApprovalService.js';
 import { expoPushService } from './expoPushService.js';
 import { renderWhatsappEmailReply } from './whatsappEmailNotice.js';
 import { redis } from './redisClient.js';
@@ -111,7 +111,11 @@ class WhatsappBridgeService {
         // Same draft, different wording depending on the opt-in — and only the wording. With approve-to-
         // send on we invite approval (which happens on a strong-identity surface, never here); off, we
         // keep the historical draft-and-defer refusal. Neither path sends anything from this channel.
-        const approveToSend = await preferencesService.sendEmailOverWhatsapp(userId);
+        //
+        // `isActiveFor`, never the bare preference: it answers for the kill-switch AND the opt-in, so
+        // turning the feature off in prod retracts it from users who already opted in — not just from
+        // new ones.
+        const approveToSend = await whatsappEmailApprovalService.isActiveFor(userId);
         reply = renderWhatsappEmailReply(body, true, approveToSend);
         if (approveToSend) {
           // Push the actionable Approve/Deny prompt to the user's strong-identity device. Fire-and-forget

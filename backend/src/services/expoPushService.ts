@@ -30,16 +30,26 @@ export interface EmailApprovalPush {
  * prompts; approval still flows through the authenticated confirm-email endpoint on the user's device.
  */
 class ExpoPushService {
-  private readonly expo: Expo | null;
+  /** `undefined` = not resolved yet; `null` = resolved to "no token configured". See `client()`. */
+  private expo: Expo | null | undefined;
 
-  constructor() {
-    const accessToken = config.push.expoAccessToken.trim();
-    this.expo = accessToken.length > 0 ? new Expo({ accessToken }) : null;
+  /**
+   * Resolved on first use, NOT in the constructor. The module-scope singleton below is constructed the
+   * moment anything imports this file, so reading config there would make `config.push` a load-bearing
+   * requirement of every importer — including the WhatsApp channels, which import this only to fire a
+   * prompt they may never fire. Deferring the read keeps the import side-effect-free.
+   */
+  private client(): Expo | null {
+    if (this.expo === undefined) {
+      const accessToken = config.push.expoAccessToken.trim();
+      this.expo = accessToken.length > 0 ? new Expo({ accessToken }) : null;
+    }
+    return this.expo;
   }
 
   /** Whether actionable pushes can be sent (i.e. an Expo access token is configured). */
   get enabled(): boolean {
-    return this.expo !== null;
+    return this.client() !== null;
   }
 
   /**
@@ -49,7 +59,7 @@ class ExpoPushService {
    * pruned so we stop pushing to a device the user no longer has.
    */
   async sendEmailApprovalPrompt(userId: string, payload: EmailApprovalPush): Promise<void> {
-    const expo = this.expo;
+    const expo = this.client();
     if (expo === null) {
       return;
     }

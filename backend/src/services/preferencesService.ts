@@ -47,9 +47,14 @@ export class PreferencesService {
   }
 
   /**
-   * Whether the user opted into approve-to-send email over WhatsApp — the gate both WhatsApp channels
-   * check to decide whether to offer approval (vs. their draft-and-defer refusal). Writing this opt-in
-   * is password-gated and lives in `whatsappEmailApprovalService`, deliberately NOT in `update()`.
+   * The user's STORED approve-to-send opt-in — their consent, and nothing more.
+   *
+   * ⚠️ Not the gate. This ignores the `WHATSAPP_EMAIL_APPROVAL_ENABLED` kill-switch, so a caller that
+   * gates on it alone keeps serving the feature to opted-in users after it has been switched off in prod.
+   * Anything deciding whether approve-to-send is LIVE must call `whatsappEmailApprovalService.isActiveFor`,
+   * which folds in the kill-switch. This getter exists for that service (and for reporting stored state).
+   *
+   * Writing the opt-in is password-gated and lives in `whatsappEmailApprovalService`, NOT in `update()`.
    */
   async sendEmailOverWhatsapp(userId: string): Promise<boolean> {
     const prefs = await this.getForUser(userId);
