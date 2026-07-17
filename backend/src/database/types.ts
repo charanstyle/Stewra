@@ -487,12 +487,18 @@ export interface CallPushTokensTable {
   updated_at: ColumnType<Date, Date | undefined, Date>;
 }
 
-/** General Expo push routing (migration 031) — actionable notifications. One row per (user, platform). */
+/**
+ * General push routing for actionable notifications (migration 031; FCM column added in 032). One row
+ * per (user, platform). Android stores a raw FCM device token (`fcm_token`) so the approval prompt can
+ * be sent data-only; iOS stores an Expo push token (`expo_token`). Exactly one is set per row — the
+ * table CHECK enforces at-least-one, and each platform only ever writes its own column.
+ */
 export interface PushTokensTable {
   id: Generated<string>;
   user_id: string;
   platform: PushPlatform;
-  expo_token: string;
+  expo_token: ColumnType<string | null, string | null | undefined, string | null>;
+  fcm_token: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: ColumnType<Date, Date | undefined, Date>;
   updated_at: ColumnType<Date, Date | undefined, Date>;
 }

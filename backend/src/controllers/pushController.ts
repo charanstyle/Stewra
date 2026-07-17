@@ -5,12 +5,14 @@ import { BaseController } from './baseController.js';
 import { pushTokenService } from '../services/pushTokenService.js';
 import { parse } from '../utils/validate.js';
 
-// A device is exactly one platform and supplies its Expo push token. Kept minimal on purpose — this
-// endpoint only records where a user's device can be reached; it grants no capability.
-const registerPushTokenSchema = z.object({
-  platform: z.enum(['ios', 'android']),
-  expoPushToken: z.string().min(1),
-});
+// A device is exactly one platform and supplies the token type that platform delivers on: Android a raw
+// FCM device token (data-only delivery is the only path to a backgrounded actionable notification), iOS
+// an Expo push token. Discriminated on `platform` so each carries only its own field. Kept minimal on
+// purpose — this endpoint only records where a user's device can be reached; it grants no capability.
+const registerPushTokenSchema = z.discriminatedUnion('platform', [
+  z.object({ platform: z.literal('android'), fcmToken: z.string().min(1) }),
+  z.object({ platform: z.literal('ios'), expoPushToken: z.string().min(1) }),
+]);
 
 /** General push-notification REST surface (behind requireAuth + requireEmailVerification). */
 class PushController extends BaseController {

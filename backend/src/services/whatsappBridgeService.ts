@@ -7,7 +7,7 @@ import { channelIdentityRepository } from '../repositories/channelIdentityReposi
 import { whatsappStore } from '../repositories/whatsappStore.js';
 import { dispatchToBridge } from '../websocket/bridgeEmitter.js';
 import { whatsappEmailApprovalService } from './whatsappEmailApprovalService.js';
-import { expoPushService } from './expoPushService.js';
+import { emailApprovalPushService } from './emailApprovalPushService.js';
 import { renderWhatsappEmailReply } from './whatsappEmailNotice.js';
 import { redis } from './redisClient.js';
 import { STEWRA_FAILURE_TEXT, stewraTurnService } from './stewraTurnService.js';
@@ -121,8 +121,8 @@ class WhatsappBridgeService {
           // Push the actionable Approve/Deny prompt to the user's strong-identity device. Fire-and-forget
           // and best-effort: it never sends the email (approval still flows through confirm-email) and a
           // push failure must not derail the WhatsApp reply the user is waiting on.
-          void expoPushService
-            .sendEmailApprovalPrompt(userId, { messageId: message.id })
+          void emailApprovalPushService
+            .send(userId, { messageId: message.id })
             .catch((err: unknown) =>
               logger.warn('email-approval push failed', { err: String(err), userId }),
             );

@@ -1,10 +1,13 @@
 import { Expo } from 'expo-server-sdk';
 import type { ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
-import { EMAIL_APPROVAL_ANDROID_CHANNEL_ID, EMAIL_APPROVAL_CATEGORY } from '@stewra/shared-types';
+import {
+  EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
+  EMAIL_APPROVAL_CATEGORY,
+  EMAIL_APPROVAL_PUSH_BODY,
+  EMAIL_APPROVAL_PUSH_TITLE,
+} from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
 import { logger } from '../utils/logger.js';
-import { pushTokenRepository } from '../repositories/pushTokenRepository.js';
-import type { PushToken } from '../repositories/pushTokenRepository.js';
 
 /** Expo caps a single push request at 100 messages; we page tokens the same way to keep ticket↔token order. */
 const CHUNK_SIZE = 100;
@@ -15,48 +18,39 @@ export interface EmailApprovalPush {
 }
 
 /**
- * Shape the actionable Approve/Deny notification for one device. Pure (no config, no DB) so the
+ * Shape the actionable Approve/Deny notification for one iOS device. Pure (no config, no DB) so the
  * action-button contract can be tested directly.
  *
- * `categoryId` is carried in TWO places on purpose:
- *   - the top-level `categoryId` field (iOS reads it from the APNs payload), and
- *   - inside `data` as `data.categoryId`, which is where expo-notifications' ANDROID receiver looks
- *     (`NotificationData.categoryId = data["categoryId"]`).
- * Expo's push service maps `channelId` and the top-level `categoryId` through DIFFERENT code paths, so
- * the fact that the notification lands on the right Android channel does NOT prove the top-level
- * `categoryId` reached the FCM data map. When it doesn't, Android resolves a null category and — by
- * `categoryId?.let { addActions }` — drops the Approve/Deny buttons SILENTLY, with no logcat error.
- * Putting the id in `data` ourselves makes the Android lookup succeed regardless. This is what fixes
- * the "no action buttons on the approval notification" bug.
+ * This is the iOS path: Expo forwards to APNs, which reads the top-level `categoryId` to attach the
+ * Approve/Deny actions. (Android does NOT use this path — Expo always delivers notification-type on
+ * Android, so a backgrounded push there gets no buttons; Android is sent raw FCM v1 data-only instead,
+ * see `fcmPushService.sendEmailApproval`.) `categoryId` is also mirrored into `data` — harmless on iOS
+ * and keeps the payload identical to what the Android receiver would read, should Expo ever address it.
  */
 export function buildEmailApprovalMessage(
-  token: PushToken,
+  expoToken: string,
   payload: EmailApprovalPush,
 ): ExpoPushMessage {
   return {
-    to: token.expoToken,
+    to: expoToken,
     sound: 'default',
-    title: 'Approve email?',
-    body: 'Stewra drafted an email for you to review and send.',
+    title: EMAIL_APPROVAL_PUSH_TITLE,
+    body: EMAIL_APPROVAL_PUSH_BODY,
     data: {
       type: EMAIL_APPROVAL_CATEGORY,
       messageId: payload.messageId,
-      // The key expo-notifications' Android receiver reads the category from — see the note above.
       categoryId: EMAIL_APPROVAL_CATEGORY,
     },
     categoryId: EMAIL_APPROVAL_CATEGORY,
-    // Android only; ignored on iOS. The app creates this channel with PRIVATE lock-screen
-    // visibility — without naming it here the push lands on the default channel, which shows its
-    // text on a locked screen.
     channelId: EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
     priority: 'high',
   };
 }
 
 /**
- * Sends the general actionable notifications (Expo push) — currently the approve-to-send email prompt.
- * SEPARATE from `fcmPushService` (the call-ring path): this addresses Expo push tokens through Expo's
- * push service, not raw FCM VoIP tokens.
+ * Sends the approve-to-send email prompt to iOS devices via Expo push. SEPARATE from `fcmPushService`
+ * (Android raw-FCM data-only) and from the call-ring path. Coordinated by `emailApprovalPushService`,
+ * which lists a user's tokens, routes each platform to its sender, and prunes the dead ones this returns.
  *
  * Disabled and every send a no-op when `EXPO_ACCESS_TOKEN` is unset (the required-when-enabled config
  * guard means that only ever happens with the feature off). Best-effort by design: a delivery failure is
@@ -70,8 +64,7 @@ class ExpoPushService {
   /**
    * Resolved on first use, NOT in the constructor. The module-scope singleton below is constructed the
    * moment anything imports this file, so reading config there would make `config.push` a load-bearing
-   * requirement of every importer — including the WhatsApp channels, which import this only to fire a
-   * prompt they may never fire. Deferring the read keeps the import side-effect-free.
+   * requirement of every importer. Deferring the read keeps the import side-effect-free.
    */
   private client(): Expo | null {
     if (this.expo === undefined) {
@@ -87,55 +80,45 @@ class ExpoPushService {
   }
 
   /**
-   * Fire the actionable Approve/Deny prompt for a drafted email to all of a user's registered devices.
-   * The body is deliberately generic (no recipient/subject/body) so a lock-screen preview can never leak
-   * the email; the app opens the correct draft from `data.messageId`. Tokens Expo reports as dead are
-   * pruned so we stop pushing to a device the user no longer has.
+   * Push the Approve/Deny prompt to the given Expo push tokens (iOS), returning the tokens Expo reports
+   * as `DeviceNotRegistered` so the caller can prune them. The body is deliberately generic (no
+   * recipient/subject/body) so a lock-screen preview can never leak the email; the app opens the correct
+   * draft from `data.messageId`.
    */
-  async sendEmailApprovalPrompt(userId: string, payload: EmailApprovalPush): Promise<void> {
+  async sendEmailApproval(expoTokens: string[], payload: EmailApprovalPush): Promise<string[]> {
     const expo = this.client();
-    if (expo === null) {
-      return;
-    }
-    const tokens = (await pushTokenRepository.listForUser(userId)).filter((token) =>
-      Expo.isExpoPushToken(token.expoToken),
-    );
-    if (tokens.length === 0) {
-      return;
+    const tokens = expoTokens.filter((token) => Expo.isExpoPushToken(token));
+    if (expo === null || tokens.length === 0) {
+      return [];
     }
 
+    const dead: string[] = [];
     for (const group of this.paginate(tokens)) {
       const messages = group.map((token) => buildEmailApprovalMessage(token, payload));
       let tickets: ExpoPushTicket[];
       try {
         tickets = await expo.sendPushNotificationsAsync(messages);
       } catch (error) {
-        logger.warn('expo push send failed; skipping this batch', { err: String(error), userId });
+        logger.warn('expo push send failed; skipping this batch', { err: String(error) });
         continue;
       }
-      await this.pruneDeadTokens(group, tickets);
+      tickets.forEach((ticket, idx) => {
+        if (ticket.status === 'error' && ticket.details?.error === 'DeviceNotRegistered') {
+          const token = group[idx];
+          if (token !== undefined) {
+            dead.push(token);
+          }
+        }
+      });
     }
+    return dead;
   }
 
   /** Split tokens into ≤100-sized batches without an index comparison (keeps the anti-pattern linter happy). */
-  private paginate(tokens: PushToken[]): PushToken[][] {
+  private paginate(tokens: string[]): string[][] {
     const batchCount = Math.ceil(tokens.length / CHUNK_SIZE);
     return Array.from({ length: batchCount }, (_unused, k) =>
       tokens.slice(k * CHUNK_SIZE, k * CHUNK_SIZE + CHUNK_SIZE),
-    );
-  }
-
-  /** Drop any token Expo's ticket flags as `DeviceNotRegistered` (order matches the sent batch). */
-  private async pruneDeadTokens(group: PushToken[], tickets: ExpoPushTicket[]): Promise<void> {
-    await Promise.all(
-      tickets.map(async (ticket, idx) => {
-        if (ticket.status === 'error' && ticket.details?.error === 'DeviceNotRegistered') {
-          const dead = group[idx];
-          if (dead !== undefined) {
-            await pushTokenRepository.removeByToken(dead.expoToken);
-          }
-        }
-      }),
     );
   }
 }

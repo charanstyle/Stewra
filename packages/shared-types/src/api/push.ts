@@ -1,25 +1,42 @@
 /**
- * The GENERAL in-app push channel — Expo push notifications for actionable prompts such as the
- * approve-to-send email notification over WhatsApp.
+ * The GENERAL in-app push channel — actionable prompts such as the approve-to-send email notification
+ * over WhatsApp. Deliberately SEPARATE from the call-ring token (`RegisterCallPushTokenRequest` in
+ * `./calls`), which is a PushKit/FCM VoIP token owned by the native call layer.
  *
- * This is deliberately SEPARATE from the call-ring token (`RegisterCallPushTokenRequest` in `./calls`):
- * that one is a PushKit/FCM VoIP token owned by the native call layer, a different token type on a
- * different delivery path. An Expo push token (`getExpoPushTokenAsync`) is what Expo's push service
- * addresses, and it is what this contract registers.
+ * The two platforms register DIFFERENT token types, on purpose (confirmed on-device 2026-07-17):
+ *   - Android registers a RAW FCM device token (`getDevicePushTokenAsync`). The prompt has to arrive as
+ *     a DATA-ONLY FCM message so that, when the app is backgrounded, expo-notifications' native receiver
+ *     runs and attaches the Approve/Deny buttons. Expo's push service ALWAYS synthesises an FCM
+ *     `notification` block on Android, so a push sent through it is delivered notification-type and the
+ *     OS auto-displays it with NO action buttons. The only way to a backgrounded actionable notification
+ *     is to send raw FCM v1 data-only ourselves — which needs the FCM device token, not an Expo token.
+ *   - iOS registers an Expo push token (`getExpoPushTokenAsync`); Expo→APNs delivers actionable
+ *     categories there. (iOS is a later, credentials-only add; the contract is ready for it.)
  */
 
-/** Platform for an Expo push token. Android ships first; iOS is a later, credentials-only add. */
+/** Platform for a general push token. */
 export type PushPlatform = 'ios' | 'android';
 
 /**
- * Register this device's Expo push token. One token per `(user, platform)` server-side; re-registering
- * refreshes it (a device that reinstalls or rotates its token simply overwrites the prior row).
+ * Register this device for approval pushes. One token per `(user, platform)` server-side; re-registering
+ * refreshes it (a reinstalled or token-rotated device simply overwrites the prior row). The token type
+ * is discriminated by platform — see the note above for why Android and iOS differ.
  */
-export interface RegisterPushTokenRequest {
-  readonly platform: PushPlatform;
+export interface RegisterAndroidPushTokenRequest {
+  readonly platform: 'android';
+  /** The raw FCM device registration token from `getDevicePushTokenAsync()` (`type: 'android'`). */
+  readonly fcmToken: string;
+}
+
+export interface RegisterIosPushTokenRequest {
+  readonly platform: 'ios';
   /** The Expo push token from `getExpoPushTokenAsync`, e.g. `ExponentPushToken[xxxxxxxx]`. */
   readonly expoPushToken: string;
 }
+
+export type RegisterPushTokenRequest =
+  | RegisterAndroidPushTokenRequest
+  | RegisterIosPushTokenRequest;
 
 export interface RegisterPushTokenResponse {
   readonly registered: true;
@@ -58,3 +75,12 @@ export interface EmailApprovalPushData {
   readonly type: typeof EMAIL_APPROVAL_CATEGORY;
   readonly messageId: string;
 }
+
+/**
+ * The user-facing copy of the approval notification. Deliberately GENERIC — no recipient, subject, or
+ * body — so a lock-screen preview can never leak the email. Shared here because both senders (Expo for
+ * iOS, raw FCM v1 for Android) must present identical text, and the Android data-only path puts these
+ * exact strings in the FCM `data` map (`title`/`message`) for expo-notifications to rebuild from.
+ */
+export const EMAIL_APPROVAL_PUSH_TITLE = 'Approve email?';
+export const EMAIL_APPROVAL_PUSH_BODY = 'Stewra drafted an email for you to review and send.';

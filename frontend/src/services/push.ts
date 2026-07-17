@@ -8,7 +8,6 @@ import {
   EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
   EMAIL_APPROVAL_CATEGORY,
 } from '@stewra/shared-types';
-import type { PushPlatform } from '@stewra/shared-types';
 import { api } from './api';
 import { ensureNotificationPermission } from './notifications';
 
@@ -22,7 +21,30 @@ import { ensureNotificationPermission } from './notifications';
  * ⚠️ NOTHING HERE CAN SEND AN EMAIL. A notification is a prompt, not authority. Approving reaches the
  * authenticated `POST /messages/:id/confirm-email` carrying the device's stored JWT — the same endpoint
  * the in-app Send button uses. The push only ever carries a `messageId`.
+ *
+ * TOKEN TYPE DIFFERS BY PLATFORM. Android registers a RAW FCM device token
+ * (`getDevicePushTokenAsync`): the prompt is sent to Android as a raw FCM v1 DATA-ONLY message, because
+ * only a data-only message runs the notification receiver when the app is backgrounded — and that is
+ * what attaches the Approve/Deny buttons. Expo push always delivers notification-type on Android, which
+ * the OS auto-displays with NO buttons. iOS registers an Expo push token (`getExpoPushTokenAsync`), which
+ * Expo forwards to APNs with the actionable category.
  */
+
+/**
+ * Present approval pushes even while the app is FOREGROUNDED. expo-notifications suppresses foreground
+ * notifications unless a handler opts in, so without this a prompt arriving while the app is open would
+ * be dropped and the user would never see the Approve/Deny buttons. Background/quit delivery is handled
+ * natively and is unaffected. The approval prompt is the only push routed through expo-notifications
+ * (calls use expo-callkit-telecom), so showing every handled notification is correct here.
+ */
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 /**
  * The Android channel the approval prompt lands on. `PRIVATE` means a locked screen shows that a
@@ -109,11 +131,24 @@ export async function registerForApprovalPush(): Promise<boolean> {
   try {
     await registerEmailApprovalChannel();
     await registerEmailApprovalCategory();
+    if (Platform.OS === 'android') {
+      // The RAW FCM device token — what a data-only FCM v1 send addresses. `data` is the FCM
+      // registration token string on a native Android device (typed `any` in the union, hence the guard).
+      const devicePushToken = await Notifications.getDevicePushTokenAsync();
+      const fcmToken: unknown = devicePushToken.data;
+      if (typeof fcmToken !== 'string' || fcmToken.length === 0) {
+        // Loud, per the no-silent-fallback rule: without a token this device can't receive prompts.
+        console.warn('[push] getDevicePushTokenAsync returned no FCM token — cannot register Android.');
+        return false;
+      }
+      await api.registerPushToken({ platform: 'android', fcmToken });
+      return true;
+    }
+    // iOS: Expo → APNs delivers the actionable category. (Later, credentials-only add.)
     const { data: expoPushToken } = await Notifications.getExpoPushTokenAsync({
       projectId: requireProjectId(),
     });
-    const platform: PushPlatform = Platform.OS === 'ios' ? 'ios' : 'android';
-    await api.registerPushToken({ platform, expoPushToken });
+    await api.registerPushToken({ platform: 'ios', expoPushToken });
     return true;
   } catch (error) {
     console.error('[push] Failed to register for approval push', error);

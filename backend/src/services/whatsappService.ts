@@ -3,7 +3,7 @@ import type { ChannelIdentity, ChannelLinkChallenge } from '@stewra/shared-types
 import { channelIdentityRepository } from '../repositories/channelIdentityRepository.js';
 import { channelSender, WHATSAPP_CHANNEL } from './channelSenders/index.js';
 import { whatsappEmailApprovalService } from './whatsappEmailApprovalService.js';
-import { expoPushService } from './expoPushService.js';
+import { emailApprovalPushService } from './emailApprovalPushService.js';
 import { renderWhatsappEmailReply } from './whatsappEmailNotice.js';
 import { stewraTurnService, STEWRA_FAILURE_TEXT } from './stewraTurnService.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
@@ -184,8 +184,8 @@ class WhatsappService {
         // Push the actionable Approve/Deny prompt to the user's strong-identity device. Fire-and-forget
         // and best-effort: it never sends the email (approval still flows through confirm-email) and a
         // push failure must not derail the WhatsApp reply the user is waiting on.
-        void expoPushService
-          .sendEmailApprovalPrompt(userId, { messageId: reply.id })
+        void emailApprovalPushService
+          .send(userId, { messageId: reply.id })
           .catch((err: unknown) =>
             logger.warn('email-approval push failed', { err: String(err), userId }),
           );

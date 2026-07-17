@@ -232,6 +232,8 @@ export type {
 export type {
   EmailApprovalPushData,
   PushPlatform,
+  RegisterAndroidPushTokenRequest,
+  RegisterIosPushTokenRequest,
   RegisterPushTokenRequest,
   RegisterPushTokenResponse,
 } from './api/push';
@@ -240,6 +242,8 @@ export {
   EMAIL_APPROVAL_ACTION_DENY,
   EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
   EMAIL_APPROVAL_CATEGORY,
+  EMAIL_APPROVAL_PUSH_BODY,
+  EMAIL_APPROVAL_PUSH_TITLE,
 } from './api/push';
 
 // Realtime (Socket.IO) contract
