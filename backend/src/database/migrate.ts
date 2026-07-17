@@ -34,6 +34,7 @@ import * as m028 from './migrations/028_channel_identities.js';
 import * as m029 from './migrations/029_whatsapp_bridge.js';
 import * as m030 from './migrations/030_email_over_whatsapp_optin.js';
 import * as m031 from './migrations/031_push_tokens.js';
+import * as m032 from './migrations/032_push_tokens_add_fcm_token.js';
 import { logger } from '../utils/logger.js';
 
 interface Migration {
@@ -74,6 +75,7 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '029_whatsapp_bridge', up: m029.up },
   { name: '030_email_over_whatsapp_optin', up: m030.up },
   { name: '031_push_tokens', up: m031.up },
+  { name: '032_push_tokens_add_fcm_token', up: m032.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {
