@@ -13,6 +13,7 @@ import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import ResetPasswordScreen from '../screens/auth/ResetPasswordScreen';
 import MainTabs from './MainTabs';
 import ConversationScreen from '../screens/chat/ConversationScreen';
+import EmailApprovalScreen from '../screens/chat/EmailApprovalScreen';
 import CallScreen from '../screens/call/CallScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -76,6 +77,13 @@ export default function RootNavigator(): React.JSX.Element {
               name="Call"
               component={CallScreen}
               options={{ headerShown: false, presentation: 'fullScreenModal' }}
+            />
+            {/* Registered on the authenticated stack only — PushProvider holds an Approve tap until
+                there's a session, so a cold start from the notification lands here, not on Login. */}
+            <Stack.Screen
+              name="EmailApproval"
+              component={EmailApprovalScreen}
+              options={{ title: 'Approve email', presentation: 'modal' }}
             />
           </>
         )}

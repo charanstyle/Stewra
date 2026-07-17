@@ -33,6 +33,12 @@ export interface RootStackParamList {
   ResetPassword: { readonly email: string };
   MainTabs: undefined;
   Conversation: { readonly conversationId: string; readonly title: string };
+  /**
+   * The biometric gate for approving an email Stewra drafted, reached by tapping Approve on the
+   * approval notification. Carries only the message id — the draft is fetched over the authenticated
+   * session, never from the notification, so the OS never holds the email's contents.
+   */
+  EmailApproval: { readonly messageId: string };
   Call: {
     readonly conversationId: string;
     readonly callKind: CallKind;

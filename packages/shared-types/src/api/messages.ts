@@ -67,6 +67,18 @@ export interface ListReadReceiptsResponse {
 export type ConfirmEmailAction = 'send' | 'cancel';
 
 /**
+ * One message by id (GET /messages/:id), for a viewer who participates in its conversation.
+ *
+ * Exists for the approve-to-send flow: the approval notification carries only a `messageId` (never the
+ * email's contents, which must not sit in an OS notification), so the app fetches the draft over its
+ * authenticated session to show the user WHAT they are approving. Approving an email you cannot see is
+ * a blind signature, which would defeat the point of asking.
+ */
+export interface GetMessageResponse {
+  readonly message: Message;
+}
+
+/**
  * Confirm (or dismiss) the email Stewra proposed on an assistant message
  * (POST /messages/:id/confirm-email). The stored message's `proposedEmail.status` transitions to
  * `sent`/`failed` (on `send`) or `cancelled` (on `cancel`); the updated message is returned so the

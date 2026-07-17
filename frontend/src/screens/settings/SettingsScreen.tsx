@@ -7,6 +7,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../services/api';
 import { theme } from '../../theme/colors';
 import { TinyAvatar } from '../../components/chat/TinyAvatar';
+import { EmailOverWhatsappToggle } from '../../components/settings/EmailOverWhatsappToggle';
 
 /** Derive an upload filename + MIME from a picked asset, falling back to JPEG when the picker omits them. */
 function fileMetaFor(asset: ImagePicker.ImagePickerAsset): { fileName: string; mimeType: string } {
@@ -117,6 +118,9 @@ export default function SettingsScreen(): React.JSX.Element {
             />
           </View>
         </View>
+
+        {/* Renders nothing unless the server reports the capability available (kill-switch on). */}
+        <EmailOverWhatsappToggle />
       </ScrollView>
     </SafeAreaView>
   );

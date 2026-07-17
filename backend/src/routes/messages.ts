@@ -35,6 +35,13 @@ router.get('/:id/receipts', requireAuth, verified, (req, res) => {
   void messagesController.listReceipts(req, res);
 });
 
+// After '/:id/receipts' — Express matches in registration order, and a bare '/:id' registered first
+// would not shadow it (different segment counts), but keeping the specific route above the general one
+// is the convention that stays correct if either ever grows an optional segment.
+router.get('/:id', requireAuth, verified, (req, res) => {
+  void messagesController.get(req, res);
+});
+
 router.post('/:id/react', requireAuth, verified, (req, res) => {
   void messagesController.react(req, res);
 });

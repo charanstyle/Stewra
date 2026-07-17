@@ -22,6 +22,10 @@ import palette from './src/theme/palette.json';
 const config: ExpoConfig = {
   name: 'Stewra',
   slug: 'stewra',
+  // The EAS account that owns the project, its builds, and its push credentials.
+  // Not env-driven: this is a fixed identity (`@nurturinglab/stewra`), not a
+  // per-environment setting — moving it would invalidate the push credentials.
+  owner: 'nurturinglab',
   scheme: 'stewra',
   version: '0.1.0',
   orientation: 'portrait',
@@ -120,8 +124,15 @@ const config: ExpoConfig = {
   ],
   extra: {
     eas: {
-      // Set via `eas init` / EAS dashboard; not committed as a literal here
-      // per the project's no-hardcoding rule.
+      // The `@nurturinglab/stewra` EAS project id, created by `eas init`. Read from
+      // the environment rather than committed as a literal, per the no-hardcoding
+      // rule. EAS cannot write it back into a dynamic config, so it lives in
+      // frontend/.env (documented in .env.example) and is baked in at build time.
+      //
+      // Deliberately NOT defaulted or conditionally spread: if it is missing, push
+      // registration must fail loudly at the call site (see registerPushToken)
+      // rather than leave the app silently unable to receive approval pushes.
+      projectId: process.env['EAS_PROJECT_ID'],
     },
   },
 };

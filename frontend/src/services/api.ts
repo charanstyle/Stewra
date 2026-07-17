@@ -39,6 +39,7 @@ import type {
   ReactResponse,
   ConfirmEmailRequest,
   ConfirmEmailResponse,
+  GetMessageResponse,
   DeleteMessageResponse,
   SendVoiceMessageResponse,
   ListReadReceiptsResponse,
@@ -50,6 +51,11 @@ import type {
   RegisterCallPushTokenRequest,
   RegisterCallPushTokenResponse,
   ListCallHistoryResponse,
+  RegisterPushTokenRequest,
+  RegisterPushTokenResponse,
+  GetEmailOverWhatsappResponse,
+  SetEmailOverWhatsappRequest,
+  SetEmailOverWhatsappResponse,
 } from '@stewra/shared-types';
 import { File, Paths } from 'expo-file-system';
 import { config } from './config';
@@ -285,6 +291,9 @@ export const api = {
   reactToMessage: (messageId: string, body: ReactRequest): Promise<ReactResponse> =>
     request(`/messages/${messageId}/react`, { method: 'POST', body }),
 
+  /** One message by id. Used by the push approval screen, which only receives a messageId. */
+  getMessage: (messageId: string): Promise<GetMessageResponse> => request(`/messages/${messageId}`),
+
   /** Confirm (send) or dismiss (cancel) an email Stewra proposed on an assistant message. */
   confirmEmail: (messageId: string, body: ConfirmEmailRequest): Promise<ConfirmEmailResponse> =>
     request(`/messages/${messageId}/confirm-email`, { method: 'POST', body }),
@@ -330,4 +339,22 @@ export const api = {
     request('/calls/push-token', { method: 'PUT', body }),
 
   listCallHistory: (): Promise<ListCallHistoryResponse> => request('/calls/history'),
+
+  /**
+   * Register this device's EXPO push token — the actionable-notification path (approve-to-send email).
+   * Distinct from `registerCallPushToken`, which registers the native VoIP token for the call ring.
+   */
+  registerPushToken: (body: RegisterPushTokenRequest): Promise<RegisterPushTokenResponse> =>
+    request('/push/token', { method: 'PUT', body }),
+
+  /** Whether approve-to-send email over WhatsApp is available and whether this user has it on. */
+  getEmailOverWhatsapp: (): Promise<GetEmailOverWhatsappResponse> =>
+    request('/channels/whatsapp-email-approval'),
+
+  /**
+   * Turn approve-to-send on or off. Enabling requires the account password (re-verified server-side);
+   * disabling deliberately does not — removing a capability must never be harder than adding it.
+   */
+  setEmailOverWhatsapp: (body: SetEmailOverWhatsappRequest): Promise<SetEmailOverWhatsappResponse> =>
+    request('/channels/whatsapp-email-approval', { method: 'POST', body }),
 };

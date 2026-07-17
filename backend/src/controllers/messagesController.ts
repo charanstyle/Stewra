@@ -8,6 +8,7 @@ import {
   type ConfirmEmailAction,
   type ConfirmEmailResponse,
   type DeleteMessageResponse,
+  type GetMessageResponse,
   type ListMessagesResponse,
   type ListReadReceiptsResponse,
   type MessageReaction,
@@ -186,6 +187,19 @@ class MessagesController extends BaseController {
    * `send` runs the confirm-gated executor, `cancel` dismisses it. Returns the updated message and
    * fans it out to the conversation room so the confirmation card re-renders in its terminal state.
    */
+  /** GET /messages/:id — one message the viewer participates in (drives the push approval screen). */
+  async get(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = this.userId(req);
+      const { id } = parse(idParamsSchema, req.params);
+      const message = await messageService.getMessage(userId, id);
+      const body: GetMessageResponse = { message };
+      this.handleSuccess(res, body);
+    } catch (error) {
+      this.handleError(error, res, 'MessagesController.get');
+    }
+  }
+
   async confirmEmail(req: Request, res: Response): Promise<void> {
     try {
       const userId = this.userId(req);

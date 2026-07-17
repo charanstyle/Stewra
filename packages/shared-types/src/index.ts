@@ -190,6 +190,7 @@ export type {
   SendMessageResponse,
   ListMessagesRequest,
   ListMessagesResponse,
+  GetMessageResponse,
   ReactRequest,
   ReactResponse,
   DeleteMessageResponse,
@@ -229,9 +230,16 @@ export type {
   ListCallHistoryResponse,
 } from './api/calls';
 export type {
+  EmailApprovalPushData,
   PushPlatform,
   RegisterPushTokenRequest,
   RegisterPushTokenResponse,
+} from './api/push';
+export {
+  EMAIL_APPROVAL_ACTION_APPROVE,
+  EMAIL_APPROVAL_ACTION_DENY,
+  EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
+  EMAIL_APPROVAL_CATEGORY,
 } from './api/push';
 
 // Realtime (Socket.IO) contract

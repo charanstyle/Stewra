@@ -1,15 +1,10 @@
 import { Expo } from 'expo-server-sdk';
 import type { ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
+import { EMAIL_APPROVAL_ANDROID_CHANNEL_ID, EMAIL_APPROVAL_CATEGORY } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
 import { logger } from '../utils/logger.js';
 import { pushTokenRepository } from '../repositories/pushTokenRepository.js';
 import type { PushToken } from '../repositories/pushTokenRepository.js';
-
-/**
- * The category id the RN app registers its Approve/Deny actions under. Shared verbatim with the client's
- * `setNotificationCategoryAsync` call — if they drift the buttons silently vanish, so keep them equal.
- */
-export const EMAIL_APPROVAL_CATEGORY = 'email_approval';
 
 /** Expo caps a single push request at 100 messages; we page tokens the same way to keep ticket↔token order. */
 const CHUNK_SIZE = 100;
@@ -100,6 +95,10 @@ class ExpoPushService {
       body: 'Stewra drafted an email for you to review and send.',
       data: { type: EMAIL_APPROVAL_CATEGORY, messageId: payload.messageId },
       categoryId: EMAIL_APPROVAL_CATEGORY,
+      // Android only; ignored on iOS. The app creates this channel with PRIVATE lock-screen
+      // visibility — without naming it here the push lands on the default channel, which shows its
+      // text on a locked screen.
+      channelId: EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
       priority: 'high',
     };
   }

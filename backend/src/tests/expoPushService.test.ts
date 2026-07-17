@@ -1,4 +1,5 @@
-import { EMAIL_APPROVAL_CATEGORY, expoPushService } from '../services/expoPushService.js';
+import { EMAIL_APPROVAL_CATEGORY } from '@stewra/shared-types';
+import { expoPushService } from '../services/expoPushService.js';
 
 /**
  * Fail-safe contract for the Expo push sender. NO mocks: this runs the real service against the real
@@ -21,8 +22,11 @@ describe('expoPushService — fail-safe when unconfigured', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('pins the Approve/Deny category id shared verbatim with the RN client', () => {
-    // If this drifts from the app's setNotificationCategoryAsync id, the action buttons silently vanish.
+  it('pins the Approve/Deny category id the sender and the RN client share', () => {
+    // The id now lives in @stewra/shared-types, so both sides import the same constant and CANNOT drift.
+    // This pins its literal value instead: the id is baked into notification categories already
+    // registered on real devices, so changing it silently strips the action buttons from any
+    // notification sent to an app build that registered the old one.
     expect(EMAIL_APPROVAL_CATEGORY).toBe('email_approval');
   });
 });

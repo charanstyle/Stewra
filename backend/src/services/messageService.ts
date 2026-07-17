@@ -212,6 +212,20 @@ class MessageService {
    * state; on `cancel` it marks it `cancelled`. Returns the updated message so the caller can respond
    * and fan it out over the socket.
    */
+  /**
+   * One message, for a viewer who participates in its conversation.
+   *
+   * The same two checks `confirmEmailAction` makes, in the same order: the row must be visible to this
+   * viewer AND they must participate in the conversation. Reading is narrower than confirming, so this
+   * grants nothing new — it exists so the approval screen can show the draft it is about to send.
+   */
+  async getMessage(userId: string, messageId: string): Promise<Message> {
+    const message = await messageRepository.findById(messageId, userId);
+    if (message === undefined) throw new NotFoundError('Message not found');
+    await conversationService.assertParticipant(userId, message.conversationId);
+    return message;
+  }
+
   async confirmEmailAction(
     userId: string,
     messageId: string,
