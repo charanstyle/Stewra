@@ -11,6 +11,31 @@ const MAX_OUTPUT_TOKENS = 1024;
 /** A structured briefing (summary + sections + several nudges) needs a larger budget than an insight. */
 const MAX_STRUCTURED_TOKENS = 4096;
 
+/**
+ * Flatten turns into the single prompt string the `claude -p` CLI accepts on stdin.
+ *
+ * The CLI has no multi-turn input, so a conversation has to be rendered as text. Roles are rendered
+ * EXPLICITLY: without labels the model receives its own past replies and the user's messages as one
+ * undifferentiated blob and cannot tell who said what — so a past assistant line reads as if the user
+ * had asserted it. That is not hypothetical; it made Stewra read its own stale "I can't send emails"
+ * replies as the user's own words and parrot them back while a live draft was attached.
+ *
+ * A lone user turn is passed through VERBATIM: the single-shot callers (`produceInsight`,
+ * `draftService`, `briefingService`, `emailComposeService`) hand-build a complete prompt and there is
+ * no ambiguity about who is speaking, so labelling there would only corrupt their formatting.
+ */
+export function renderCliPrompt(
+  turns: ReadonlyArray<{ role: 'user' | 'assistant'; content: string }>,
+): string {
+  const [only] = turns;
+  if (turns.length === 1 && only !== undefined && only.role === 'user') {
+    return only.content;
+  }
+  return turns
+    .map((t) => `${t.role === 'assistant' ? 'Assistant' : 'User'}: ${t.content}`)
+    .join('\n\n');
+}
+
 /** Split a message list into the Anthropic-style (system text, user/assistant turns). */
 function splitMessages(messages: ReadonlyArray<ModelMessage>): {
   system: string;
@@ -44,7 +69,7 @@ export class ClaudeCliModelClient implements IModelClient {
 
   async complete(messages: ReadonlyArray<ModelMessage>): Promise<string> {
     const { system, turns } = splitMessages(messages);
-    const prompt = turns.map((t) => t.content).join('\n\n');
+    const prompt = renderCliPrompt(turns);
 
     const args = ['-p', '--output-format', 'text'];
     if (this.modelId.length > 0) {
