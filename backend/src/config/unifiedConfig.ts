@@ -213,9 +213,10 @@ const EnvSchema = z.object({
   APNS_KEY_P8: z.string().min(1).optional(),
   FCM_SERVICE_ACCOUNT_JSON: z.string().min(1).optional(),
   // Expo push access token — authorizes THIS backend to send through Expo's push service under Expo's
-  // "Enhanced Security" (which rejects unauthenticated sends). OPTIONAL here; REQUIRED (checked
-  // post-parse) only when WHATSAPP_EMAIL_APPROVAL_ENABLED is true, since the approve-to-send actionable
-  // notification is delivered over Expo push. Distinct from the call-ring FCM/APNs creds above.
+  // "Enhanced Security" (which rejects unauthenticated sends). Backs only the DEFERRED iOS approve-to-send
+  // path (iOS → Expo → APNs); Android delivers the same prompt over raw FCM instead. OPTIONAL, and NOT
+  // part of the WHATSAPP_EMAIL_APPROVAL_ENABLED required-when-on set until iOS ships. Distinct from the
+  // call-ring FCM/APNs creds above.
   EXPO_ACCESS_TOKEN: z.string().min(1).optional(),
   // Master switch for talk-to-Stewra voice (STT/TTS). When false, /messages/voice returns 503 so a dev
   // box without whisper.cpp/Piper isn't blocked. The WHISPER_*/PIPER_*/UPLOADS_* knobs are required
@@ -388,13 +389,17 @@ if (env.WHATSAPP_PERSONAL_ENABLED) {
   }
 }
 
-// Fail loud when approve-to-send email over WhatsApp is enabled but its Expo push credential is missing.
-// The actionable Approve/Deny prompt is delivered via Expo push; without the access token the prompt
-// would silently never reach the user's device, leaving the feature advertised but inert — worse than
-// refusing to boot. (Phase 1's web approve card still works without push, but enabling the switch now
-// means the full approve-to-send experience, so we require the credential unconditionally when on.)
+// Fail loud when approve-to-send email over WhatsApp is enabled but its push credential is missing.
+// Android — the only shipped push surface — delivers the actionable Approve/Deny prompt via raw FCM v1
+// DATA-ONLY (`fcmPushService`); a data-only message is what runs expo-notifications' receiver in the
+// background and attaches the buttons (see emailApprovalPushService). So FCM_SERVICE_ACCOUNT_JSON is the
+// load-bearing credential: without it the prompt silently never reaches the device, leaving the feature
+// advertised but inert — worse than refusing to boot. EXPO_ACCESS_TOKEN is NOT required here because it
+// backs only the deferred iOS path; add it to this set when iOS ships. (Phase 1's web approve card still
+// works without push, but enabling the switch means the full approve-to-send experience, so we require
+// the Android transport unconditionally when on.)
 if (env.WHATSAPP_EMAIL_APPROVAL_ENABLED) {
-  const missing = (['EXPO_ACCESS_TOKEN'] as const).filter((k) => !env[k]);
+  const missing = (['FCM_SERVICE_ACCOUNT_JSON'] as const).filter((k) => !env[k]);
   if (missing.length > 0) {
     throw new Error(`WHATSAPP_EMAIL_APPROVAL_ENABLED=true requires: ${missing.join(', ')}`);
   }
