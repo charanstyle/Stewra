@@ -30,3 +30,6 @@ coverage/
 # Expo local cache + per-machine dev-client device registry.
 .expo/
 **/.expo/
+# `eas build --local` writes its finished artifact here as build-<epoch>.apk (~120 MB).
+/frontend/build-*.apk
+/frontend/build-*.aab
