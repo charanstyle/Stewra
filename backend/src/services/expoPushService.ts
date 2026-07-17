@@ -15,6 +15,45 @@ export interface EmailApprovalPush {
 }
 
 /**
+ * Shape the actionable Approve/Deny notification for one device. Pure (no config, no DB) so the
+ * action-button contract can be tested directly.
+ *
+ * `categoryId` is carried in TWO places on purpose:
+ *   - the top-level `categoryId` field (iOS reads it from the APNs payload), and
+ *   - inside `data` as `data.categoryId`, which is where expo-notifications' ANDROID receiver looks
+ *     (`NotificationData.categoryId = data["categoryId"]`).
+ * Expo's push service maps `channelId` and the top-level `categoryId` through DIFFERENT code paths, so
+ * the fact that the notification lands on the right Android channel does NOT prove the top-level
+ * `categoryId` reached the FCM data map. When it doesn't, Android resolves a null category and — by
+ * `categoryId?.let { addActions }` — drops the Approve/Deny buttons SILENTLY, with no logcat error.
+ * Putting the id in `data` ourselves makes the Android lookup succeed regardless. This is what fixes
+ * the "no action buttons on the approval notification" bug.
+ */
+export function buildEmailApprovalMessage(
+  token: PushToken,
+  payload: EmailApprovalPush,
+): ExpoPushMessage {
+  return {
+    to: token.expoToken,
+    sound: 'default',
+    title: 'Approve email?',
+    body: 'Stewra drafted an email for you to review and send.',
+    data: {
+      type: EMAIL_APPROVAL_CATEGORY,
+      messageId: payload.messageId,
+      // The key expo-notifications' Android receiver reads the category from — see the note above.
+      categoryId: EMAIL_APPROVAL_CATEGORY,
+    },
+    categoryId: EMAIL_APPROVAL_CATEGORY,
+    // Android only; ignored on iOS. The app creates this channel with PRIVATE lock-screen
+    // visibility — without naming it here the push lands on the default channel, which shows its
+    // text on a locked screen.
+    channelId: EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
+    priority: 'high',
+  };
+}
+
+/**
  * Sends the general actionable notifications (Expo push) — currently the approve-to-send email prompt.
  * SEPARATE from `fcmPushService` (the call-ring path): this addresses Expo push tokens through Expo's
  * push service, not raw FCM VoIP tokens.
@@ -66,7 +105,7 @@ class ExpoPushService {
     }
 
     for (const group of this.paginate(tokens)) {
-      const messages = group.map((token) => this.buildMessage(token, payload));
+      const messages = group.map((token) => buildEmailApprovalMessage(token, payload));
       let tickets: ExpoPushTicket[];
       try {
         tickets = await expo.sendPushNotificationsAsync(messages);
@@ -84,23 +123,6 @@ class ExpoPushService {
     return Array.from({ length: batchCount }, (_unused, k) =>
       tokens.slice(k * CHUNK_SIZE, k * CHUNK_SIZE + CHUNK_SIZE),
     );
-  }
-
-  /** The one place the notification is shaped — generic body only, id in `data` for the app to resolve. */
-  private buildMessage(token: PushToken, payload: EmailApprovalPush): ExpoPushMessage {
-    return {
-      to: token.expoToken,
-      sound: 'default',
-      title: 'Approve email?',
-      body: 'Stewra drafted an email for you to review and send.',
-      data: { type: EMAIL_APPROVAL_CATEGORY, messageId: payload.messageId },
-      categoryId: EMAIL_APPROVAL_CATEGORY,
-      // Android only; ignored on iOS. The app creates this channel with PRIVATE lock-screen
-      // visibility — without naming it here the push lands on the default channel, which shows its
-      // text on a locked screen.
-      channelId: EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
-      priority: 'high',
-    };
   }
 
   /** Drop any token Expo's ticket flags as `DeviceNotRegistered` (order matches the sent batch). */
