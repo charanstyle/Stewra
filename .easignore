@@ -1,0 +1,33 @@
+# EAS build ignore list. Mirrors .gitignore EXACTLY, with ONE deliberate difference: the
+# `google-services.json` lines are omitted so `frontend/google-services.json` is INCLUDED in the
+# `eas build --local` tarball. app.config.ts's `googleServicesFile` (from GOOGLE_SERVICES_JSON) then
+# has a file to copy during prebuild, so the google-services Gradle plugin injects the Firebase
+# resources — without them the app crashes on launch ("Default FirebaseApp is not initialized") and
+# `getDevicePushTokenAsync()` throws, leaving the approval-push FCM token unregistered.
+# google-services.json is a per-app CLIENT config that already ships inside every APK; it is not a
+# private secret, and git still ignores it so it is never committed.
+node_modules/
+dist/
+*.log
+.env
+.env.*
+!.env.example
+stewra.env
+.mailcredentials
+**/.mailcredentials
+.DS_Store
+coverage/
+.next/
+*.tsbuildinfo
+
+.claude/hooks/.session-skills/
+.apptest
+.claude/tsc-cache/
+
+/frontend/android/
+/frontend/ios/
+.expo/
+**/.expo/
+/frontend/build-*.apk
+/frontend/build-*.aab
+/frontend/build/

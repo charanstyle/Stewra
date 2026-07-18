@@ -33,3 +33,5 @@ coverage/
 # `eas build --local` writes its finished artifact here as build-<epoch>.apk (~120 MB).
 /frontend/build-*.apk
 /frontend/build-*.aab
+# ...and the preview/output dir (e.g. build/stewra-preview.apk) — keep it out of git too.
+/frontend/build/
