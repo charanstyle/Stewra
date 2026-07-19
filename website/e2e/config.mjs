@@ -66,6 +66,10 @@ export const config = {
   apiUrl: (env.E2E_API_URL || `${webUrl}/api`).replace(/\/$/, ''),
   // Optional 16 kHz mono WAV fed to WebRTC as fake mic input so speech-to-text produces a real transcript.
   audioFile: env.E2E_AUDIO_FILE || '',
+  // OPTIONAL direct DB connection, used ONLY to provision the destructive-but-reversible lifecycle
+  // tests (today nudge actions, memory delete) — see seed.mjs. Empty by default: without it those
+  // tests skip rather than run, so the minimal "just emails+passwords" contract still holds.
+  databaseUrl: env.E2E_DATABASE_URL || '',
   // Mobile-only, surfaced here so both suites read one file. Optional for the web suite.
   contactName: env.E2E_CONTACT_NAME || '',
   users: {

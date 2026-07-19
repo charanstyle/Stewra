@@ -18,11 +18,18 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures';
 import { WEB, apiCall } from '../lib.mjs';
+import { config } from '../config.mjs';
+import { dbEnabled, openNeedsReplyNudges, restoreNudges } from '../seed.mjs';
 
 interface SuggestionLike {
   readonly id: string;
   readonly title: string;
 }
+
+// When E2E_DATABASE_URL is set, surface a handful of A's already-triaged needs_reply nudges as
+// `open` so the action tests (expand/draft/snooze/dismiss/chat) actually run, then restore their
+// exact prior status in afterAll (see seed.mjs). Without it, these tests skip on a quiet inbox.
+let nudgeSnapshot: Array<{ id: string; status: string; snoozedUntil: Date | null }> = [];
 
 async function openSuggestions(): Promise<SuggestionLike[]> {
   const res = await apiCall('/home/suggestions');
@@ -35,6 +42,18 @@ function nudgeHeader(page: Page, title: string) {
 }
 
 test.describe('today', () => {
+  test.beforeAll(async () => {
+    if (dbEnabled) {
+      // 4 covers the two consuming actions (snooze, dismiss) plus expand/draft/chat headroom.
+      nudgeSnapshot = await openNeedsReplyNudges(config.users.a.email, 4);
+    }
+  });
+
+  test.afterAll(async () => {
+    await restoreNudges(nudgeSnapshot);
+    nudgeSnapshot = [];
+  });
+
   test('Root redirects to /today (post-login landing)', async ({ pageA }) => {
     await pageA.goto(WEB, { waitUntil: 'networkidle' });
     await pageA.waitForURL(/\/today$/, { timeout: 15000 });

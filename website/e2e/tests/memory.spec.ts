@@ -1,8 +1,31 @@
 // Ported from the legacy full.mjs section "8. MEMORY features".
-import { test } from '../fixtures';
+//
+// User A has no learned memories of its own (nothing has been fed back), so the edit/hide/delete
+// UI only exists to drive when the suite provisions one. When E2E_DATABASE_URL is set, beforeAll
+// seeds a single clearly-labelled throwaway memory (seed.mjs) that these tests exercise and the
+// delete test removes; afterAll sweeps any leftover. Without it, the seed is skipped and the
+// original resilient "act only if a card is present" behaviour still holds.
+import { test, expect } from '../fixtures';
 import { WEB } from '../lib.mjs';
+import { config } from '../config.mjs';
+import {
+  dbEnabled,
+  seedThrowawayMemory,
+  cleanupThrowawayMemories,
+  THROWAWAY_MEMORY_LABEL,
+} from '../seed.mjs';
 
 test.describe('memory', () => {
+  test.beforeAll(async () => {
+    if (dbEnabled) {
+      await seedThrowawayMemory(config.users.a.email);
+    }
+  });
+
+  test.afterAll(async () => {
+    await cleanupThrowawayMemories(config.users.a.email);
+  });
+
   test('memory page renders + search + source filter', async ({ pageA }) => {
     await pageA.goto(`${WEB}/memory`, { waitUntil: 'domcontentloaded' });
     await pageA.getByRole('heading', { name: /What Stewra has learned/i }).waitFor({ timeout: 12000 });
@@ -68,13 +91,25 @@ test.describe('memory', () => {
     }
   });
 
-  // Original: skip('memory', 'Delete memory / Delete rule / Dismiss rule', 'irreversibly
-  // destroys real learned data on a live account — buttons present & located, deliberately not
-  // clicked').
-  // NB: must be a NAMED skipped test (test.skip('title', fn)). A bare `test.skip(true, desc)` in
-  // the describe body is a GROUP modifier — it skips every test in this describe block.
-  test.skip('Delete memory / Delete rule / Dismiss rule', () => {
-    // irreversibly destroys real learned data on a live account — buttons present & located,
-    // deliberately not clicked.
+  // Original: skip('memory', 'Delete memory / Delete rule / Dismiss rule', 'irreversibly destroys
+  // real learned data on a live account'). Now RUN against the seeded throwaway memory: real learned
+  // memories are never touched — the delete targets the card by its distinctive throwaway label.
+  test('Delete memory removes the card (throwaway, real data untouched)', async ({ pageA }) => {
+    test.skip(!dbEnabled, 'requires E2E_DATABASE_URL to seed a throwaway memory (see seed.mjs)');
+    await pageA.goto(`${WEB}/memory`, { waitUntil: 'domcontentloaded' });
+    await pageA.getByRole('heading', { name: /What Stewra has learned/i }).waitFor({ timeout: 12000 });
+
+    const heading = pageA.getByRole('heading', { name: THROWAWAY_MEMORY_LABEL });
+    await heading.waitFor({ timeout: 12000 });
+    // The Delete button lives in the same card as the throwaway label.
+    const card = heading.locator('xpath=ancestor::div[contains(@class,"card")][1]');
+    await card.getByRole('button', { name: 'Delete' }).click();
+
+    await heading.waitFor({ state: 'detached', timeout: 15000 });
+    // Persisted server-side: it must not reappear after a reload.
+    await pageA.reload({ waitUntil: 'domcontentloaded' });
+    await pageA.getByRole('heading', { name: /What Stewra has learned/i }).waitFor({ timeout: 12000 });
+    const stillGone = (await pageA.getByRole('heading', { name: THROWAWAY_MEMORY_LABEL }).count()) === 0;
+    expect(stillGone, 'deleted throwaway memory reappeared after reload').toBe(true);
   });
 });
