@@ -37,14 +37,10 @@ test.describe('call', () => {
     pageB,
     convId,
   }) => {
-    // Known mobile-web layout bug: at phone width the call `.stage` overlaps the `.controls`,
-    // so the Mute/Hang-up buttons can't be clicked (the call itself DOES connect). Two-party
-    // calls are covered on desktop-chromium here and by the RN Maestro suite on mobile, so we
-    // skip the control-driven call flow on the mobile-web project rather than mask the bug.
-    test.skip(
-      test.info().project.name === 'mobile-chromium',
-      'mobile-web call controls overlapped by the video stage (responsive bug) — calls covered on desktop-web + RN Maestro',
-    );
+    // Runs on both desktop- and mobile-chromium: verified live that the call `.controls`
+    // (Mute / Hang-up) are fully clickable at phone width — the earlier "stage overlaps controls"
+    // skip was a misdiagnosis of a transient WebRTC handshake collision (see the file-top caveat
+    // about signed-in devices), not a layout bug.
     await placeCall(pageA, pageB, convId, 'audio', /Incoming audio call/i);
     await pageB.getByRole('button', { name: 'Answer' }).click();
     await pageA.getByText('Connected', { exact: true }).waitFor({ timeout: 20000 });
@@ -92,11 +88,8 @@ test.describe('call', () => {
     pageB,
     convId,
   }) => {
-    // See the AUDIO test above: mobile-web call controls are overlapped by the video stage.
-    test.skip(
-      test.info().project.name === 'mobile-chromium',
-      'mobile-web call controls overlapped by the video stage (responsive bug) — calls covered on desktop-web + RN Maestro',
-    );
+    // See the AUDIO test above: mobile-web call controls are clickable at phone width; this runs
+    // on both projects.
     await placeCall(pageA, pageB, convId, 'video', /Incoming video call/i);
     await pageB.getByRole('button', { name: 'Answer' }).click();
     await pageA.getByText('Connected', { exact: true }).waitFor({ timeout: 20000 });
