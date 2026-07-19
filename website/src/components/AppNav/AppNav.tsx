@@ -12,7 +12,7 @@ export function AppNav(): React.JSX.Element {
     clsx(styles.link, isActive && styles.active);
 
   return (
-    <header className={styles.nav}>
+    <header className={styles.nav} data-testid="app-nav">
       <div className={styles.left}>
         <span className={styles.brand}>Stewra</span>
         <nav className={styles.links}>

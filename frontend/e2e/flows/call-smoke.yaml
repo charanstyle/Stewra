@@ -9,7 +9,9 @@ env:
   CONTACT_NAME: ""
 ---
 - assertVisible: "Chats"
-- tapOn: "Chats"
+- tapOn:
+    id: "tab-chats"
+# Chat list rows are dynamic/user-generated content, so they stay text-selected.
 - runFlow:
     when:
       true: ${CONTACT_NAME != ""}
@@ -20,11 +22,11 @@ env:
           index: 0
           text: ".*"
 - tapOn:
-    accessibilityLabel: "Start voice call"
+    id: "call-start-voice"
 # The call screen should come up with a Hang up / End control; end it right away
 # so the flow leaves no dangling ringing call.
 - assertVisible:
-    accessibilityLabel: "End call"
+    id: "call-end"
     timeout: 15000
 - tapOn:
-    accessibilityLabel: "End call"
+    id: "call-end"

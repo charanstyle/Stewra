@@ -25,6 +25,7 @@ export default function PasswordInput(props: Props): React.JSX.Element {
         placeholderTextColor={placeholderTextColor ?? theme.colors.textSecondary}
       />
       <Pressable
+        testID="password-visibility-toggle"
         accessibilityRole="button"
         accessibilityLabel={visible ? 'Hide password' : 'Show password'}
         hitSlop={8}

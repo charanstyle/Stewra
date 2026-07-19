@@ -15,7 +15,10 @@ function describeError(err: unknown): string {
 function Turn({ message }: { message: Message }): React.JSX.Element {
   const fromStewra = message.senderKind === 'assistant';
   return (
-    <div className={fromStewra ? styles.stewraTurn : styles.userTurn}>
+    <div
+      className={fromStewra ? styles.stewraTurn : styles.userTurn}
+      data-testid={fromStewra ? 'stewra-turn' : 'stewra-user-turn'}
+    >
       <div className={styles.turnLabel}>{fromStewra ? 'Stewra' : 'You'}</div>
       <div className={styles.turnText}>{message.content ?? message.transcript ?? ''}</div>
       {message.audioUrl && (

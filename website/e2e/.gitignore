@@ -1,12 +1,8 @@
-# Never commit real tokens — this holds live production credentials for local runs.
+# Legacy local creds file (superseded by the repo-root .env.e2e) — never commit if present.
 e2e.config.json
 
-# Test tooling + artifacts
+# Test tooling + Playwright artifacts
 node_modules/
-artifacts/
-report/
+.artifacts/
+shots/
 *.png
-full-report.md
-full-report.json
-today-report.md
-today-report.json

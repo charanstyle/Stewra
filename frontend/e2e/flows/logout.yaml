@@ -5,9 +5,10 @@
 appId: com.stewra.app
 ---
 - assertVisible: "Chats"
-- tapOn: "Chats"
 - tapOn:
-    accessibilityLabel: "Log out"
+    id: "tab-chats"
+- tapOn:
+    id: "logout-btn"
 - assertVisible:
     text: "Sign in"
     timeout: 15000

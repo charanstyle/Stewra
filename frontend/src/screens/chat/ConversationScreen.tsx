@@ -522,6 +522,7 @@ export default function ConversationScreen({ route, navigation }: Props): React.
             )}
             <View style={styles.headerActions}>
               <Pressable
+                testID="call-start-voice"
                 accessibilityRole="button"
                 accessibilityLabel="Start voice call"
                 onPress={() => void handleCall('audio')}
@@ -530,6 +531,7 @@ export default function ConversationScreen({ route, navigation }: Props): React.
                 <PhoneIcon size={16} color={theme.colors.textPrimary} />
               </Pressable>
               <Pressable
+                testID="call-start-video"
                 accessibilityRole="button"
                 accessibilityLabel="Start video call"
                 onPress={() => void handleCall('video')}
@@ -565,6 +567,7 @@ export default function ConversationScreen({ route, navigation }: Props): React.
         {voiceError ? <Text style={styles.voiceError}>{voiceError}</Text> : null}
         <View style={styles.composer}>
           <TextInput
+            testID="conversation-input"
             style={styles.composerInput}
             placeholder="Message"
             placeholderTextColor={theme.colors.textSecondary}
@@ -574,6 +577,7 @@ export default function ConversationScreen({ route, navigation }: Props): React.
           />
           {draft.trim().length > 0 ? (
             <Pressable
+              testID="conversation-send"
               accessibilityRole="button"
               onPress={() => void handleSend()}
               style={({ pressed }) => [styles.sendButton, pressed && styles.pressed]}
@@ -582,6 +586,7 @@ export default function ConversationScreen({ route, navigation }: Props): React.
             </Pressable>
           ) : (
             <Pressable
+              testID="composer-record"
               accessibilityRole="button"
               accessibilityLabel="Hold to record a voice message"
               disabled={voiceState === 'uploading'}

@@ -11,11 +11,14 @@ env:
 - launchApp:
     clearState: true          # start from a signed-out state every run
 - assertVisible: "Sign in"
-- tapOn: "Email"
+- tapOn:
+    id: "login-email-input"
 - inputText: ${EMAIL}
-- tapOn: "Password"
+- tapOn:
+    id: "login-password-input"
 - inputText: ${PASSWORD}
-- tapOn: "Sign in"
+- tapOn:
+    id: "login-submit"
 # Landing on the Chats tab proves the token was issued and the user is verified.
 - assertVisible:
     text: "Chats"

@@ -61,7 +61,7 @@ export default function ChatsPage(): React.JSX.Element {
               >
                 <div className={styles.avatar}>
                   {titleFor(summary).charAt(0).toUpperCase()}
-                  {online && <span className={styles.onlineDot} />}
+                  {online && <span className={styles.onlineDot} data-testid="presence-dot" />}
                 </div>
                 <div className={styles.rowBody}>
                   <div className={styles.rowTop}>
@@ -80,7 +80,9 @@ export default function ChatsPage(): React.JSX.Element {
                       {summary.lastMessage?.preview ?? 'No messages yet'}
                     </span>
                     {summary.unreadCount > 0 && (
-                      <span className={styles.unread}>{summary.unreadCount}</span>
+                      <span className={styles.unread} data-testid="unread-badge">
+                        {summary.unreadCount}
+                      </span>
                     )}
                   </div>
                 </div>

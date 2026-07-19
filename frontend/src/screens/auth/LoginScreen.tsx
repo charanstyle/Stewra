@@ -49,6 +49,7 @@ export default function LoginScreen({ navigation }: Props): React.JSX.Element {
           <Text style={styles.subtitle}>Sign in to continue</Text>
 
           <TextInput
+            testID="login-email-input"
             style={styles.input}
             placeholder="Email"
             placeholderTextColor={theme.colors.textSecondary}
@@ -59,6 +60,7 @@ export default function LoginScreen({ navigation }: Props): React.JSX.Element {
             onChangeText={setEmail}
           />
           <PasswordInput
+            testID="login-password-input"
             placeholder="Password"
             autoComplete="password"
             value={password}
@@ -68,6 +70,7 @@ export default function LoginScreen({ navigation }: Props): React.JSX.Element {
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <Pressable
+            testID="login-submit"
             accessibilityRole="button"
             disabled={submitting || !email || !password}
             onPress={() => void handleSubmit()}

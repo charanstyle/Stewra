@@ -9,42 +9,61 @@ This is the mobile counterpart to [`website/e2e/`](../../website/e2e/). The webs
 suite drives two browser sessions at once (good for two-party calls); Maestro drives
 one device, so the call flow here is a **caller-side smoke test** only.
 
+Element selectors are **registered `testID`s**, not visible text or
+`accessibilityLabel` — see [`TESTIDS.md`](./TESTIDS.md) for the full contract between
+the app and this suite. `assertVisible` still checks human-readable screen text (e.g.
+"Chats", "Sign in", the echoed message body) for transition assertions, since those
+prove real navigation and real data round-tripping.
+
 ## Prerequisites
 
 - **Maestro CLI** — `curl -Ls "https://get.maestro.mobile.dev" | bash`
 - **A build of the app installed** on the target (`com.stewra.app`) — e.g.
   `npx expo run:android`, or a dev/release APK installed on a real phone.
-- **adb** on PATH (Android platform-tools) for `scripts/reset-devices.sh`.
-- One attached device or emulator: `adb devices -l` should list it.
+- **adb** on PATH (Android platform-tools), or **Xcode command line tools** (`xcrun`)
+  for iOS simulators.
+- One attached device or emulator/simulator: `adb devices -l` (android) or
+  `xcrun simctl list devices booted` (ios) should list it.
 
 ## Credentials (never hardcoded)
 
-Flows take credentials via Maestro `--env`; nothing is baked in. Copy the example
-and fill it with an **email-verified** test user:
+This suite shares **one** untracked secrets file at the **repo root** with the
+Playwright web suite — `../../.env.e2e` (there is no separate `frontend/e2e` copy):
 
 ```bash
-cp e2e.env.example e2e.env      # e2e.env is gitignored
-# edit e2e.env
-set -a; source e2e.env; set +a
+cp ../../.env.e2e.example ../../.env.e2e     # .env.e2e is gitignored at the repo root
+# edit ../../.env.e2e — fill E2E_USER_A_EMAIL / E2E_USER_A_PASSWORD / E2E_CONTACT_NAME
 ```
+
+The run wrappers below source it automatically (`set -a; source ../../.env.e2e; set +a`)
+and fail loudly if the file is missing or required keys are blank — nothing falls
+back to a hardcoded default.
 
 ## Run
 
 ```bash
-# Full journey: login → send message → voice-call smoke → logout
-maestro test \
-  --env EMAIL="$EMAIL" --env PASSWORD="$PASSWORD" \
-  --env CONTACT_NAME="$CONTACT_NAME" \
-  flows/full.yaml
+# Every flow in flows/, in sequence, with a PASS/FAIL summary:
+./run-all-features.sh android
+./run-all-features.sh ios
+./run-all-features.sh android <device-serial>   # pin an explicit device
 
-# Or a single step:
-maestro test --env EMAIL="$EMAIL" --env PASSWORD="$PASSWORD" flows/login.yaml
-maestro test --env CONTACT_NAME="$CONTACT_NAME" flows/send-message.yaml
-maestro test flows/logout.yaml
+# A single flow:
+./run-features.sh flows/login.yaml android
+./run-features.sh flows/send-message.yaml android
+./run-features.sh flows/call-smoke.yaml android
+./run-features.sh flows/logout.yaml android
+./run-features.sh flows/full.yaml android        # login → send → call smoke → logout
 ```
 
-`CONTACT_NAME` picks which thread to open; leave it blank to use the first
-conversation in the list.
+Both wrappers **pin the device explicitly** before invoking Maestro — a documented
+gotcha is that a bare `maestro test` picks a device non-deterministically when a
+simulator/emulator is also booted alongside a physical device. For android they
+resolve the single attached device via `adb devices`; for ios, the single booted
+simulator via `xcrun simctl list devices booted`. Pass a UDID/serial as the last
+argument to skip auto-resolution (required when more than one device is present).
+
+`E2E_CONTACT_NAME` (from `.env.e2e`) picks which thread to open; leave it blank to
+use the first conversation in the list.
 
 ## Flows
 

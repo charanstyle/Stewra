@@ -30,6 +30,7 @@ export default function LogoutButton(): React.JSX.Element {
 
   return (
     <Pressable
+      testID="logout-btn"
       onPress={() => void onPress()}
       disabled={busy}
       accessibilityRole="button"

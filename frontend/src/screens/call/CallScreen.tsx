@@ -97,6 +97,7 @@ export default function CallScreen({ route, navigation }: Props): React.JSX.Elem
 
       <View style={styles.controls}>
         <Pressable
+          testID="call-mute"
           accessibilityRole="button"
           accessibilityLabel={audioEnabled ? 'Mute microphone' : 'Unmute microphone'}
           onPress={toggleAudio}
@@ -112,6 +113,7 @@ export default function CallScreen({ route, navigation }: Props): React.JSX.Elem
 
         {callKind === 'video' ? (
           <Pressable
+            testID="call-stop-video"
             accessibilityRole="button"
             accessibilityLabel={videoEnabled ? 'Stop video' : 'Start video'}
             onPress={toggleVideo}
@@ -131,6 +133,7 @@ export default function CallScreen({ route, navigation }: Props): React.JSX.Elem
         ) : null}
 
         <Pressable
+          testID="call-speaker"
           accessibilityRole="button"
           accessibilityLabel={speakerOn ? 'Turn speaker off' : 'Turn speaker on'}
           onPress={toggleSpeaker}
@@ -145,6 +148,7 @@ export default function CallScreen({ route, navigation }: Props): React.JSX.Elem
         </Pressable>
 
         <Pressable
+          testID="call-end"
           accessibilityRole="button"
           accessibilityLabel="End call"
           onPress={handleHangup}

@@ -43,6 +43,7 @@ export default function MainTabs(): React.JSX.Element {
         component={ChatListScreen}
         options={{
           title: 'Chats',
+          tabBarButtonTestID: 'tab-chats',
           tabBarIcon: ({ color, size }: TabBarIconArgs) => <ChatIcon color={color} size={size} />,
         }}
       />

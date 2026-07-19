@@ -9,8 +9,11 @@ env:
   MESSAGE_TEXT: "E2E hello from Maestro"
 ---
 - assertVisible: "Chats"
-- tapOn: "Chats"
+- tapOn:
+    id: "tab-chats"
 # Open the target thread by contact name (falls back to the first row if unset).
+# Chat list rows are dynamic/user-generated content, so they stay text-selected —
+# a fixed testID wouldn't be unique or meaningful per row.
 - runFlow:
     when:
       true: ${CONTACT_NAME != ""}
@@ -23,10 +26,11 @@ env:
       - tapOn:
           index: 0
           text: ".*"
-- assertVisible: "Message"
-- tapOn: "Message"
+- tapOn:
+    id: "conversation-input"
 - inputText: ${MESSAGE_TEXT}
-- tapOn: "Send"
+- tapOn:
+    id: "conversation-send"
 # The sent bubble echoing our text confirms the message posted to the thread.
 - assertVisible:
     text: ${MESSAGE_TEXT}

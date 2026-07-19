@@ -2,17 +2,18 @@
   "name": "stewra-website-e2e",
   "private": true,
   "type": "module",
-  "description": "End-to-end tests for the Stewra website, driving two real user sessions with Playwright.",
+  "description": "End-to-end tests for the Stewra website, driving two real QA sessions with @playwright/test.",
   "scripts": {
     "postinstall": "playwright install chromium",
-    "audio": "node calls.audio.mjs",
-    "video": "node calls.video.mjs",
-    "calls": "node calls.audio.mjs && node calls.video.mjs",
-    "full": "node full.mjs",
-    "today": "node today.mjs",
-    "all": "node run-all.mjs"
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report .artifacts/report",
+    "type-check:e2e": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "playwright": "^1.55.0"
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0"
   }
 }

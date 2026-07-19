@@ -109,7 +109,7 @@ function MessageBubble({
             onConfirm={(action) => onConfirmEmail(message.id, action)}
           />
         )}
-        <span className={styles.bubbleTime}>
+        <span className={styles.bubbleTime} data-testid="message-timestamp">
           {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {mine && <MessageStatusIndicator status={message.status} />}
         </span>

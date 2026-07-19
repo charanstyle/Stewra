@@ -6,12 +6,17 @@
   padding: 12px 20px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
+  /* Let the right-hand section drop below the brand+links when the viewport is too
+     narrow to hold everything on one row (mobile) instead of overflowing/overlapping. */
+  flex-wrap: wrap;
 }
 
 .left {
   display: flex;
   align-items: center;
   gap: 20px;
+  /* Allow the brand and the link group to wrap on narrow screens. */
+  flex-wrap: wrap;
 }
 
 .brand {
@@ -23,6 +28,8 @@
 .links {
   display: flex;
   gap: 6px;
+  /* Wrap links to a second row on narrow viewports so their hit-areas never overlap. */
+  flex-wrap: wrap;
 }
 
 .link {
