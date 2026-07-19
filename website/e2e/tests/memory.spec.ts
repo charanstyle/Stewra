@@ -70,10 +70,11 @@ test.describe('memory', () => {
 
   // Original: skip('memory', 'Delete memory / Delete rule / Dismiss rule', 'irreversibly
   // destroys real learned data on a live account — buttons present & located, deliberately not
-  // clicked')
-  test.skip(
-    true,
-    'irreversibly destroys real learned data on a live account — buttons present & ' +
-      'located, deliberately not clicked',
-  );
+  // clicked').
+  // NB: must be a NAMED skipped test (test.skip('title', fn)). A bare `test.skip(true, desc)` in
+  // the describe body is a GROUP modifier — it skips every test in this describe block.
+  test.skip('Delete memory / Delete rule / Dismiss rule', () => {
+    // irreversibly destroys real learned data on a live account — buttons present & located,
+    // deliberately not clicked.
+  });
 });

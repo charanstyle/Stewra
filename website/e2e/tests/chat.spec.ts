@@ -33,22 +33,25 @@ test.describe('chat', () => {
     await pageB.getByPlaceholder('Type a message').press('Enter');
     await pageA.getByText(m2, { exact: false }).waitFor({ timeout: 12000 });
 
-    // typing indicator: A types, B sees "typing…" — a hard requirement in the original.
-    // Use pressSequentially (real per-key keydown/keypress/input events), NOT fill():
-    // the app broadcasts "typing" off keystroke events, which fill()'s single value-set
-    // does not produce.
+    // typing indicator: A types, B sees the composing indicator — a hard requirement in the
+    // original. Two things this spec has to get right about the real web UI:
+    //   1. Use pressSequentially (real per-key keydown/keypress/input events), NOT fill():
+    //      ConversationPage fires setTyping(true) off the composer's onChange keystrokes, which
+    //      fill()'s single value-set does not produce.
+    //   2. The web indicator is TypingIndicator.tsx — three bouncing dots in a
+    //      `<div aria-label="typing">`, NOT literal "typing…" text. Match the aria-label.
     const composer = pageA.getByPlaceholder('Type a message');
     await composer.click();
     await composer.pressSequentially('composing…', { delay: 60 });
     let typing = false;
     try {
-      await pageB.getByText('typing…', { exact: false }).waitFor({ timeout: 6000 });
+      await pageB.getByLabel('typing').waitFor({ timeout: 6000 });
       typing = true;
     } catch {
       // fall through — asserted below
     }
     await composer.fill('');
-    expect(typing, `typing…=${typing}`).toBe(true);
+    expect(typing, `typingIndicator=${typing}`).toBe(true);
 
     // timestamps present on bubbles — info-only, per TESTIDS.md.
     const stamped = await pageA.getByTestId('message-timestamp').first().isVisible().catch(() => false);

@@ -41,12 +41,13 @@ test.describe('auth', () => {
   });
 
   // Original: skip('auth', 'complete sign-up / email verification via UI', 'no throwaway
-  // email+password+inbox code available; render-only checked above')
-  test.skip(
-    true,
-    'no throwaway email+password+inbox code available; render-only checked in the ' +
-      'previous test (register mode reveals the Name field)',
-  );
+  // email+password+inbox code available; render-only checked above').
+  // NB: must be a NAMED skipped test (test.skip('title', fn)). A bare `test.skip(true, desc)` in
+  // the describe body is a GROUP modifier — it skips every test in this describe block.
+  test.skip('complete sign-up / email verification via UI', () => {
+    // no throwaway email+password+inbox code available; render-only checked in the previous test
+    // (register mode reveals the Name field).
+  });
 
   test('authenticated identity is shown in the nav for both A and B', async ({
     pageA,
