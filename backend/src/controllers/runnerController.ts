@@ -1,7 +1,9 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import { RUNNER_HARNESS_IDS } from '@stewra/shared-types';
 import { BaseController } from './baseController.js';
 import { runnerService } from '../services/runnerService.js';
+import { runnerSessionService } from '../services/runnerSessionService.js';
 
 /**
  * `deviceName`/`os` are bounded rather than free — they are echoed into the device list and an audit row,
@@ -16,6 +18,22 @@ const claimSchema = z.object({
 
 const deviceIdSchema = z.object({
   id: z.string().uuid(),
+});
+
+const sessionIdSchema = z.object({ id: z.string().uuid() });
+
+const startSessionSchema = z.object({
+  deviceId: z.string().uuid(),
+  harness: z.enum(RUNNER_HARNESS_IDS),
+  workspaceId: z.string().min(1).max(128),
+  prompt: z.string().min(1).max(100_000),
+});
+
+const promptBodySchema = z.object({ text: z.string().min(1).max(100_000) });
+
+const permissionBodySchema = z.object({
+  promptId: z.string().min(1).max(128),
+  optionId: z.string().min(1).max(256),
 });
 
 /**
@@ -82,6 +100,58 @@ class RunnerController extends BaseController {
       this.handleSuccess(res, { revoked });
     } catch (error) {
       this.handleError(error, res, 'RunnerController.revokeDevice');
+    }
+  }
+
+  /** GET /runner/sessions — the user's runner sessions, newest first. */
+  async listSessions(req: Request, res: Response): Promise<void> {
+    try {
+      this.handleSuccess(res, await runnerSessionService.listSessions(this.userId(req)));
+    } catch (error) {
+      this.handleError(error, res, 'RunnerController.listSessions');
+    }
+  }
+
+  /** POST /runner/sessions — start a coding session on a chosen device. */
+  async startSession(req: Request, res: Response): Promise<void> {
+    try {
+      const body = startSessionSchema.parse(req.body);
+      const session = await runnerSessionService.startSession(this.userId(req), body);
+      this.handleSuccess(res, { session }, 201);
+    } catch (error) {
+      this.handleError(error, res, 'RunnerController.startSession');
+    }
+  }
+
+  /** POST /runner/sessions/:id/prompt — a follow-up turn in a running session. */
+  async promptSession(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = sessionIdSchema.parse(req.params);
+      const { text } = promptBodySchema.parse(req.body);
+      this.handleSuccess(res, await runnerSessionService.prompt(this.userId(req), id, text));
+    } catch (error) {
+      this.handleError(error, res, 'RunnerController.promptSession');
+    }
+  }
+
+  /** POST /runner/sessions/:id/permission — relay the user's permission answer to the runner. */
+  async decidePermission(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = sessionIdSchema.parse(req.params);
+      const { promptId, optionId } = permissionBodySchema.parse(req.body);
+      this.handleSuccess(res, await runnerSessionService.decidePermission(this.userId(req), id, promptId, optionId));
+    } catch (error) {
+      this.handleError(error, res, 'RunnerController.decidePermission');
+    }
+  }
+
+  /** POST /runner/sessions/:id/cancel — stop a running session. */
+  async cancelSession(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = sessionIdSchema.parse(req.params);
+      this.handleSuccess(res, await runnerSessionService.cancel(this.userId(req), id));
+    } catch (error) {
+      this.handleError(error, res, 'RunnerController.cancelSession');
     }
   }
 }

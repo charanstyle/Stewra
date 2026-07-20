@@ -1,8 +1,21 @@
 import * as Sentry from '@sentry/node';
 import { z } from 'zod';
-import { RUNNER_CLIENT_EVENTS, RUNNER_HARNESS_IDS } from '@stewra/shared-types';
-import type { RunnerHarnessInfo, RunnerWorkspace } from '@stewra/shared-types';
+import {
+  RUNNER_CLIENT_EVENTS,
+  RUNNER_HARNESS_IDS,
+  RUNNER_PERMISSION_KINDS,
+  RUNNER_UPDATE_KINDS,
+} from '@stewra/shared-types';
+import type {
+  RunnerHarnessInfo,
+  RunnerPermissionOption,
+  RunnerPermissionPromptPayload,
+  RunnerSessionDonePayload,
+  RunnerSessionUpdatePayload,
+  RunnerWorkspace,
+} from '@stewra/shared-types';
 import { runnerService } from '../services/runnerService.js';
+import { runnerSessionService } from '../services/runnerSessionService.js';
 import { logger } from '../utils/logger.js';
 import { runnerUserRoom } from './runnerTypes.js';
 import type { RunnerSocketLike } from './runnerTypes.js';
@@ -31,6 +44,58 @@ const helloSchema = z.object({
   harnesses: z.array(harnessSchema).max(16),
   workspaces: z.array(workspaceSchema).max(256),
 });
+
+const updateSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  seq: z.number().int().nonnegative(),
+  kind: z.enum(RUNNER_UPDATE_KINDS),
+  text: z.string().max(50_000).optional(),
+  tool: z.string().max(256).optional(),
+});
+
+const doneSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  status: z.enum(['completed', 'failed', 'cancelled']),
+  summary: z.string().max(10_000).optional(),
+  error: z.string().max(2_000).optional(),
+});
+
+const permissionOptionSchema = z.object({
+  id: z.string().min(1).max(256),
+  label: z.string().min(1).max(256),
+  kind: z.enum(RUNNER_PERMISSION_KINDS),
+});
+
+const permissionRequestSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  promptId: z.string().min(1).max(128),
+  title: z.string().max(500),
+  detail: z.string().max(2_000),
+  options: z.array(permissionOptionSchema).min(1).max(16),
+});
+
+/** Rebuild optional-bearing payloads so an absent field stays absent under exactOptionalPropertyTypes. */
+function toUpdatePayload(d: z.infer<typeof updateSchema>): RunnerSessionUpdatePayload {
+  return {
+    sessionId: d.sessionId,
+    seq: d.seq,
+    kind: d.kind,
+    ...(d.text !== undefined ? { text: d.text } : {}),
+    ...(d.tool !== undefined ? { tool: d.tool } : {}),
+  };
+}
+function toDonePayload(d: z.infer<typeof doneSchema>): RunnerSessionDonePayload {
+  return {
+    sessionId: d.sessionId,
+    status: d.status,
+    ...(d.summary !== undefined ? { summary: d.summary } : {}),
+    ...(d.error !== undefined ? { error: d.error } : {}),
+  };
+}
+function toPermissionPayload(d: z.infer<typeof permissionRequestSchema>): RunnerPermissionPromptPayload {
+  const options: RunnerPermissionOption[] = d.options.map((o) => ({ id: o.id, label: o.label, kind: o.kind }));
+  return { sessionId: d.sessionId, promptId: d.promptId, title: d.title, detail: d.detail, options };
+}
 
 /** Rebuild optional-bearing objects so an absent field stays absent under exactOptionalPropertyTypes. */
 function normalizeHarness(h: z.infer<typeof harnessSchema>): RunnerHarnessInfo {
@@ -105,6 +170,38 @@ export function registerRunnerHandler(socket: RunnerSocketLike): void {
         harnesses: parsed.data.harnesses.map(normalizeHarness),
         workspaces: parsed.data.workspaces.map(normalizeWorkspace),
       }),
+    );
+  });
+
+  // ── Session lifecycle: a runner's reports about the agent runs it is hosting ─────────────────────────
+  // Each is validated (a bad frame is dropped, never allowed to move a session), then handed to the
+  // session service, which persists the transition and relays it to the user watching on the main socket.
+
+  socket.on(RUNNER_CLIENT_EVENTS.SESSION_UPDATE, (raw: unknown) => {
+    const parsed = updateSchema.safeParse(raw);
+    if (!parsed.success) return;
+    runnerSessionService.handleUpdate(userId, toUpdatePayload(parsed.data));
+  });
+
+  socket.on(RUNNER_CLIENT_EVENTS.PERMISSION_REQUEST, (raw: unknown) => {
+    const parsed = permissionRequestSchema.safeParse(raw);
+    if (!parsed.success) {
+      logger.warn('runner: rejected a malformed permission-request', { userId, deviceId });
+      return;
+    }
+    guard(RUNNER_CLIENT_EVENTS.PERMISSION_REQUEST, () =>
+      runnerSessionService.handlePermissionRequest(userId, toPermissionPayload(parsed.data)),
+    );
+  });
+
+  socket.on(RUNNER_CLIENT_EVENTS.SESSION_DONE, (raw: unknown) => {
+    const parsed = doneSchema.safeParse(raw);
+    if (!parsed.success) {
+      logger.warn('runner: rejected a malformed session-done', { userId, deviceId });
+      return;
+    }
+    guard(RUNNER_CLIENT_EVENTS.SESSION_DONE, () =>
+      runnerSessionService.handleDone(userId, toDonePayload(parsed.data)),
     );
   });
 

@@ -1,9 +1,15 @@
 import type {
   ApiResponse,
+  DecideRunnerPermissionRequest,
   GetRunnerStatusResponse,
   ListRunnerDevicesResponse,
-  StartRunnerPairingResponse,
+  ListRunnerSessionsResponse,
+  PromptRunnerSessionRequest,
   RevokeRunnerDeviceResponse,
+  RunnerSessionActionResponse,
+  StartRunnerPairingResponse,
+  StartRunnerSessionRequest,
+  StartRunnerSessionResponse,
 } from '@stewra/shared-types';
 import { BASE_URL, readTokens, ApiError } from './api';
 
@@ -48,4 +54,21 @@ export const runnerService = {
 
   revokeDevice: (id: string): Promise<RevokeRunnerDeviceResponse> =>
     request(`/runner/devices/${id}`, { method: 'DELETE' }),
+
+  listSessions: (): Promise<ListRunnerSessionsResponse> => request('/runner/sessions'),
+
+  startSession: (body: StartRunnerSessionRequest): Promise<StartRunnerSessionResponse> =>
+    request('/runner/sessions', { method: 'POST', body }),
+
+  promptSession: (id: string, body: PromptRunnerSessionRequest): Promise<RunnerSessionActionResponse> =>
+    request(`/runner/sessions/${id}/prompt`, { method: 'POST', body }),
+
+  decidePermission: (
+    id: string,
+    body: DecideRunnerPermissionRequest,
+  ): Promise<RunnerSessionActionResponse> =>
+    request(`/runner/sessions/${id}/permission`, { method: 'POST', body }),
+
+  cancelSession: (id: string): Promise<RunnerSessionActionResponse> =>
+    request(`/runner/sessions/${id}/cancel`, { method: 'POST', body: {} }),
 };

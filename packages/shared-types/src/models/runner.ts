@@ -1,5 +1,10 @@
 import type { ISODateString, UUID } from '../common/base';
-import type { RunnerHarnessInfo, RunnerWorkspace } from '../realtime/runner';
+import type {
+  RunnerHarnessId,
+  RunnerHarnessInfo,
+  RunnerSessionStatus,
+  RunnerWorkspace,
+} from '../realtime/runner';
 
 /**
  * One registered Stewra Runner install — a process on the user's OWN machine (a laptop, or a cloud VM they
@@ -29,4 +34,32 @@ export interface RunnerDevice {
   /** Last `runner:hello`/heartbeat. Null until the runner connects for the first time. */
   readonly lastSeenAt: ISODateString | null;
   readonly createdAt: ISODateString;
+}
+
+/**
+ * One coding session hosted by a runner — a single agent run on one machine against one workspace.
+ *
+ * `deviceName`/`workspaceName` are SNAPSHOTS taken when the session started, not live joins: a session must
+ * still render in the history after its device has been revoked (and its `runner_devices` row deleted), so
+ * the display strings travel with the session rather than being looked up from a row that may be gone.
+ */
+export interface RunnerSession {
+  readonly id: UUID;
+  /** The machine this ran on. Not guaranteed to still exist as a device (it may have been revoked). */
+  readonly deviceId: UUID;
+  readonly deviceName: string;
+  readonly harness: RunnerHarnessId;
+  readonly workspaceId: string;
+  readonly workspaceName: string;
+  readonly status: RunnerSessionStatus;
+  /** The user's opening instruction to the agent. */
+  readonly prompt: string;
+  /** A short final summary once the session ends, when the harness produced one. */
+  readonly summary: string | null;
+  /** The failure reason when `status` is `failed`. */
+  readonly error: string | null;
+  readonly createdAt: ISODateString;
+  readonly updatedAt: ISODateString;
+  /** When the session reached a terminal state, or null while it is still active. */
+  readonly endedAt: ISODateString | null;
 }

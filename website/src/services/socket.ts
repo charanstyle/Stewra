@@ -3,6 +3,7 @@ import type { Socket } from 'socket.io-client';
 import {
   CLIENT_EVENTS,
   SERVER_EVENTS,
+  RUNNER_UI_EVENTS,
 } from '@stewra/shared-types';
 import type {
   PresenceSubscribePayload,
@@ -34,6 +35,9 @@ import type {
   StewraErrorEvent,
   ISODateString,
   CallSession,
+  RunnerSessionUpdatePayload,
+  RunnerSessionDonePayload,
+  RunnerPermissionPromptPayload,
 } from '@stewra/shared-types';
 import { readTokens, BASE_URL } from './api';
 
@@ -91,6 +95,10 @@ interface ServerToClientEvents {
   [SERVER_EVENTS.STEWRA_THINKING]: (event: StewraThinkingEvent) => void;
   [SERVER_EVENTS.STEWRA_REPLY]: (event: StewraReplyEvent) => void;
   [SERVER_EVENTS.STEWRA_ERROR]: (event: StewraErrorEvent) => void;
+  // Runner sessions — the server relays a runner's live reports here so a session view can stream.
+  [RUNNER_UI_EVENTS.SESSION_UPDATE]: (event: RunnerSessionUpdatePayload) => void;
+  [RUNNER_UI_EVENTS.SESSION_DONE]: (event: RunnerSessionDonePayload) => void;
+  [RUNNER_UI_EVENTS.PERMISSION_REQUEST]: (event: RunnerPermissionPromptPayload) => void;
 }
 
 export type StewraSocket = Socket<ServerToClientEvents, ClientToServerEvents>;

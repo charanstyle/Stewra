@@ -85,6 +85,20 @@ export const RUNNER_SERVER_EVENTS = {
 } as const;
 export type RunnerServerEvent = (typeof RUNNER_SERVER_EVENTS)[keyof typeof RUNNER_SERVER_EVENTS];
 
+/**
+ * Events the server sends to a USER'S web/app client (on the MAIN namespace, not `/runner`) so a session
+ * view can render live. These are the runner's reports, forwarded: the server relays a runner's
+ * `session-update`/`session-done`/`permission-request` to the user watching that session. Distinct event
+ * names (not the `/runner` ones) because they cross a different namespace to a different kind of client, and
+ * a user client must never be confused for a runner.
+ */
+export const RUNNER_UI_EVENTS = {
+  SESSION_UPDATE: 'runner-ui:session-update',
+  SESSION_DONE: 'runner-ui:session-done',
+  PERMISSION_REQUEST: 'runner-ui:permission-request',
+} as const;
+export type RunnerUiEvent = (typeof RUNNER_UI_EVENTS)[keyof typeof RUNNER_UI_EVENTS];
+
 // ── Capability reporting (runner → server, in `hello`) ──────────────────────────────────────────────
 
 /** One coding harness on the runner's machine, and whether it is actually runnable. */
@@ -182,12 +196,25 @@ export interface RunnerSessionDonePayload {
 
 // ── Permission gating (runner ↔ server) ─────────────────────────────────────────────────────────────
 
-/** One choice offered for a permission prompt. `id` is echoed back in the decision. */
+/**
+ * The semantics of a permission choice, taken verbatim from ACP's `PermissionOption.kind`. The `_once`
+ * variants authorise just this action; the `_always` variants also tell the harness to stop asking for
+ * this kind of action for the rest of the session. A UI styles allow-vs-reject on the prefix and can offer
+ * "always" as a distinct, more-deliberate button.
+ */
+export const RUNNER_PERMISSION_KINDS = [
+  'allow_once',
+  'allow_always',
+  'reject_once',
+  'reject_always',
+] as const;
+export type RunnerPermissionKind = (typeof RUNNER_PERMISSION_KINDS)[number];
+
+/** One choice offered for a permission prompt. `id` (the ACP optionId) is echoed back in the decision. */
 export interface RunnerPermissionOption {
   readonly id: string;
   readonly label: string;
-  /** `allow` / `deny` semantics for the option, so a UI can style/confirm accordingly. */
-  readonly kind: 'allow' | 'deny';
+  readonly kind: RunnerPermissionKind;
 }
 
 /**

@@ -23,7 +23,9 @@ import type {
   Rating,
   ReactionType,
   ResourceKind,
+  RunnerHarnessId,
   RunnerHarnessInfo,
+  RunnerSessionStatus,
   RunnerWorkspace,
   SenderKind,
   SuggestionKind,
@@ -665,6 +667,29 @@ export interface RunnerPairCodesTable {
   created_at: CreatedAt;
 }
 
+/**
+ * One coding session hosted by a runner (migration 034). `id` is the server-minted session id that also
+ * travels on the wire. `device_id` is a plain uuid, NOT a foreign key: revoking a device deletes its
+ * `runner_devices` row, but the session history must survive that, so `device_name`/`workspace_name` are
+ * snapshotted for display. `status` is the RunnerSessionStatus union; `harness` the RunnerHarnessId union.
+ */
+export interface RunnerSessionsTable {
+  id: Generated<string>;
+  user_id: string;
+  device_id: string;
+  device_name: Generated<string>;
+  harness: RunnerHarnessId;
+  workspace_id: string;
+  workspace_name: Generated<string>;
+  status: RunnerSessionStatus;
+  prompt: string;
+  summary: ColumnType<string | null, string | null | undefined, string | null>;
+  error: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+  ended_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -706,4 +731,5 @@ export interface Database {
   whatsapp_outbound: WhatsappOutboundTable;
   runner_devices: RunnerDevicesTable;
   runner_pair_codes: RunnerPairCodesTable;
+  runner_sessions: RunnerSessionsTable;
 }

@@ -1,4 +1,5 @@
-import type { RunnerDevice } from '../models/runner';
+import type { RunnerDevice, RunnerSession } from '../models/runner';
+import type { RunnerHarnessId } from '../realtime/runner';
 import type { ISODateString } from '../common/base';
 
 /**
@@ -58,4 +59,43 @@ export interface GetRunnerStatusResponse {
   readonly enabled: boolean;
   readonly devices: readonly RunnerDevice[];
   readonly downloadUrl: string;
+}
+
+// ── Sessions ─────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * POST /runner/sessions — start a coding session on a CHOSEN device. Unlike a bridge send (any online
+ * machine), a runner session names its target: the user picks which machine and which of its workspaces.
+ */
+export interface StartRunnerSessionRequest {
+  readonly deviceId: string;
+  readonly harness: RunnerHarnessId;
+  readonly workspaceId: string;
+  readonly prompt: string;
+}
+
+export interface StartRunnerSessionResponse {
+  readonly session: RunnerSession;
+}
+
+/** POST /runner/sessions/:id/prompt — a follow-up turn in an existing session. */
+export interface PromptRunnerSessionRequest {
+  readonly text: string;
+}
+
+/** POST /runner/sessions/:id/permission — the user's answer to a permission prompt, relayed to the runner. */
+export interface DecideRunnerPermissionRequest {
+  readonly promptId: string;
+  /** The `id` of the chosen option from the permission request. */
+  readonly optionId: string;
+}
+
+/** Shared ack for prompt / permission / cancel: whether the instruction was accepted for delivery. */
+export interface RunnerSessionActionResponse {
+  readonly ok: boolean;
+}
+
+/** GET /runner/sessions — the user's sessions, newest first. */
+export interface ListRunnerSessionsResponse {
+  readonly sessions: readonly RunnerSession[];
 }

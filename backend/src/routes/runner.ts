@@ -49,4 +49,28 @@ router.delete('/devices/:id', requireAuth, (req, res) => {
   void runnerController.revokeDevice(req, res);
 });
 
+// ── Sessions ─────────────────────────────────────────────────────────────────────────────────────────
+// A session starts a coding agent on one of the user's machines; it requires a verified email for the same
+// reason pairing does. Prompt/permission/cancel act on an already-started session the user owns.
+
+router.get('/sessions', requireAuth, (req, res) => {
+  void runnerController.listSessions(req, res);
+});
+
+router.post('/sessions', requireAuth, verified, (req, res) => {
+  void runnerController.startSession(req, res);
+});
+
+router.post('/sessions/:id/prompt', requireAuth, verified, (req, res) => {
+  void runnerController.promptSession(req, res);
+});
+
+router.post('/sessions/:id/permission', requireAuth, verified, (req, res) => {
+  void runnerController.decidePermission(req, res);
+});
+
+router.post('/sessions/:id/cancel', requireAuth, (req, res) => {
+  void runnerController.cancelSession(req, res);
+});
+
 export default router;

@@ -26,7 +26,7 @@ export type { UserPreferences } from './models/preferences';
 export type { Rating, InsightFeedback } from './models/feedback';
 export { RATINGS, RATING_REWARD, POSITIVE_RATINGS } from './models/feedback';
 export type { AgentMemory, MemorySource } from './models/memory';
-export type { RunnerDevice } from './models/runner';
+export type { RunnerDevice, RunnerSession } from './models/runner';
 export type {
   ProcessRule,
   ProcessDomain,
@@ -229,6 +229,12 @@ export type {
   ListRunnerDevicesResponse,
   RevokeRunnerDeviceResponse,
   GetRunnerStatusResponse,
+  StartRunnerSessionRequest,
+  StartRunnerSessionResponse,
+  PromptRunnerSessionRequest,
+  DecideRunnerPermissionRequest,
+  RunnerSessionActionResponse,
+  ListRunnerSessionsResponse,
 } from './api/runner';
 export type {
   IceServerConfig,
@@ -310,13 +316,17 @@ export {
   RUNNER_HARNESS_IDS,
   RUNNER_SESSION_STATUSES,
   RUNNER_UPDATE_KINDS,
+  RUNNER_PERMISSION_KINDS,
+  RUNNER_UI_EVENTS,
 } from './realtime/runner';
 export type {
   RunnerClientEvent,
   RunnerServerEvent,
+  RunnerUiEvent,
   RunnerHarnessId,
   RunnerSessionStatus,
   RunnerUpdateKind,
+  RunnerPermissionKind,
   RunnerHarnessInfo,
   RunnerWorkspace,
   RunnerHelloPayload,

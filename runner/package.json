@@ -17,6 +17,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^1.2.1",
     "@stewra/shared-types": "*",
     "socket.io-client": "^4.8.3",
     "zod": "^3.23.8"

@@ -37,3 +37,6 @@ coverage/
 /frontend/build-*.aab
 # ...and the preview/output dir (e.g. build/stewra-preview.apk) — keep it out of git too.
 /frontend/build/
+
+# local compiled redis for isolated runner testing (not part of the repo)
+.local-redis/
