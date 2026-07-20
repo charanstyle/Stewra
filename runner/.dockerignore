@@ -1,0 +1,10 @@
+# The image is built from the repo root; keep the context lean and never ship build output or local state.
+**/node_modules
+**/dist
+**/.git
+**/.env
+**/.env.*
+**/*.log
+runner/smoke-*.mts
+**/coverage
+**/.DS_Store

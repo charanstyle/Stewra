@@ -8,6 +8,8 @@ import {
   assertGitRepo,
   commitWorktree,
   createSessionWorktree,
+  describeGitDir,
+  ensureClone,
   pushWorktree,
   worktreeDiff,
 } from '../core/workspace.js';
@@ -145,6 +147,90 @@ describe('workspace (git worktree isolation)', () => {
       await expect(pushWorktree(wt)).rejects.toThrow(/no_remote/);
     } finally {
       await wt.cleanup(true);
+    }
+  });
+});
+
+describe('cloud-VM workspaces (clone mode)', () => {
+  // `origin` stands in for the GitHub repo a cloud runner would clone. Cloning from a local path is real
+  // git over a real transport — no network, no mocks — so it exercises the exact clone/fetch code paths.
+  let origin: string;
+  let dest: string;
+
+  beforeEach(async () => {
+    origin = await mkdtemp(join(tmpdir(), 'stewra-origin-'));
+    await git(origin, ['init', '-q', '-b', 'main']);
+    await git(origin, ['config', 'user.email', 'origin@stewra.local']);
+    await git(origin, ['config', 'user.name', 'Stewra Origin']);
+    await writeFile(join(origin, 'README.md'), 'base\n');
+    await git(origin, ['add', '.']);
+    await git(origin, ['commit', '-q', '-m', 'initial']);
+    dest = await mkdtemp(join(tmpdir(), 'stewra-clone-root-'));
+  });
+
+  afterEach(async () => {
+    await rm(origin, { recursive: true, force: true }).catch(() => undefined);
+    await rm(dest, { recursive: true, force: true }).catch(() => undefined);
+  });
+
+  it('clones a repo and reports its remote + default branch', async () => {
+    const dir = join(dest, 'repo');
+    const cloned = await ensureClone(origin, dir);
+    expect(cloned.path).toBe(dir);
+    expect(cloned.gitRemote).toBe(origin);
+    expect(cloned.defaultBranch).toBe('main');
+    // A real checkout carrying the origin content — not an empty dir.
+    expect(await readFile(join(dir, 'README.md'), 'utf8')).toBe('base\n');
+  });
+
+  it('is idempotent: a second call fetches new upstream commits instead of failing', async () => {
+    const dir = join(dest, 'repo');
+    await ensureClone(origin, dir);
+
+    // Advance origin, then re-run: ensureClone must fetch (not choke on "already exists").
+    await writeFile(join(origin, 'CHANGELOG.md'), 'v2\n');
+    await git(origin, ['add', '.']);
+    await git(origin, ['commit', '-q', '-m', 'second']);
+    const { stdout: originHead } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: origin });
+
+    await ensureClone(origin, dir);
+    const { stdout: fetchedHead } = await execFileAsync('git', ['rev-parse', 'origin/main'], { cwd: dir });
+    expect(fetchedHead.trim()).toBe(originHead.trim()); // the new commit really arrived
+  });
+
+  it('a cloned workspace runs a full session round-trip: worktree -> commit -> push back', async () => {
+    const dir = join(dest, 'repo');
+    const cloned = await ensureClone(origin, dir);
+
+    // Exactly what a real session does: branch a worktree from the clone's default branch, edit, commit, push.
+    const wt = await createSessionWorktree(cloned.path, 'sess-cloud', cloned.defaultBranch);
+    try {
+      await writeFile(join(wt.path, 'from-cloud.txt'), 'hello from a cloud runner\n');
+      const commit = await commitWorktree(wt, 'Stewra runner: cloud change');
+      expect(commit.committed).toBe(true);
+      const push = await pushWorktree(wt);
+      expect(push.remoteUrl).toBe(origin);
+
+      // The branch really landed back on origin (the "GitHub" repo).
+      const { stdout } = await execFileAsync('git', ['ls-remote', '--heads', origin, 'stewra/run/sess-cloud'], { cwd: dir });
+      expect(stdout).toContain('refs/heads/stewra/run/sess-cloud');
+    } finally {
+      await wt.cleanup(true);
+    }
+  });
+
+  it('describeGitDir reports remote + branch for a checkout, and nothing for a plain dir', async () => {
+    const dir = join(dest, 'repo');
+    await ensureClone(origin, dir);
+    const info = await describeGitDir(dir);
+    expect(info.gitRemote).toBe(origin);
+    expect(info.defaultBranch).toBe('main');
+
+    const plain = await mkdtemp(join(tmpdir(), 'stewra-plain-'));
+    try {
+      expect(await describeGitDir(plain)).toEqual({});
+    } finally {
+      await rm(plain, { recursive: true, force: true }).catch(() => undefined);
     }
   });
 });

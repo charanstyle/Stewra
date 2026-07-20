@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -32,6 +32,8 @@ export interface Worktree {
 const GIT_TIMEOUT_MS = 30_000;
 /** A push/PR reaches the network, so it needs a far more generous cap than a local plumbing command. */
 const GIT_NETWORK_TIMEOUT_MS = 120_000;
+/** A clone/fetch can pull a lot of history over the network, so it gets the most generous cap of all. */
+const GIT_CLONE_TIMEOUT_MS = 600_000;
 
 async function git(cwd: string, args: readonly string[], timeout = GIT_TIMEOUT_MS): Promise<string> {
   const { stdout } = await execFileAsync('git', [...args], { cwd, timeout });
@@ -203,4 +205,82 @@ export async function openPullRequest(
   // `gh pr create` prints the PR URL as its last non-empty line; fall back to the whole output if it changes.
   const url = stdout.trim().split('\n').map((l) => l.trim()).filter((l) => l.startsWith('http')).at(-1);
   return { url: url ?? stdout.trim() };
+}
+
+// ── Cloud-VM workspaces (Phase 4): the runner clones repos it will run against ──────────────────────────
+
+/** True when `dir` is the top of a git working tree — used to decide clone-vs-fetch. */
+async function isGitWorktreeRoot(dir: string): Promise<boolean> {
+  try {
+    return (await git(dir, ['rev-parse', '--show-toplevel'])).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The clone's default branch: `origin/HEAD` when set (it always is right after a clone), else the branch
+ * that got checked out. Never guesses a name — a repo with no determinable default (a detached HEAD with no
+ * origin/HEAD) fails loud rather than silently branching sessions off the wrong base.
+ */
+async function resolveDefaultBranch(dir: string): Promise<string> {
+  try {
+    const short = (await git(dir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).replace(/^origin\//, '');
+    if (short.length > 0) return short;
+  } catch {
+    // origin/HEAD not set — fall through to the checked-out branch.
+  }
+  const head = await git(dir, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (head.length === 0 || head === 'HEAD') throw new Error(`cannot determine default branch: ${dir}`);
+  return head;
+}
+
+/** A workspace's remote + base branch, best-effort — used to enrich the picker (never fatal for local dirs). */
+export interface GitDirInfo {
+  readonly gitRemote?: string;
+  readonly defaultBranch?: string;
+}
+
+/** Describe a workspace dir's origin + default branch; an empty object when it isn't a git repo at all. */
+export async function describeGitDir(dir: string): Promise<GitDirInfo> {
+  if (!(await isGitWorktreeRoot(dir))) return {};
+  const info: { gitRemote?: string; defaultBranch?: string } = {};
+  try { info.gitRemote = await git(dir, ['remote', 'get-url', 'origin']); } catch { /* no origin remote */ }
+  try { info.defaultBranch = await resolveDefaultBranch(dir); } catch { /* detached / indeterminate */ }
+  return info;
+}
+
+/** A repo the runner has cloned locally and is ready to run sessions against. */
+export interface ClonedWorkspace {
+  readonly path: string;
+  readonly gitRemote: string;
+  readonly defaultBranch: string;
+}
+
+/**
+ * Ensure a working clone of `url` exists at `dir`, then report its remote + default branch.
+ *
+ * This is the cloud-VM counterpart to a laptop's local checkout: the same runner binary, but it fetches the
+ * code instead of finding it already on disk. Credentials are the MACHINE'S own — a `GITHUB_TOKEN` in git's
+ * credential store, a deploy key, or `gh auth` on the VM — never a token from Stewra, exactly as push/PR do.
+ * `GIT_TERMINAL_PROMPT=0` turns a missing or expired credential into a loud, immediate failure instead of a
+ * hung interactive prompt, because a headless VM has no human to answer one.
+ *
+ * Clone when absent; otherwise re-point origin at `url` and fetch, so a long-lived runner picks up upstream
+ * commits between sessions without anyone reprovisioning it.
+ */
+export async function ensureClone(url: string, dir: string): Promise<ClonedWorkspace> {
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+  if (await isGitWorktreeRoot(dir)) {
+    await execFileAsync('git', ['-C', dir, 'remote', 'set-url', 'origin', url], { env, timeout: GIT_TIMEOUT_MS });
+    await execFileAsync('git', ['-C', dir, 'fetch', '--prune', 'origin'], { env, timeout: GIT_CLONE_TIMEOUT_MS });
+  } else {
+    await mkdir(dirname(dir), { recursive: true });
+    // Clear a partial/stale dir from a crashed prior clone so the retry is clean rather than "already exists".
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    await execFileAsync('git', ['clone', url, dir], { env, timeout: GIT_CLONE_TIMEOUT_MS });
+  }
+  const gitRemote = await git(dir, ['remote', 'get-url', 'origin']);
+  const defaultBranch = await resolveDefaultBranch(dir);
+  return { path: dir, gitRemote, defaultBranch };
 }
