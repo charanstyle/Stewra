@@ -1,15 +1,14 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/types';
 import { api, ApiError } from '../../services/api';
@@ -21,6 +20,8 @@ export default function ForgotPasswordScreen({ navigation }: Props): React.JSX.E
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
 
   const handleSubmit = async (): Promise<void> => {
     setError(null);
@@ -39,10 +40,9 @@ export default function ForgotPasswordScreen({ navigation }: Props): React.JSX.E
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.flex}
-      >
+      {/* Manual keyboard avoidance — KeyboardAvoidingView is a no-op on Android under Expo
+          edge-to-edge (see useKeyboardHeight). */}
+      <View style={[styles.flex, { paddingBottom: Math.max(keyboardHeight - insets.bottom, 0) }]}>
         <View style={styles.content}>
           <Text style={styles.title}>Reset password</Text>
           <Text style={styles.subtitle}>
@@ -83,7 +83,7 @@ export default function ForgotPasswordScreen({ navigation }: Props): React.JSX.E
             <Text style={styles.linkText}>Back to sign in</Text>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }

@@ -2,15 +2,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import {
   AudioModule,
   RecordingPresets,
@@ -105,6 +104,10 @@ function bubbleIcon(type: Message['type']): React.ComponentType<IconProps> | nul
 export default function ConversationScreen({ route, navigation }: Props): React.JSX.Element {
   const { conversationId } = route.params;
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+  // Lift the composer above the keyboard by its measured height — RN's KeyboardAvoidingView is a
+  // no-op for this on Android under Expo edge-to-edge (see useKeyboardHeight). Used in the render.
+  const keyboardHeight = useKeyboardHeight();
   const [messages, setMessages] = useState<ReadonlyArray<Message>>([]);
   const [participants, setParticipants] = useState<ReadonlyArray<PublicUser>>([]);
   const [presence, setPresence] = useState<Map<string, { status: PresenceStatus; lastActiveAt: string }>>(
@@ -544,11 +547,11 @@ export default function ConversationScreen({ route, navigation }: Props): React.
         ) : null}
       </View>
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
+      {/* Lift the composer above the keyboard by its measured height. RN's KeyboardAvoidingView
+          does nothing here on Android under Expo edge-to-edge (the window no longer resizes for
+          the IME), which left the composer stranded behind the keyboard. `insets.bottom` is
+          already reserved by the SafeAreaView's bottom edge, so subtract it to avoid a gap. */}
+      <View style={[styles.flex, { paddingBottom: Math.max(keyboardHeight - insets.bottom, 0) }]}>
         <FlatList
           ref={listRef}
           data={messages}
@@ -606,7 +609,7 @@ export default function ConversationScreen({ route, navigation }: Props): React.
             </Pressable>
           )}
         </View>
-      </KeyboardAvoidingView>
+      </View>
       <ReadReceiptManager
         message={receiptsFor}
         participants={participants}

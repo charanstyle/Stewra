@@ -1,15 +1,14 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../navigation/types';
 import { useAuth } from '../../contexts/AuthContext';
@@ -25,6 +24,8 @@ export default function LoginScreen({ navigation }: Props): React.JSX.Element {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
 
   const handleSubmit = async (): Promise<void> => {
     setError(null);
@@ -40,10 +41,10 @@ export default function LoginScreen({ navigation }: Props): React.JSX.Element {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.flex}
-      >
+      {/* Lift the form above the keyboard by its measured height — KeyboardAvoidingView is a
+          no-op on Android under Expo edge-to-edge, which left Sign in behind the keyboard on
+          short screens (see useKeyboardHeight). The centered content re-centers in the space left. */}
+      <View style={[styles.flex, { paddingBottom: Math.max(keyboardHeight - insets.bottom, 0) }]}>
         <View style={styles.content}>
           <Text style={styles.title}>Stewra</Text>
           <Text style={styles.subtitle}>Sign in to continue</Text>
@@ -98,7 +99,7 @@ export default function LoginScreen({ navigation }: Props): React.JSX.Element {
             <Text style={styles.linkText}>Need an account? Create one</Text>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }

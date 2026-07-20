@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   PASSWORD_RESET_CODE_LENGTH,
@@ -31,6 +31,8 @@ export default function ResetPasswordScreen({ navigation, route }: Props): React
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
 
   const passwordsMatch = password === confirmPassword;
   const showMismatch = confirmPassword.length > 0 && !passwordsMatch;
@@ -70,10 +72,9 @@ export default function ResetPasswordScreen({ navigation, route }: Props): React
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.flex}
-      >
+      {/* Manual keyboard avoidance — KeyboardAvoidingView is a no-op on Android under Expo
+          edge-to-edge (see useKeyboardHeight). */}
+      <View style={[styles.flex, { paddingBottom: Math.max(keyboardHeight - insets.bottom, 0) }]}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Enter your code</Text>
           <Text style={styles.subtitle}>
@@ -132,7 +133,7 @@ export default function ResetPasswordScreen({ navigation, route }: Props): React
             <Text style={styles.linkText}>Back to sign in</Text>
           </Pressable>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
