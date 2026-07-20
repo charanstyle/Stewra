@@ -685,6 +685,11 @@ export interface RunnerSessionsTable {
   prompt: string;
   summary: ColumnType<string | null, string | null | undefined, string | null>;
   error: ColumnType<string | null, string | null | undefined, string | null>;
+  // Git follow-through (migration 035): the isolated branch, its committed tip, push state, and any PR.
+  branch: ColumnType<string | null, string | null | undefined, string | null>;
+  head_sha: ColumnType<string | null, string | null | undefined, string | null>;
+  pr_url: ColumnType<string | null, string | null | undefined, string | null>;
+  pushed: Generated<boolean>;
   created_at: CreatedAt;
   updated_at: ColumnType<Date, Date | undefined, Date>;
   ended_at: ColumnType<Date | null, Date | null | undefined, Date | null>;

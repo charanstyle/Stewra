@@ -58,6 +58,17 @@ export interface RunnerSession {
   readonly summary: string | null;
   /** The failure reason when `status` is `failed`. */
   readonly error: string | null;
+  /**
+   * The isolated branch the session's work lives on (`stewra/run/<id>`), recorded once the runner reports
+   * it on finish. Null while the session is still starting/running, or if no worktree was ever cut.
+   */
+  readonly branch: string | null;
+  /** The branch's HEAD SHA after the runner's auto-commit — the reviewable tip of the session's output. */
+  readonly headSha: string | null;
+  /** The pull request URL, once the user has opened one for this session's branch. Null otherwise. */
+  readonly prUrl: string | null;
+  /** Whether the session's branch has been pushed to its remote. */
+  readonly pushed: boolean;
   readonly createdAt: ISODateString;
   readonly updatedAt: ISODateString;
   /** When the session reached a terminal state, or null while it is still active. */

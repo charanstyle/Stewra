@@ -37,6 +37,7 @@ import * as m031 from './migrations/031_push_tokens.js';
 import * as m032 from './migrations/032_push_tokens_add_fcm_token.js';
 import * as m033 from './migrations/033_runner_devices.js';
 import * as m034 from './migrations/034_runner_sessions.js';
+import * as m035 from './migrations/035_runner_session_git.js';
 import { logger } from '../utils/logger.js';
 
 interface Migration {
@@ -80,6 +81,7 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '032_push_tokens_add_fcm_token', up: m032.up },
   { name: '033_runner_devices', up: m033.up },
   { name: '034_runner_sessions', up: m034.up },
+  { name: '035_runner_session_git', up: m035.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

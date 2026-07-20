@@ -30,9 +30,11 @@ export interface Worktree {
 
 /** Git output is small here; cap it so a wedged git can never hang a session's setup forever. */
 const GIT_TIMEOUT_MS = 30_000;
+/** A push/PR reaches the network, so it needs a far more generous cap than a local plumbing command. */
+const GIT_NETWORK_TIMEOUT_MS = 120_000;
 
-async function git(cwd: string, args: readonly string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', [...args], { cwd, timeout: GIT_TIMEOUT_MS });
+async function git(cwd: string, args: readonly string[], timeout = GIT_TIMEOUT_MS): Promise<string> {
+  const { stdout } = await execFileAsync('git', [...args], { cwd, timeout });
   return stdout.trim();
 }
 
@@ -105,4 +107,100 @@ export async function createSessionWorktree(
 export async function worktreeDiff(worktree: Worktree): Promise<string> {
   await git(worktree.path, ['add', '--intent-to-add', '--all']).catch(() => undefined);
   return git(worktree.path, ['diff', worktree.baseSha]);
+}
+
+/** True when the error is a "command not found" — the shape `execFile` throws for a missing binary. */
+function isCommandNotFound(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && Reflect.get(error, 'code') === 'ENOENT';
+}
+
+/** The outcome of committing a session's work to its branch. */
+export interface WorktreeCommit {
+  /** False when the worktree had nothing to commit (agent made no change, or already committed itself). */
+  readonly committed: boolean;
+  /** The branch's HEAD after the attempt — advanced if we committed, else the branch's existing tip. */
+  readonly headSha: string;
+}
+
+/**
+ * Commit everything the session changed onto its branch, so the work becomes a reviewable, pushable object
+ * rather than loose edits in a worktree that a later cleanup could drop.
+ *
+ * Idempotent-ish: if the agent already committed (or changed nothing), there's nothing to add and we simply
+ * report the branch's current tip with `committed: false`. A repo lacking a configured `user.name`/`.email`
+ * still commits — we pass a runner identity via `-c` rather than fail a completed session on git etiquette.
+ */
+export async function commitWorktree(worktree: Worktree, message: string): Promise<WorktreeCommit> {
+  await git(worktree.path, ['add', '--all']);
+  const staged = await git(worktree.path, ['status', '--porcelain']);
+  if (staged.length === 0) {
+    return { committed: false, headSha: await git(worktree.path, ['rev-parse', 'HEAD']) };
+  }
+  await git(worktree.path, [
+    '-c', 'user.name=Stewra Runner',
+    '-c', 'user.email=runner@stewra.local',
+    'commit', '--no-verify', '-m', message,
+  ]);
+  return { committed: true, headSha: await git(worktree.path, ['rev-parse', 'HEAD']) };
+}
+
+/** Where a session's branch landed when pushed. */
+export interface WorktreePush {
+  readonly remote: string;
+  readonly remoteUrl: string;
+  readonly ref: string;
+}
+
+/**
+ * Push the session's branch to a remote using the MACHINE'S own git credentials — the runner is the user's
+ * box, so its git already knows how to authenticate; Stewra never handles a token. Fails loud when the repo
+ * has no such remote (a local-only checkout) rather than silently doing nothing, so the UI can say so.
+ *
+ * The refspec is explicit (`branch:branch`) and `--force-with-lease` guards a re-push: it updates the remote
+ * branch only if it still points where we last saw it, so a re-run can't clobber someone else's push.
+ */
+export async function pushWorktree(worktree: Worktree, remote = 'origin'): Promise<WorktreePush> {
+  let remoteUrl: string;
+  try {
+    remoteUrl = await git(worktree.path, ['remote', 'get-url', remote]);
+  } catch {
+    throw new Error(`no_remote: workspace has no "${remote}" remote to push to`);
+  }
+  await git(
+    worktree.path,
+    ['push', '--force-with-lease', '--set-upstream', remote, `${worktree.branch}:${worktree.branch}`],
+    GIT_NETWORK_TIMEOUT_MS,
+  );
+  return { remote, remoteUrl, ref: worktree.branch };
+}
+
+/** The pull request a session's branch opened. */
+export interface WorktreePr {
+  readonly url: string;
+}
+
+/**
+ * Open a pull request for the session's branch via `gh` — the machine's GitHub CLI, using its own auth. We
+ * shell to `gh` (not a stored token) for the same reason we push with local git: the credential belongs to
+ * the user's machine, never to Stewra. Fails loud with `gh_missing` when the CLI isn't installed so the UI
+ * can tell the user what to install, rather than hanging or guessing an API path.
+ */
+export async function openPullRequest(
+  worktree: Worktree,
+  opts: { title: string; body: string; base?: string },
+): Promise<WorktreePr> {
+  const args = ['pr', 'create', '--head', worktree.branch, '--title', opts.title, '--body', opts.body];
+  if (opts.base !== undefined && opts.base.length > 0) args.push('--base', opts.base);
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync('gh', args, { cwd: worktree.path, timeout: GIT_NETWORK_TIMEOUT_MS }));
+  } catch (error) {
+    if (isCommandNotFound(error)) {
+      throw new Error('gh_missing: the GitHub CLI (gh) is not installed on this machine');
+    }
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+  // `gh pr create` prints the PR URL as its last non-empty line; fall back to the whole output if it changes.
+  const url = stdout.trim().split('\n').map((l) => l.trim()).filter((l) => l.startsWith('http')).at(-1);
+  return { url: url ?? stdout.trim() };
 }

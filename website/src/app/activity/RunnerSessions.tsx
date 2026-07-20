@@ -52,6 +52,11 @@ export default function RunnerSessions(): React.JSX.Element | null {
   const [prompt, setPrompt] = useState<string>('');
   const [followUp, setFollowUp] = useState<string>('');
 
+  // Git follow-through state (push / open-PR on a finished session).
+  const [prTitle, setPrTitle] = useState<string>('');
+  const [followBusy, setFollowBusy] = useState(false);
+  const [followMsg, setFollowMsg] = useState<string | null>(null);
+
   // Live view state.
   const [activeId, setActiveId] = useState<string | null>(null);
   const logsRef = useRef<Map<string, LogItem[]>>(new Map());
@@ -178,6 +183,56 @@ export default function RunnerSessions(): React.JSX.Element | null {
     },
     [refresh],
   );
+
+  // Replace one session in local state with the server's refreshed copy (after a push / PR).
+  const mergeSession = useCallback((updated: RunnerSession): void => {
+    setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+  }, []);
+
+  const push = useCallback(
+    async (id: string): Promise<void> => {
+      setFollowBusy(true);
+      setFollowMsg(null);
+      try {
+        const res = await runnerService.pushSession(id);
+        mergeSession(res.session);
+        setFollowMsg(res.remoteUrl !== null ? `Pushed to ${res.remoteUrl}` : 'Branch pushed');
+      } catch (err) {
+        setFollowMsg(describeError(err));
+      } finally {
+        setFollowBusy(false);
+      }
+    },
+    [mergeSession],
+  );
+
+  const openPr = useCallback(
+    async (session: RunnerSession): Promise<void> => {
+      if (prTitle.trim() === '') return;
+      setFollowBusy(true);
+      setFollowMsg(null);
+      try {
+        const body = `Opened from a Stewra runner session on ${session.deviceName}.\n\n> ${session.prompt}`;
+        const res = await runnerService.openPr(session.id, { title: prTitle.trim(), body });
+        mergeSession(res.session);
+        setFollowMsg(`Opened ${res.prUrl}`);
+      } catch (err) {
+        setFollowMsg(describeError(err));
+      } finally {
+        setFollowBusy(false);
+      }
+    },
+    [prTitle, mergeSession],
+  );
+
+  // Prefill the PR title from the session's opening prompt when switching sessions; clear stale follow-up UI.
+  useEffect(() => {
+    const s = sessions.find((x) => x.id === activeId);
+    setPrTitle(s ? (s.prompt.split('\n')[0] ?? '').slice(0, 72) : '');
+    setFollowMsg(null);
+    // Intentionally keyed on activeId only: re-running on every `sessions` poll would clobber a title edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
 
   if (status === null || !status.enabled) return null;
 
@@ -357,6 +412,55 @@ export default function RunnerSessions(): React.JSX.Element | null {
               <button type="button" className={styles.secondary} onClick={() => void sendFollowUp()}>
                 Send
               </button>
+            </div>
+          )}
+
+          {/* Git follow-through: a finished session's work lives on an isolated branch the user can push / PR. */}
+          {!isActive(activeSession) && activeSession.branch !== null && (
+            <div className={styles.followThrough}>
+              <div className={styles.branchRow}>
+                <span className={styles.logKind}>branch</span>
+                <code className={styles.branchName}>{activeSession.branch}</code>
+                {activeSession.pushed && <span className={styles.pushedBadge}>pushed</span>}
+              </div>
+
+              {activeSession.prUrl !== null ? (
+                <a
+                  className={styles.prLink}
+                  href={activeSession.prUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  View pull request →
+                </a>
+              ) : (
+                <div className={styles.followActions}>
+                  <input
+                    className={styles.followInput}
+                    placeholder="Pull request title"
+                    value={prTitle}
+                    onChange={(e) => setPrTitle(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={styles.secondary}
+                    disabled={followBusy}
+                    onClick={() => void push(activeSession.id)}
+                  >
+                    {activeSession.pushed ? 'Re-push' : 'Push'}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.primary}
+                    disabled={followBusy || prTitle.trim() === ''}
+                    onClick={() => void openPr(activeSession)}
+                  >
+                    Open PR
+                  </button>
+                </div>
+              )}
+
+              {followMsg !== null && <div className={styles.followMsg}>{followMsg}</div>}
             </div>
           )}
         </div>

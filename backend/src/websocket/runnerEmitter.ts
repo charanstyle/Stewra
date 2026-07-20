@@ -2,8 +2,11 @@ import { z } from 'zod';
 import { RUNNER_SERVER_EVENTS } from '@stewra/shared-types';
 import type {
   RunnerCancelPayload,
+  RunnerGitActionAck,
+  RunnerOpenPrPayload,
   RunnerPermissionDecisionPayload,
   RunnerPromptPayload,
+  RunnerPushPayload,
   RunnerStartSessionAck,
   RunnerStartSessionPayload,
 } from '@stewra/shared-types';
@@ -99,6 +102,72 @@ export function decidePermissionOnRunner(
 
 export function cancelRunnerSession(userId: string, deviceId: string, payload: RunnerCancelPayload): Promise<boolean> {
   return sendToDevice(userId, deviceId, RUNNER_SERVER_EVENTS.CANCEL, payload);
+}
+
+/** How long we wait for a runner to do the git work (push/PR reach the network) before giving up. */
+const GIT_ACTION_ACK_TIMEOUT_MS = 130_000;
+
+/** The runner's git-action ack is a payload from someone else's machine — parsed, never trusted. */
+const gitActionAckSchema = z.object({
+  ok: z.boolean(),
+  branch: z.string().max(255).optional(),
+  remoteUrl: z.string().max(1024).optional(),
+  prUrl: z.string().max(1024).optional(),
+  error: z.string().max(500).optional(),
+});
+
+/**
+ * Ask ONE chosen runner to run a git follow-through action (push / open-PR) on a finished session, and wait
+ * for its result. Returns null when the device is offline (a normal state — the laptop is shut), distinct
+ * from a device that answered `{ ok: false, error }` because the push/PR itself failed. The runner does the
+ * git work with the machine's own credentials; the server only relays the outcome.
+ */
+async function gitActionOnRunner(
+  userId: string,
+  deviceId: string,
+  event: string,
+  payload: unknown,
+): Promise<RunnerGitActionAck | null> {
+  const target = await findDevice(userId, deviceId);
+  if (target === null) return null;
+
+  let raw: unknown;
+  try {
+    raw = await target.timeout(GIT_ACTION_ACK_TIMEOUT_MS).emitWithAck(event, payload);
+  } catch {
+    logger.warn('runner: git-action ack timed out', { userId, deviceId, event });
+    return { ok: false, error: 'ack_timeout' };
+  }
+
+  const parsed = gitActionAckSchema.safeParse(raw);
+  if (!parsed.success) {
+    logger.warn('runner: malformed git-action ack', { userId, deviceId, event });
+    return { ok: false, error: 'malformed_ack' };
+  }
+  // Rebuilt so absent optionals stay absent under exactOptionalPropertyTypes.
+  return {
+    ok: parsed.data.ok,
+    ...(parsed.data.branch !== undefined ? { branch: parsed.data.branch } : {}),
+    ...(parsed.data.remoteUrl !== undefined ? { remoteUrl: parsed.data.remoteUrl } : {}),
+    ...(parsed.data.prUrl !== undefined ? { prUrl: parsed.data.prUrl } : {}),
+    ...(parsed.data.error !== undefined ? { error: parsed.data.error } : {}),
+  };
+}
+
+export function pushOnRunner(
+  userId: string,
+  deviceId: string,
+  payload: RunnerPushPayload,
+): Promise<RunnerGitActionAck | null> {
+  return gitActionOnRunner(userId, deviceId, RUNNER_SERVER_EVENTS.PUSH, payload);
+}
+
+export function openPrOnRunner(
+  userId: string,
+  deviceId: string,
+  payload: RunnerOpenPrPayload,
+): Promise<RunnerGitActionAck | null> {
+  return gitActionOnRunner(userId, deviceId, RUNNER_SERVER_EVENTS.OPEN_PR, payload);
 }
 
 /**

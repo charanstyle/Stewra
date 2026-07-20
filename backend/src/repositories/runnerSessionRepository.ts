@@ -15,6 +15,10 @@ function toModel(row: Selectable<RunnerSessionsTable>): RunnerSession {
     prompt: row.prompt,
     summary: row.summary,
     error: row.error,
+    branch: row.branch,
+    headSha: row.head_sha,
+    prUrl: row.pr_url,
+    pushed: row.pushed,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
     endedAt: row.ended_at?.toISOString() ?? null,
@@ -91,11 +95,17 @@ class RunnerSessionRepository {
       .execute();
   }
 
-  /** Record a terminal outcome: status + optional summary/error + the end timestamp. */
+  /** Record a terminal outcome: status + optional summary/error + the session's branch/tip + end timestamp. */
   async finish(
     userId: string,
     sessionId: string,
-    params: { status: Extract<RunnerSessionStatus, 'completed' | 'failed' | 'cancelled'>; summary?: string; error?: string },
+    params: {
+      status: Extract<RunnerSessionStatus, 'completed' | 'failed' | 'cancelled'>;
+      summary?: string;
+      error?: string;
+      branch?: string;
+      headSha?: string;
+    },
   ): Promise<void> {
     const now = new Date();
     await db
@@ -104,9 +114,33 @@ class RunnerSessionRepository {
         status: params.status,
         summary: params.summary ?? null,
         error: params.error ?? null,
+        // Only overwrite branch/head when the runner reported them (a completed run); leave prior values
+        // untouched otherwise so a `null` in a failure payload can't erase a branch we already recorded.
+        ...(params.branch !== undefined ? { branch: params.branch } : {}),
+        ...(params.headSha !== undefined ? { head_sha: params.headSha } : {}),
         updated_at: now,
         ended_at: now,
       })
+      .where('id', '=', sessionId)
+      .where('user_id', '=', userId)
+      .execute();
+  }
+
+  /** Mark a session's branch as pushed to its remote. */
+  async markPushed(userId: string, sessionId: string): Promise<void> {
+    await db
+      .updateTable('runner_sessions')
+      .set({ pushed: true, updated_at: new Date() })
+      .where('id', '=', sessionId)
+      .where('user_id', '=', userId)
+      .execute();
+  }
+
+  /** Record the pull request opened for a session's branch (also implies the branch was pushed). */
+  async recordPr(userId: string, sessionId: string, prUrl: string): Promise<void> {
+    await db
+      .updateTable('runner_sessions')
+      .set({ pr_url: prUrl, pushed: true, updated_at: new Date() })
       .where('id', '=', sessionId)
       .where('user_id', '=', userId)
       .execute();

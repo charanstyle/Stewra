@@ -235,6 +235,9 @@ export type {
   DecideRunnerPermissionRequest,
   RunnerSessionActionResponse,
   ListRunnerSessionsResponse,
+  PushRunnerSessionResponse,
+  OpenRunnerPrRequest,
+  OpenRunnerPrResponse,
 } from './api/runner';
 export type {
   IceServerConfig,
@@ -336,6 +339,9 @@ export type {
   RunnerCancelPayload,
   RunnerSessionUpdatePayload,
   RunnerSessionDonePayload,
+  RunnerPushPayload,
+  RunnerOpenPrPayload,
+  RunnerGitActionAck,
   RunnerPermissionOption,
   RunnerPermissionPromptPayload,
   RunnerPermissionDecisionPayload,

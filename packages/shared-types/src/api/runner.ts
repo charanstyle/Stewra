@@ -99,3 +99,31 @@ export interface RunnerSessionActionResponse {
 export interface ListRunnerSessionsResponse {
   readonly sessions: readonly RunnerSession[];
 }
+
+// ── Git follow-through (on a FINISHED session) ──────────────────────────────────────────────────────
+
+/**
+ * POST /runner/sessions/:id/push — push a finished session's isolated branch to its workspace remote. The
+ * runner does the push with the MACHINE'S own credentials; Stewra never holds them. Returns the refreshed
+ * session (its `pushed` flag flipped) plus the remote it landed on.
+ */
+export interface PushRunnerSessionResponse {
+  readonly session: RunnerSession;
+  /** The remote URL the branch was pushed to, for a "pushed to …" confirmation. */
+  readonly remoteUrl: string | null;
+}
+
+/**
+ * POST /runner/sessions/:id/pr — open a pull request for a finished session's branch (pushing it first if
+ * needed), via the machine's `gh`. Title/body are user-supplied; the base is the workspace's default branch.
+ */
+export interface OpenRunnerPrRequest {
+  readonly title: string;
+  readonly body: string;
+}
+
+export interface OpenRunnerPrResponse {
+  readonly session: RunnerSession;
+  /** The created pull request URL. */
+  readonly prUrl: string;
+}

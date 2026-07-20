@@ -36,6 +36,12 @@ const permissionBodySchema = z.object({
   optionId: z.string().min(1).max(256),
 });
 
+/** PR title/body are echoed onto GitHub, so they're bounded — a create-a-PR endpoint isn't a text dump. */
+const openPrBodySchema = z.object({
+  title: z.string().min(1).max(256),
+  body: z.string().max(16_000),
+});
+
 /**
  * The Stewra Runner surface (`/runner`).
  *
@@ -152,6 +158,27 @@ class RunnerController extends BaseController {
       this.handleSuccess(res, await runnerSessionService.cancel(this.userId(req), id));
     } catch (error) {
       this.handleError(error, res, 'RunnerController.cancelSession');
+    }
+  }
+
+  /** POST /runner/sessions/:id/push — push a finished session's branch to its remote. */
+  async pushSession(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = sessionIdSchema.parse(req.params);
+      this.handleSuccess(res, await runnerSessionService.pushSession(this.userId(req), id));
+    } catch (error) {
+      this.handleError(error, res, 'RunnerController.pushSession');
+    }
+  }
+
+  /** POST /runner/sessions/:id/pr — open a pull request for a finished session's branch. */
+  async openPr(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = sessionIdSchema.parse(req.params);
+      const { title, body } = openPrBodySchema.parse(req.body);
+      this.handleSuccess(res, await runnerSessionService.openPr(this.userId(req), id, title, body), 201);
+    } catch (error) {
+      this.handleError(error, res, 'RunnerController.openPr');
     }
   }
 }

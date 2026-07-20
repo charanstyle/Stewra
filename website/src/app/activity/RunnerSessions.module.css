@@ -324,3 +324,61 @@
 .followInput {
   flex: 1;
 }
+
+/* Git follow-through: branch line + push / open-PR controls on a finished session. */
+.followThrough {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.branchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.branchName {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--muted);
+  background: rgba(127, 127, 127, 0.1);
+  border-radius: 6px;
+  padding: 2px 6px;
+  overflow-wrap: anywhere;
+}
+
+.pushedBadge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+.followActions {
+  display: flex;
+  gap: 8px;
+}
+
+.prLink {
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.prLink:hover {
+  text-decoration: underline;
+}
+
+.followMsg {
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

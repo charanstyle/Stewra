@@ -80,6 +80,14 @@ export const RUNNER_SERVER_EVENTS = {
   PERMISSION_DECISION: 'runner:permission-decision',
   /** Stop a running session and tear down its subprocess + worktree. */
   CANCEL: 'runner:cancel',
+  /**
+   * Push a finished session's branch to its workspace remote. Acked with a `RunnerGitActionAck` (the pushed
+   * ref + remote URL, or a machine-readable error) — the runner does the git work with the machine's own
+   * credentials; the server never holds them.
+   */
+  PUSH: 'runner:push',
+  /** Open a pull request for a finished session's (pushed) branch, via the machine's `gh`. Acked with the URL. */
+  OPEN_PR: 'runner:open-pr',
   /** The user revoked THIS device. The runner must stop all sessions, wipe its token, and shut down. */
   REVOKED: 'runner:revoked',
 } as const;
@@ -191,6 +199,49 @@ export interface RunnerSessionDonePayload {
   readonly status: Extract<RunnerSessionStatus, 'completed' | 'failed' | 'cancelled'>;
   /** A short final summary for the transcript, when the harness produced one. */
   readonly summary?: string;
+  readonly error?: string;
+  /**
+   * The isolated branch the session's work lives on (`stewra/run/<id>`). Present once a worktree was cut —
+   * so the control surface can offer push / open-PR after the run without inventing the ref itself.
+   */
+  readonly branch?: string;
+  /** The branch's HEAD after the runner's auto-commit — the unambiguous tip of what the session produced. */
+  readonly headSha?: string;
+  /** Whether the runner made a commit on finish (false when the agent left no changes, or already committed). */
+  readonly committed?: boolean;
+}
+
+// ── Git follow-through (server ↔ runner, on a FINISHED session) ──────────────────────────────────────
+
+/**
+ * `runner:push` — push a finished session's branch to its workspace remote. The runner uses the MACHINE'S
+ * own git credentials (it is the user's box); the server never sees or stores them. Acked, not streamed,
+ * because it's a discrete action whose result (the pushed ref) the UI needs immediately.
+ */
+export interface RunnerPushPayload {
+  readonly sessionId: string;
+}
+
+/** `runner:open-pr` — open a pull request for a finished session's branch, via the machine's `gh`. Acked. */
+export interface RunnerOpenPrPayload {
+  readonly sessionId: string;
+  readonly title: string;
+  readonly body: string;
+}
+
+/**
+ * The runner's ack to `runner:push` / `runner:open-pr`. `ok:false` carries a machine-readable `error`
+ * (e.g. `no_remote`, `gh_missing`, `unknown_session`) so the control surface renders an honest, specific
+ * message instead of a generic failure — the same discipline as the start-session ack.
+ */
+export interface RunnerGitActionAck {
+  readonly ok: boolean;
+  /** The branch the action operated on. */
+  readonly branch?: string;
+  /** The remote URL the branch was pushed to (push). */
+  readonly remoteUrl?: string;
+  /** The created pull request URL (open-pr). */
+  readonly prUrl?: string;
   readonly error?: string;
 }
 

@@ -34,6 +34,12 @@ const permissionDecisionSchema = z.object({
   optionId: z.string().min(1).max(256),
 });
 const cancelSchema = z.object({ sessionId: z.string().min(1).max(128) });
+const pushSchema = z.object({ sessionId: z.string().min(1).max(128) });
+const openPrSchema = z.object({
+  sessionId: z.string().min(1).max(128),
+  title: z.string().min(1).max(256),
+  body: z.string().max(16_000),
+});
 
 export interface RunnerClientEvents {
   /** The user revoked THIS device from the web app. Wipe the token and stop. */
@@ -169,6 +175,30 @@ export class StewraRunnerClient {
     socket.on(RUNNER_SERVER_EVENTS.CANCEL, (raw: unknown) => {
       const parsed = cancelSchema.safeParse(raw);
       if (parsed.success) void this.sessions?.cancel(parsed.data);
+    });
+
+    // Git follow-through is acked, so the server (and the user watching) learns the pushed ref / PR URL — or
+    // a specific failure — synchronously, rather than inferring it from a later stream event.
+    socket.on(RUNNER_SERVER_EVENTS.PUSH, (raw: unknown, ack?: (response: unknown) => void) => {
+      const parsed = pushSchema.safeParse(raw);
+      if (!parsed.success) {
+        ack?.({ ok: false, error: 'malformed_payload' });
+        return;
+      }
+      void (this.sessions?.push(parsed.data) ?? Promise.resolve({ ok: false, error: 'not_ready' }))
+        .then((result) => ack?.(result))
+        .catch((error: unknown) => ack?.({ ok: false, error: messageOf(error) }));
+    });
+
+    socket.on(RUNNER_SERVER_EVENTS.OPEN_PR, (raw: unknown, ack?: (response: unknown) => void) => {
+      const parsed = openPrSchema.safeParse(raw);
+      if (!parsed.success) {
+        ack?.({ ok: false, error: 'malformed_payload' });
+        return;
+      }
+      void (this.sessions?.openPr(parsed.data) ?? Promise.resolve({ ok: false, error: 'not_ready' }))
+        .then((result) => ack?.(result))
+        .catch((error: unknown) => ack?.({ ok: false, error: messageOf(error) }));
     });
   }
 

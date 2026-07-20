@@ -73,4 +73,15 @@ router.post('/sessions/:id/cancel', requireAuth, (req, res) => {
   void runnerController.cancelSession(req, res);
 });
 
+// Git follow-through on a finished session: push the isolated branch to its remote, or open a PR. Both act
+// on the user's own machine (the runner does the git with the machine's credentials), so they require a
+// verified email like starting a session does.
+router.post('/sessions/:id/push', requireAuth, verified, (req, res) => {
+  void runnerController.pushSession(req, res);
+});
+
+router.post('/sessions/:id/pr', requireAuth, verified, (req, res) => {
+  void runnerController.openPr(req, res);
+});
+
 export default router;

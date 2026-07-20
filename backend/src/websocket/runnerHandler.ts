@@ -58,6 +58,9 @@ const doneSchema = z.object({
   status: z.enum(['completed', 'failed', 'cancelled']),
   summary: z.string().max(10_000).optional(),
   error: z.string().max(2_000).optional(),
+  branch: z.string().max(255).optional(),
+  headSha: z.string().max(64).optional(),
+  committed: z.boolean().optional(),
 });
 
 const permissionOptionSchema = z.object({
@@ -90,6 +93,9 @@ function toDonePayload(d: z.infer<typeof doneSchema>): RunnerSessionDonePayload 
     status: d.status,
     ...(d.summary !== undefined ? { summary: d.summary } : {}),
     ...(d.error !== undefined ? { error: d.error } : {}),
+    ...(d.branch !== undefined ? { branch: d.branch } : {}),
+    ...(d.headSha !== undefined ? { headSha: d.headSha } : {}),
+    ...(d.committed !== undefined ? { committed: d.committed } : {}),
   };
 }
 function toPermissionPayload(d: z.infer<typeof permissionRequestSchema>): RunnerPermissionPromptPayload {

@@ -4,7 +4,10 @@ import type {
   GetRunnerStatusResponse,
   ListRunnerDevicesResponse,
   ListRunnerSessionsResponse,
+  OpenRunnerPrRequest,
+  OpenRunnerPrResponse,
   PromptRunnerSessionRequest,
+  PushRunnerSessionResponse,
   RevokeRunnerDeviceResponse,
   RunnerSessionActionResponse,
   StartRunnerPairingResponse,
@@ -71,4 +74,10 @@ export const runnerService = {
 
   cancelSession: (id: string): Promise<RunnerSessionActionResponse> =>
     request(`/runner/sessions/${id}/cancel`, { method: 'POST', body: {} }),
+
+  pushSession: (id: string): Promise<PushRunnerSessionResponse> =>
+    request(`/runner/sessions/${id}/push`, { method: 'POST', body: {} }),
+
+  openPr: (id: string, body: OpenRunnerPrRequest): Promise<OpenRunnerPrResponse> =>
+    request(`/runner/sessions/${id}/pr`, { method: 'POST', body }),
 };
