@@ -7,9 +7,6 @@
 # Each step is its own reusable flow so you can run them individually too.
 appId: com.stewra.app
 env:
-  EMAIL: ""
-  PASSWORD: ""
-  CONTACT_NAME: ""
   MESSAGE_TEXT: "E2E hello from Maestro"
 ---
 - runFlow: login.yaml

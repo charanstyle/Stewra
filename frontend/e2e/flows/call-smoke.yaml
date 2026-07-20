@@ -4,10 +4,18 @@
 # A true two-party connect/answer test needs a second live session and is covered
 # by the website suite (website/e2e/calls.audio.mjs), which drives two users at
 # once. Maestro drives one device, so we assert the outgoing-call UI, not connect.
+#
+# CONTACT_NAME is injected by run-features.sh (--env); no flow-level default, because a default
+# overrides the injected value in Maestro 2.6.x. Empty CONTACT_NAME falls back to the first thread.
 appId: com.stewra.app
-env:
-  CONTACT_NAME: ""
 ---
+# A preceding flow (e.g. send-message) may leave us inside a conversation. Return to the Chats
+# list first so this flow is safe both standalone and chained after another.
+- runFlow:
+    when:
+      notVisible: "Chats"
+    commands:
+      - pressKey: Back
 - assertVisible: "Chats"
 - tapOn:
     id: "tab-chats"
@@ -17,7 +25,10 @@ env:
       true: ${CONTACT_NAME != ""}
     commands:
       - tapOn: ${CONTACT_NAME}
-    else:
+- runFlow:
+    when:
+      true: ${CONTACT_NAME == ""}
+    commands:
       - tapOn:
           index: 0
           text: ".*"
@@ -25,8 +36,9 @@ env:
     id: "call-start-voice"
 # The call screen should come up with a Hang up / End control; end it right away
 # so the flow leaves no dangling ringing call.
-- assertVisible:
-    id: "call-end"
+- extendedWaitUntil:
+    visible:
+      id: "call-end"
     timeout: 15000
 - tapOn:
     id: "call-end"

@@ -1,12 +1,12 @@
 # Sign in to the Stewra app with credentials supplied via env.
 #
-# Never hardcodes credentials: EMAIL / PASSWORD default to empty and MUST be
-# overridden at run time (see ../README.md). A blank credential fails the login
-# assertion loudly rather than silently signing in as the wrong user.
+# Credentials are injected at run time by run-features.sh as `--env EMAIL=... --env PASSWORD=...`
+# (sourced from the repo-root .env.e2e). They are deliberately NOT declared with defaults here:
+# Maestro 2.6.x lets a flow-level `env:` default win over the command-line `--env`, so a default
+# would clobber the injected credential and the flow would type an empty string. run-features.sh
+# fails loudly when the credentials are missing, so the "never sign in as a blank/wrong user"
+# guarantee lives there, not in a placeholder default.
 appId: com.stewra.app
-env:
-  EMAIL: ""
-  PASSWORD: ""
 ---
 - launchApp:
     clearState: true          # start from a signed-out state every run
@@ -17,9 +17,13 @@ env:
 - tapOn:
     id: "login-password-input"
 - inputText: ${PASSWORD}
+# Dismiss the keyboard before submitting: on shorter screens / taller keyboards the "Sign in"
+# button sits behind the soft keyboard, so a tap on it would land on a key instead of the button.
+- hideKeyboard
 - tapOn:
     id: "login-submit"
 # Landing on the Chats tab proves the token was issued and the user is verified.
-- assertVisible:
-    text: "Chats"
+- extendedWaitUntil:
+    visible:
+      text: "Chats"
     timeout: 20000

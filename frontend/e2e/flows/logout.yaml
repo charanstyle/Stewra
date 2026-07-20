@@ -4,11 +4,19 @@
 # always land back on "Sign in", never leave the app on a half-torn-down screen.
 appId: com.stewra.app
 ---
+# A preceding flow (e.g. call-smoke) may leave us inside a conversation. Return to the Chats
+# list first so this flow is safe both standalone and chained after another.
+- runFlow:
+    when:
+      notVisible: "Chats"
+    commands:
+      - pressKey: Back
 - assertVisible: "Chats"
 - tapOn:
     id: "tab-chats"
 - tapOn:
     id: "logout-btn"
-- assertVisible:
-    text: "Sign in"
+- extendedWaitUntil:
+    visible:
+      text: "Sign in"
     timeout: 15000
