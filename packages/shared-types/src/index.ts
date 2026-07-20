@@ -26,6 +26,7 @@ export type { UserPreferences } from './models/preferences';
 export type { Rating, InsightFeedback } from './models/feedback';
 export { RATINGS, RATING_REWARD, POSITIVE_RATINGS } from './models/feedback';
 export type { AgentMemory, MemorySource } from './models/memory';
+export type { RunnerDevice } from './models/runner';
 export type {
   ProcessRule,
   ProcessDomain,
@@ -222,6 +223,14 @@ export {
   isConsentSentenceValid,
 } from './api/channels';
 export type {
+  StartRunnerPairingResponse,
+  ClaimRunnerTokenRequest,
+  ClaimRunnerTokenResponse,
+  ListRunnerDevicesResponse,
+  RevokeRunnerDeviceResponse,
+  GetRunnerStatusResponse,
+} from './api/runner';
+export type {
   IceServerConfig,
   TurnCredentialsResponse,
   CallPushPlatform,
@@ -293,6 +302,34 @@ export type {
   BridgeSendPayload,
   BridgeSendAck,
 } from './realtime/bridge';
+
+// Realtime — the /runner namespace (Stewra Runner on the user's own machine: laptop or their cloud VM)
+export {
+  RUNNER_CLIENT_EVENTS,
+  RUNNER_SERVER_EVENTS,
+  RUNNER_HARNESS_IDS,
+  RUNNER_SESSION_STATUSES,
+  RUNNER_UPDATE_KINDS,
+} from './realtime/runner';
+export type {
+  RunnerClientEvent,
+  RunnerServerEvent,
+  RunnerHarnessId,
+  RunnerSessionStatus,
+  RunnerUpdateKind,
+  RunnerHarnessInfo,
+  RunnerWorkspace,
+  RunnerHelloPayload,
+  RunnerStartSessionPayload,
+  RunnerStartSessionAck,
+  RunnerPromptPayload,
+  RunnerCancelPayload,
+  RunnerSessionUpdatePayload,
+  RunnerSessionDonePayload,
+  RunnerPermissionOption,
+  RunnerPermissionPromptPayload,
+  RunnerPermissionDecisionPayload,
+} from './realtime/runner';
 
 // Audit
 export type { AuditResourceType, AuditAction, AuditEvent, NewAuditEvent } from './audit/events';

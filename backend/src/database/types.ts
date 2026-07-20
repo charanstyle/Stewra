@@ -23,6 +23,8 @@ import type {
   Rating,
   ReactionType,
   ResourceKind,
+  RunnerHarnessInfo,
+  RunnerWorkspace,
   SenderKind,
   SuggestionKind,
   SuggestionOption,
@@ -630,6 +632,39 @@ export interface WhatsappOutboundTable {
   sent_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
 }
 
+/**
+ * A registered Stewra Runner install on a user's own machine (migration 033). Like `bridge_devices`, there
+ * is no `revoked_at`: revoking DELETES the row. `harnesses`/`workspaces` are the runner's last-reported
+ * capabilities (jsonb), written as JSON strings and read back parsed.
+ */
+export interface RunnerDevicesTable {
+  id: Generated<string>;
+  user_id: string;
+  name: string;
+  /** SHA-256 of the runner token. The plaintext token exists only in the pairing response. */
+  token_hash: string;
+  app_version: string;
+  os: Generated<string>;
+  harnesses: ColumnType<readonly RunnerHarnessInfo[], string | undefined, string>;
+  workspaces: ColumnType<readonly RunnerWorkspace[], string | undefined, string>;
+  last_seen_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+}
+
+/**
+ * Single-use runner pairing codes (migration 033). A dedicated table rather than `channel_link_codes`,
+ * whose `channel` is a MessagingChannel — a runner is not a messaging channel. The redemption UPDATE's
+ * WHERE clause is the atomic guard; there is no `revoked` flag, only `consumed_at`.
+ */
+export interface RunnerPairCodesTable {
+  id: Generated<string>;
+  user_id: string;
+  code: string;
+  expires_at: ColumnType<Date, Date, Date>;
+  consumed_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -669,4 +704,6 @@ export interface Database {
   whatsapp_chats: WhatsappChatsTable;
   whatsapp_messages: WhatsappMessagesTable;
   whatsapp_outbound: WhatsappOutboundTable;
+  runner_devices: RunnerDevicesTable;
+  runner_pair_codes: RunnerPairCodesTable;
 }

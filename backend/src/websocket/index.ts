@@ -13,9 +13,13 @@ import { CallSignalingHandler } from './callSignalingHandler.js';
 import { bridgeAuthMiddleware } from './bridgeAuthMiddleware.js';
 import { registerBridgeHandler } from './bridgeHandler.js';
 import { setBridgeNamespace } from './bridgeEmitter.js';
+import { runnerAuthMiddleware } from './runnerAuthMiddleware.js';
+import { registerRunnerHandler } from './runnerHandler.js';
+import { setRunnerNamespace } from './runnerEmitter.js';
 import { config } from '../config/unifiedConfig.js';
 import type { BaseSocketHandler } from './baseSocketHandler.js';
 import type { BridgeNamespace, BridgeSocket } from './bridgeTypes.js';
+import type { RunnerNamespace, RunnerSocket } from './runnerTypes.js';
 import type { AppServer, AppSocket } from './types.js';
 import { presenceRoom, userRoom } from './types.js';
 
@@ -103,8 +107,35 @@ export function initSockets(io: AppServer): void {
   });
 
   initBridgeNamespace(io);
+  initRunnerNamespace(io);
 
   logger.info('Socket.IO realtime layer initialized');
+}
+
+/**
+ * The `/runner` namespace: where Stewra Runner processes live (a coding-agent host on the user's own
+ * machine or their cloud VM).
+ *
+ * A SEPARATE NAMESPACE, for the same reasons as `/bridge`: a runner authenticates with a revocable device
+ * token rather than a JWT, must never join a conversation or presence room, and must never emit a chat
+ * event. Isolation makes that structural rather than a rule to remember. Not mounted unless the operator
+ * enabled the feature, so a default deploy has no runner namespace to connect to.
+ */
+function initRunnerNamespace(io: AppServer): void {
+  if (!config.runner.enabled) {
+    logger.info('runner: namespace not mounted (RUNNER_ENABLED=false)');
+    return;
+  }
+
+  const runner: RunnerNamespace = io.of('/runner');
+  runner.use(runnerAuthMiddleware);
+  setRunnerNamespace(runner);
+  runner.on('connection', (socket: RunnerSocket) => {
+    logger.info('runner: connected', { userId: socket.data.userId, deviceId: socket.data.deviceId });
+    registerRunnerHandler(socket);
+  });
+
+  logger.info('runner: /runner namespace mounted');
 }
 
 /**

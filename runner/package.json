@@ -1,0 +1,29 @@
+{
+  "name": "@stewra/runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stewra Runner — a headless companion process that runs on the user's OWN machine (a laptop, or a cloud VM they own). It hosts coding agents (Claude Code, Codex, Gemini CLI) via ACP and runs them against the user's repositories; Stewra's servers only route and observe.",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "stewra-runner": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run && npm run test:esm-interop",
+    "test:esm-interop": "node --input-type=module -e \"import { RUNNER_CLIENT_EVENTS } from '@stewra/shared-types'; if (!RUNNER_CLIENT_EVENTS?.HELLO) { throw new Error('ESM named-export interop is broken'); }\"",
+    "start": "npm run build && node dist/cli.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@stewra/shared-types": "*",
+    "socket.io-client": "^4.8.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "typescript": "^5.6.3",
+    "vitest": "^3.2.0"
+  }
+}

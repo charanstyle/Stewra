@@ -1,0 +1,18 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2022"],
+    "types": ["node"],
+
+    // ESM on `nodenext`, like the bridge (see bridge/tsconfig.json for the full reasoning). The runner is
+    // a plain headless Node process — no Electron, no DOM — but it shares the bridge's constraint: it must
+    // import `@stewra/shared-types` (still CommonJS) under the SAME module resolution Node will use at
+    // runtime, so a green typecheck reflects the real interop. Relative imports carry a `.js` extension.
+    "module": "nodenext",
+    "moduleResolution": "nodenext"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist", "node_modules"]
+}

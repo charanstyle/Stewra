@@ -300,6 +300,22 @@ const EnvSchema = z.object({
   // A bridge token is a long-lived DEVICE credential, so it is deliberately not a JWT and has no expiry
   // baked in — revocation is by database row, which is immediate. This bounds its raw entropy instead.
   WHATSAPP_PERSONAL_BRIDGE_TOKEN_BYTES: z.coerce.number().int().min(32).max(64).default(32),
+
+  // ── Stewra RUNNER (coding-agent host on the user's OWN machine — a laptop or their cloud VM) ─────────
+  // A separate, opt-in, off-by-default surface where the user runs coding agents (Claude Code, Codex,
+  // Gemini CLI) on their own machine and drives them from Stewra. Its own namespace, like the WhatsApp
+  // channels above, so enabling one capability can never enable this one as a side effect.
+  RUNNER_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // Where the user downloads the Stewra Runner. Required when the feature is on — no hardcoded client URL.
+  RUNNER_DOWNLOAD_URL: z.string().url().optional(),
+  // The oldest runner build allowed to connect — the lever to refuse a build with a known-bad execution
+  // path. A SAFETY control: a runner executes code on the user's machine.
+  RUNNER_MIN_VERSION: z.string().regex(/^\d+\.\d+\.\d+$/).optional(),
+  // A runner token is a long-lived DEVICE credential (not a JWT); revocation is by database row. This
+  // bounds its raw entropy — 32 bytes of base64url is ample and unguessable.
+  RUNNER_DEVICE_TOKEN_BYTES: z.coerce.number().int().min(16).max(64).default(32),
+  // How long a single-use runner pairing code is valid before it expires.
+  RUNNER_PAIR_CODE_TTL_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -386,6 +402,16 @@ if (env.WHATSAPP_PERSONAL_ENABLED) {
   ).filter((k) => !env[k]);
   if (missing.length > 0) {
     throw new Error(`WHATSAPP_PERSONAL_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+}
+
+// Fail loud when the runner is enabled but under-configured. Without a download URL the "Runners" panel
+// would offer a pairing flow leading nowhere; without a minimum version we could not refuse a build whose
+// execution path we no longer trust. Both are worse than not booting.
+if (env.RUNNER_ENABLED) {
+  const missing = (['RUNNER_DOWNLOAD_URL', 'RUNNER_MIN_VERSION'] as const).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`RUNNER_ENABLED=true requires: ${missing.join(', ')}`);
   }
 }
 
@@ -618,6 +644,18 @@ export const config = {
     // and `whatsappPersonal`, so enabling either of those can never enable this. When false the per-user
     // opt-in cannot be turned on and both WhatsApp channels keep refusing to send email.
     enabled: env.WHATSAPP_EMAIL_APPROVAL_ENABLED,
+  },
+  runner: {
+    // The coding-agent runner surface. Its own namespace, separate from every WhatsApp switch above, so
+    // enabling any of those can never enable this. When false the `/runner` socket namespace is not
+    // mounted and every runner REST route reports the feature unavailable.
+    enabled: env.RUNNER_ENABLED,
+    /** Where the user gets the Stewra Runner. Empty unless the feature is enabled (fail-loud above). */
+    downloadUrl: env.RUNNER_DOWNLOAD_URL ?? '',
+    /** Oldest runner build allowed to connect — our lever to refuse a build we no longer trust to run. */
+    minVersion: env.RUNNER_MIN_VERSION ?? '',
+    deviceTokenBytes: env.RUNNER_DEVICE_TOKEN_BYTES,
+    pairCodeTtlMs: env.RUNNER_PAIR_CODE_TTL_MINUTES * 60 * 1000,
   },
   uploads: {
     // Mounted volume for uploaded/synthesized media; served only via authenticated GET /media/:id.

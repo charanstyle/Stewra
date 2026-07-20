@@ -1,0 +1,5 @@
+{
+  // What actually ships. Tests are typechecked via tsconfig.json (`npm run typecheck`) but never emitted.
+  "extends": "./tsconfig.json",
+  "exclude": ["dist", "node_modules", "src/tests"]
+}
