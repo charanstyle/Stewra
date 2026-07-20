@@ -6,8 +6,11 @@ a message, place a call, sign out — plus an adb utility for resetting devices 
 runs.
 
 This is the mobile counterpart to [`website/e2e/`](../../website/e2e/). The website
-suite drives two browser sessions at once (good for two-party calls); Maestro drives
-one device, so the call flow here is a **caller-side smoke test** only.
+suite drives two browser sessions at once (good for two-party calls); a single Maestro
+flow drives one device, so the call *flow* here (`flows/call-smoke.yaml`) is a
+**caller-side smoke test** only. For a **real device-to-device call** there is a
+separate orchestrator, [`run-two-party-call.sh`](#two-party-device-to-device-call),
+which coordinates two devices with Maestro + adb.
 
 Element selectors are **registered `testID`s**, not visible text or
 `accessibilityLabel` — see [`TESTIDS.md`](./TESTIDS.md) for the full contract between
@@ -75,13 +78,46 @@ use the first conversation in the list.
 | `flows/logout.yaml` | Tap the header **Log out**; app returns to **Sign in** (guards the logout hardening). |
 | `flows/full.yaml` | Runs all four in order. |
 
-### Why the call test is caller-side only
+### Why the call *flow* is caller-side only
 
 WebRTC calls need a live callee. A real connect/answer assertion requires a second
-signed-in session, which Maestro (one device) can't provide. The two-party audio and
-video connect tests live in `website/e2e/calls.audio.mjs` / `calls.video.mjs`, which
-seed two browser contexts and drive both ends. Here we assert only that the outgoing
-call UI launches and can be ended cleanly.
+signed-in session, which a single Maestro flow (one device) can't provide. So
+`flows/call-smoke.yaml` asserts only that the outgoing call UI launches and can be
+ended cleanly. Two-party parity on the web side lives in
+`website/e2e/tests/calls.spec.ts` (two browser contexts, both ends assert `Connected`).
+
+## Two-party device-to-device call
+
+`run-two-party-call.sh` drives a **real** two-party WebRTC call across **two attached
+Android devices**: device A places the call (signed in as QA user A), device B answers
+it (signed in as QA user B), both ends are asserted to reach the connected state, then
+A hangs up and both are asserted to leave the call. This is the durable form of the
+orchestration proven live on 2026-07-19 (emulator ↔ USB Pixel 8, voice and video).
+
+```bash
+# <voice|video> <caller-serial> <callee-serial> [--no-login]
+./run-two-party-call.sh voice emulator-5554 <phone-serial>
+./run-two-party-call.sh video emulator-5554 <phone-serial>
+./run-two-party-call.sh voice emulator-5554 <phone-serial> --no-login   # skip sign-in
+```
+
+Both serials are **explicit** (see `adb devices -l`) — there's no sane default for
+"which device is the caller", and pinning avoids Maestro's non-deterministic device
+pick. It sources the same `.env.e2e` and additionally needs `E2E_USER_B_EMAIL` /
+`E2E_USER_B_PASSWORD` and `E2E_CONTACT_NAME` (B's display name as it appears in A's
+chat list).
+
+A single Maestro flow can't answer the call, because callkit-telecom raises the
+incoming call as a **system heads-up notification** (not a React view): its "Answer"
+button has no `testID`, its visible text is bidi-wrapped, and a cold `maestro test` is
+too slow to catch it before the ring times out. The script instead reads the live view
+hierarchy (which cleanly exposes `accessibilityText: "Answer"` with pixel bounds) and
+`adb ... input tap`s the button centre directly.
+
+For **voice**, connectedness is asserted by the `Connected` status label on both ends.
+For **video**, once media flows that label is replaced by the remote video surface
+(which has no `testID`), so the script asserts the in-call screen persists past the
+ringing labels; the pixel-level "I can see their camera" remains a manual visual check.
 
 ## Resetting devices between runs
 
