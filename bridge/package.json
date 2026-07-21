@@ -5,6 +5,10 @@
   "description": "Stewra Bridge — the companion-device app that runs on the user's OWN computer. It holds the WhatsApp connection; Stewra's servers never do.",
   "author": "Stewra",
   "homepage": "https://www.stewra.com",
+  "stewra": {
+    "comment": "Declared production default baked into packaged builds by scripts/inject-config.mjs. Override at package time with STEWRA_API_URL (e.g. for staging).",
+    "apiBaseUrl": "https://www.stewra.com"
+  },
   "type": "module",
   "main": "dist/main/main.js",
   "scripts": {
@@ -13,10 +17,10 @@
     "test": "vitest run && npm run test:esm-interop",
     "test:esm-interop": "node --input-type=module -e \"import { BRIDGE_CLIENT_EVENTS } from '@stewra/shared-types'; import { DisconnectReason } from '@whiskeysockets/baileys'; if (!BRIDGE_CLIENT_EVENTS?.HELLO || !DisconnectReason?.loggedOut) { throw new Error('ESM named-export interop is broken'); }\"",
     "start": "npm run build && electron dist/main/main.js",
-    "package": "npm run build && electron-builder",
-    "package:linux": "npm run build && electron-builder --linux",
-    "package:mac": "npm run build && electron-builder --mac",
-    "package:win": "npm run build && electron-builder --win",
+    "package": "npm run build && node scripts/inject-config.mjs && electron-builder",
+    "package:linux": "npm run build && node scripts/inject-config.mjs && electron-builder --linux",
+    "package:mac": "npm run build && node scripts/inject-config.mjs && electron-builder --mac",
+    "package:win": "npm run build && node scripts/inject-config.mjs && electron-builder --win",
     "clean": "rm -rf dist release"
   },
   "dependencies": {

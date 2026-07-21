@@ -4,6 +4,7 @@ import type { BridgeWaState } from '@stewra/shared-types';
 import { Bridge } from '../core/bridge.js';
 import { loadBridgeConfig } from '../core/config.js';
 import type { BridgeConfig } from '../core/config.js';
+import { BAKED_API_URL } from './bakedConfig.js';
 import { createSafeStorageSecretStore } from './secretStore.js';
 import { TokenStore } from './tokenStore.js';
 import type { SecretStore } from '../core/authState.js';
@@ -245,7 +246,11 @@ if (!app.requestSingleInstanceLock()) {
       // guessed at a server URL would point a WhatsApp session somewhere the user never agreed to; a
       // bridge with no real keystore would write that session to disk where anyone could read it. Neither
       // is a degraded mode worth running in, so neither gets a silent fallback.
-      activeConfig = loadBridgeConfig(process.env, app.getVersion());
+      // A GUI launch carries no STEWRA_API_URL; fall back to the value baked in at package time.
+      activeConfig = loadBridgeConfig(
+        { STEWRA_API_URL: process.env['STEWRA_API_URL'] ?? BAKED_API_URL },
+        app.getVersion(),
+      );
       secrets = createSafeStorageSecretStore();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Stewra Bridge is misconfigured.';
