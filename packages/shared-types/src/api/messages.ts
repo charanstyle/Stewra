@@ -90,3 +90,21 @@ export interface ConfirmEmailRequest {
 export interface ConfirmEmailResponse {
   readonly message: Message;
 }
+
+/** Resolve a Stewra-proposed runner session: `start` kicks it off, `cancel` dismisses it. */
+export type ConfirmRunnerSessionAction = 'start' | 'cancel';
+
+/**
+ * Confirm (or dismiss) the coding-agent runner session Stewra proposed on an assistant message
+ * (POST /messages/:id/confirm-runner-session). This is the button-driven twin of the natural-language
+ * "yes"/"no" confirm loop (web/mobile render Start/Cancel over the same path). On `start` the stored
+ * message's `proposedRunnerSession.status` transitions to `sent` (with the new `sessionId`) or `failed`;
+ * on `cancel` to `cancelled`. The updated message is returned so the card re-renders and is pushed to
+ * the room over the chat socket.
+ */
+export interface ConfirmRunnerSessionRequest {
+  readonly action: ConfirmRunnerSessionAction;
+}
+export interface ConfirmRunnerSessionResponse {
+  readonly message: Message;
+}

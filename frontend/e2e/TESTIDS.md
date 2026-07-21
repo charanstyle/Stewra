@@ -23,6 +23,11 @@ Convention: kebab-case `<screen-or-area>-<element>`.
 | `call-speaker` | `src/screens/call/CallScreen.tsx` | Speaker on/off toggle |
 | `call-end` | `src/screens/call/CallScreen.tsx` | End call / decline-incoming control |
 | `logout-btn` | `src/components/LogoutButton.tsx` | Header "Log out" control on the authenticated tabs |
+| `runner-session-card` | `src/components/chat/ProposedRunnerSessionCard.tsx` | The in-chat "Run coding agent" card Stewra renders when it proposes a runner session on one of the user's machines. Its presence gates the runner flow — absent means no runner online / not proposed |
+| `runner-session-start` | `src/components/chat/ProposedRunnerSessionCard.tsx` | Start (or "Try again" after a failed start) button — taps the confirm-gated `POST /messages/:id/confirm-runner-session` |
+| `runner-session-cancel` | `src/components/chat/ProposedRunnerSessionCard.tsx` | Cancel (or "Dismiss" after a failed start) button |
+| `runner-session-busy` | `src/components/chat/ProposedRunnerSessionCard.tsx` | The `ActivityIndicator` shown while a confirm request for this proposal is in flight (both buttons removed) |
+| `runner-session-status` | `src/components/chat/ProposedRunnerSessionCard.tsx` | The collapsed terminal-status line for a resolved (`sent`/`cancelled`) proposal, e.g. "Started on <machine>" |
 
 ## Conventions for flows
 

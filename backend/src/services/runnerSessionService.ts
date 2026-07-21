@@ -14,6 +14,7 @@ import type {
 } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
 import { runnerSessionRepository } from '../repositories/runnerSessionRepository.js';
+import { runnerChatRelayService } from './runnerChatRelayService.js';
 import { runnerService } from './runnerService.js';
 import {
   cancelRunnerSession,
@@ -112,6 +113,9 @@ class RunnerSessionService {
   async handlePermissionRequest(userId: string, payload: RunnerPermissionPromptPayload): Promise<void> {
     await runnerSessionRepository.setStatus(userId, payload.sessionId, 'awaiting-permission');
     emitToUser(userId, RUNNER_UI_EVENTS.PERMISSION_REQUEST, payload);
+    // In addition to the Runners-screen socket stream, relay the gate to the chat the session was
+    // started from (if any), so a WhatsApp/chat watcher can approve by simply replying "yes".
+    await runnerChatRelayService.onPermission(userId, payload);
   }
 
   /** A session reached a terminal state: record it (including the branch/tip it produced) and tell the user. */
@@ -124,6 +128,7 @@ class RunnerSessionService {
       ...(payload.headSha !== undefined ? { headSha: payload.headSha } : {}),
     });
     emitToUser(userId, RUNNER_UI_EVENTS.SESSION_DONE, payload);
+    await runnerChatRelayService.onDone(payload);
   }
 
   // ── User → runner relays (called by REST controllers) ───────────────────────────────────────────────

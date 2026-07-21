@@ -10,6 +10,7 @@ import {
 } from '@stewra/shared-types';
 import { conversationRepository } from '../repositories/conversationRepository.js';
 import { messageService } from './messageService.js';
+import type { RunnerChatChannel } from './runnerChatRelayService.js';
 import { emitToConversation } from '../websocket/emitter.js';
 import { logger } from '../utils/logger.js';
 
@@ -41,8 +42,13 @@ class StewraTurnService {
    * captured (a background rejection must never crash the process) and surfaced to the room as a
    * thinking-cleared ping.
    */
-  dispatchReply(userId: string, conversation: Conversation, userMessage: Message): void {
-    void this.replyTo(userId, conversation, userMessage).catch(() => {
+  dispatchReply(
+    userId: string,
+    conversation: Conversation,
+    userMessage: Message,
+    channel: RunnerChatChannel = 'stewra_chat',
+  ): void {
+    void this.replyTo(userId, conversation, userMessage, channel).catch(() => {
       // replyTo already captured to Sentry and emitted stewra:error; swallow so this stays fire-and-forget.
     });
   }
@@ -62,7 +68,9 @@ class StewraTurnService {
     const event: ChatMessageEvent = { message };
     emitToConversation(conversation.id, SERVER_EVENTS.CHAT_MESSAGE, event);
 
-    return this.replyTo(userId, conversation, message);
+    // The only callers of this entry point are the WhatsApp channels; a runner session started from here
+    // therefore relays its permission gates and result back to the user's WhatsApp self-chat.
+    return this.replyTo(userId, conversation, message, 'whatsapp');
   }
 
   /**
@@ -73,6 +81,7 @@ class StewraTurnService {
     userId: string,
     conversation: Conversation,
     userMessage: Message,
+    channel: RunnerChatChannel,
   ): Promise<Message> {
     const thinking: StewraThinkingEvent = { conversationId: conversation.id };
     emitToConversation(conversation.id, SERVER_EVENTS.STEWRA_THINKING, thinking);
@@ -82,6 +91,7 @@ class StewraTurnService {
         userId,
         conversation,
         userMessage,
+        channel,
       );
       const reply: StewraReplyEvent = { message: assistantMessage };
       emitToConversation(conversation.id, SERVER_EVENTS.STEWRA_REPLY, reply);

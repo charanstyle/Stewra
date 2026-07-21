@@ -7,6 +7,8 @@ import {
   type ChatReactionEvent,
   type ConfirmEmailAction,
   type ConfirmEmailResponse,
+  type ConfirmRunnerSessionAction,
+  type ConfirmRunnerSessionResponse,
   type DeleteMessageResponse,
   type GetMessageResponse,
   type ListMessagesResponse,
@@ -43,6 +45,8 @@ const listSchema = z.object({
 const idParamsSchema = z.object({ id: z.string().uuid() });
 const confirmEmailValues: [ConfirmEmailAction, ...ConfirmEmailAction[]] = ['send', 'cancel'];
 const confirmEmailSchema = z.object({ action: z.enum(confirmEmailValues) });
+const confirmRunnerValues: [ConfirmRunnerSessionAction, ...ConfirmRunnerSessionAction[]] = ['start', 'cancel'];
+const confirmRunnerSchema = z.object({ action: z.enum(confirmRunnerValues) });
 // Multipart text fields for POST /messages/voice (the audio itself arrives as the `audio` file part).
 const voiceFieldsSchema = z.object({ conversationId: z.string().uuid() });
 const reactSchema = z.object({
@@ -214,6 +218,29 @@ class MessagesController extends BaseController {
       this.handleSuccess(res, body);
     } catch (error) {
       this.handleError(error, res, 'MessagesController.confirmEmail');
+    }
+  }
+
+  /**
+   * POST /messages/:id/confirm-runner-session — resolve the runner session Stewra proposed on an assistant
+   * message: `start` runs the confirm-gated executor (the same path a natural-language "yes" takes),
+   * `cancel` dismisses it. Returns the updated message and fans it out to the conversation room so the
+   * proposal card re-renders in its terminal (started/cancelled/failed) state.
+   */
+  async confirmRunnerSession(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = this.userId(req);
+      const { id } = parse(idParamsSchema, req.params);
+      const { action } = parse(confirmRunnerSchema, req.body);
+      const message = await messageService.confirmRunnerSessionAction(userId, id, action);
+
+      const event: ChatMessageEvent = { message };
+      emitToConversation(message.conversationId, SERVER_EVENTS.CHAT_MESSAGE, event);
+
+      const body: ConfirmRunnerSessionResponse = { message };
+      this.handleSuccess(res, body);
+    } catch (error) {
+      this.handleError(error, res, 'MessagesController.confirmRunnerSession');
     }
   }
 

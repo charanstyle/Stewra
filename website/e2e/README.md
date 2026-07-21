@@ -88,6 +88,7 @@ test:e2e:report` opens it), `results.json`, traces/videos/screenshots on failure
 | `tests/memory.spec.ts` | `full.mjs` §8 | Memory page render/search/filter, Edit→Cancel, Hide↔Use-for-recall toggle. |
 | `tests/gaps.spec.ts` | `full.mjs` §9 | By-design product gaps, asserted as real (hard) checks: no call buttons on the Stewra thread, no mic on the human composer. |
 | `tests/today.spec.ts` | `today.mjs` | The proactive `/today` home: greeting, briefing card vs. backend truth, nudge list vs. backend suggestions, expand/draft/snooze/dismiss/chat-about-this, AppNav order, console-error-free navigation. |
+| `tests/runner.spec.ts` | Phase 5 control surface | The in-chat "Run coding agent" card: ask Stewra (in the Stewra thread) to run a coding agent on one of your machines → the intent classifier proposes → the card renders → **Start** dispatches a real session. Auto-discovers an online runner via `GET /runner/devices` and **skips** if none is paired/online — no synthetic runner. |
 
 ## Safety: destructive / external-OAuth flows are skipped, not omitted
 

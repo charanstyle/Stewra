@@ -65,6 +65,7 @@ export type {
   MessagePreview,
   ReadReceipt,
   ProposedEmail,
+  ProposedRunnerSession,
   ProposedActionStatus,
 } from './models/message';
 export {
@@ -201,6 +202,9 @@ export type {
   ConfirmEmailAction,
   ConfirmEmailRequest,
   ConfirmEmailResponse,
+  ConfirmRunnerSessionAction,
+  ConfirmRunnerSessionRequest,
+  ConfirmRunnerSessionResponse,
 } from './api/messages';
 export type { UploadAvatarResponse } from './api/avatar';
 export type {

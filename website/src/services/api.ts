@@ -57,6 +57,8 @@ import type {
   DeleteMessageResponse,
   ConfirmEmailRequest,
   ConfirmEmailResponse,
+  ConfirmRunnerSessionRequest,
+  ConfirmRunnerSessionResponse,
   SendVoiceMessageResponse,
   UploadAvatarResponse,
   TurnCredentialsResponse,
@@ -336,6 +338,12 @@ export const api = {
    */
   confirmEmail: (id: string, body: ConfirmEmailRequest): Promise<ConfirmEmailResponse> =>
     request(`/messages/${id}/confirm-email`, { method: 'POST', body }),
+
+  confirmRunnerSession: (
+    id: string,
+    body: ConfirmRunnerSessionRequest,
+  ): Promise<ConfirmRunnerSessionResponse> =>
+    request(`/messages/${id}/confirm-runner-session`, { method: 'POST', body }),
 
   /** Per-participant read acknowledgements for one message (drives the read-receipt detail view). */
   listMessageReceipts: (id: string): Promise<ListReadReceiptsResponse> =>

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   CallKind,
   ConfirmEmailAction,
+  ConfirmRunnerSessionAction,
   ConversationSummary,
   Message,
   PublicUser,
@@ -11,6 +12,7 @@ import { AppNav } from '../../components/AppNav/AppNav';
 import { Avatar } from '../../components/Avatar/Avatar';
 import { MessageStatusIndicator } from '../../components/chat/MessageStatusIndicator';
 import { ProposedEmailCard } from '../../components/chat/ProposedEmailCard';
+import { ProposedRunnerSessionCard } from '../../components/chat/ProposedRunnerSessionCard';
 import { TypingIndicator } from '../../components/chat/TypingIndicator';
 import { ReadReceiptModal } from '../../components/chat/ReadReceiptModal';
 import { useAuth } from '../../hooks/useAuth';
@@ -57,6 +59,8 @@ function MessageBubble({
   onOpenReceipts,
   emailBusy,
   onConfirmEmail,
+  runnerBusy,
+  onConfirmRunner,
 }: {
   message: Message;
   mine: boolean;
@@ -67,6 +71,10 @@ function MessageBubble({
   emailBusy: boolean;
   /** Resolve this message's proposed email (send/cancel). */
   onConfirmEmail: (messageId: string, action: ConfirmEmailAction) => void;
+  /** True while this message's proposed-runner-session confirm is in flight. */
+  runnerBusy: boolean;
+  /** Resolve this message's proposed runner session (start/cancel). */
+  onConfirmRunner: (messageId: string, action: ConfirmRunnerSessionAction) => void;
 }): React.JSX.Element {
   const isSystem =
     message.type === 'call_start' || message.type === 'call_end' || message.type === 'system';
@@ -109,6 +117,13 @@ function MessageBubble({
             onConfirm={(action) => onConfirmEmail(message.id, action)}
           />
         )}
+        {message.proposedRunnerSession && (
+          <ProposedRunnerSessionCard
+            proposal={message.proposedRunnerSession}
+            busy={runnerBusy}
+            onConfirm={(action) => onConfirmRunner(message.id, action)}
+          />
+        )}
         <span className={styles.bubbleTime} data-testid="message-timestamp">
           {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {mine && <MessageStatusIndicator status={message.status} />}
@@ -139,6 +154,8 @@ export default function ConversationPage(): React.JSX.Element {
   const [receiptsFor, setReceiptsFor] = useState<Message | null>(null);
   // The assistant message whose proposed-email confirm is currently in flight (disables its card).
   const [confirmingEmailId, setConfirmingEmailId] = useState<string | null>(null);
+  // Likewise for a proposed runner session's Start/Cancel confirm.
+  const [confirmingRunnerId, setConfirmingRunnerId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -198,6 +215,27 @@ export default function ConversationPage(): React.JSX.Element {
         // Leave the proposal `pending` so the user can retry; a transient failure shouldn't lose the draft.
       } finally {
         setConfirmingEmailId((current) => (current === messageId ? null : current));
+      }
+    },
+    [appendMessages],
+  );
+
+  /**
+   * Start or dismiss a runner session Stewra proposed. The backend runs the same confirm-gated executor a
+   * natural-language "yes" would and returns the updated message (its `proposedRunnerSession.status` now
+   * terminal); we upsert it so the card re-renders. The message also arrives over the socket — upsert-by-id
+   * makes that idempotent.
+   */
+  const handleConfirmRunner = useCallback(
+    async (messageId: string, action: ConfirmRunnerSessionAction): Promise<void> => {
+      setConfirmingRunnerId(messageId);
+      try {
+        const res = await api.confirmRunnerSession(messageId, { action });
+        appendMessages([res.message]);
+      } catch {
+        // Leave the proposal `pending` so the user can retry; a transient failure shouldn't lose it.
+      } finally {
+        setConfirmingRunnerId((current) => (current === messageId ? null : current));
       }
     },
     [appendMessages],
@@ -295,6 +333,8 @@ export default function ConversationPage(): React.JSX.Element {
               onOpenReceipts={setReceiptsFor}
               emailBusy={confirmingEmailId === m.id}
               onConfirmEmail={(messageId, action) => void handleConfirmEmail(messageId, action)}
+              runnerBusy={confirmingRunnerId === m.id}
+              onConfirmRunner={(messageId, action) => void handleConfirmRunner(messageId, action)}
             />
           );
         })}

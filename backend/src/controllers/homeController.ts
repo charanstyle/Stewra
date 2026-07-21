@@ -153,7 +153,7 @@ class HomeController extends BaseController {
         null,
       );
       // Generate Stewra's reply before responding so both turns exist when the client opens /stewra.
-      await messageService.generateStewraReply(userId, conversation, userTurn);
+      await messageService.generateStewraReply(userId, conversation, userTurn, 'stewra_chat');
 
       const body: ChatAboutSuggestionResponse = { conversationId };
       this.handleSuccess(res, body);

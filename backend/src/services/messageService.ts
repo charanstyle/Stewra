@@ -1,11 +1,13 @@
 import { SERVER_EVENTS } from '@stewra/shared-types';
-import type { ChatDeliveredEvent, ConfirmEmailAction, Conversation, Message, Paginated, ProposedEmail, ReactionType, ReadReceipt } from '@stewra/shared-types';
+import type { ChatDeliveredEvent, ConfirmEmailAction, ConfirmRunnerSessionAction, Conversation, Message, Paginated, ProposedEmail, ReactionType, ReadReceipt } from '@stewra/shared-types';
 import { messageRepository, MessageRepository } from '../repositories/messageRepository.js';
 import { conversationService } from './conversationService.js';
 import { emailActionService } from './emailActionService.js';
 import { mediaService } from './mediaService.js';
 import { sttService } from './sttService.js';
 import { stewraConversationService } from './stewraConversationService.js';
+import { runnerIntentService } from './runnerIntentService.js';
+import type { RunnerChatChannel } from './runnerChatRelayService.js';
 import { presenceService } from './presenceService.js';
 import { emitToUser } from '../websocket/emitter.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../utils/errors.js';
@@ -64,8 +66,9 @@ class MessageService {
     userId: string,
     conversation: Conversation,
     userMessage: Message,
+    channel: RunnerChatChannel,
   ): Promise<Message> {
-    return stewraConversationService.generateReply(userId, conversation, userMessage);
+    return stewraConversationService.generateReply(userId, conversation, userMessage, channel);
   }
 
   /**
@@ -107,7 +110,7 @@ class MessageService {
 
     const assistantMessage =
       conversation.type === 'stewra_ai'
-        ? await stewraConversationService.generateReply(userId, conversation, userMessage)
+        ? await stewraConversationService.generateReply(userId, conversation, userMessage, 'stewra_chat')
         : null;
 
     return { conversation, userMessage, assistantMessage };
@@ -252,6 +255,48 @@ class MessageService {
     }
 
     await messageRepository.updateProposedEmail(messageId, updated);
+    const refreshed = await messageRepository.findById(messageId, userId);
+    if (refreshed === undefined) throw new NotFoundError('Message not found');
+    return refreshed;
+  }
+
+  /**
+   * Resolve the runner session Stewra proposed on an assistant message — the web/app card's Start/Cancel
+   * buttons. The exact same two checks and confirm-gate discipline as {@link confirmEmailAction}: the row
+   * must be visible to this viewer AND they must participate in the conversation, and only a `pending` or
+   * previously-`failed` proposal can be acted on (so it can't be double-started or started by a
+   * non-participant). `start` runs the shared confirm-gated executor (the identical path the
+   * natural-language "yes" takes, so both surfaces behave the same and relay to the SAME chat); `cancel`
+   * dismisses it. Returns the updated message so the caller can respond and fan it out over the socket.
+   */
+  async confirmRunnerSessionAction(
+    userId: string,
+    messageId: string,
+    action: ConfirmRunnerSessionAction,
+  ): Promise<Message> {
+    const message = await messageRepository.findById(messageId, userId);
+    if (message === undefined) throw new NotFoundError('Message not found');
+    await conversationService.assertParticipant(userId, message.conversationId);
+
+    const proposal = message.proposedRunnerSession;
+    if (proposal === null) throw new ValidationError('This message has no runner session to confirm');
+    if (proposal.status !== 'pending' && proposal.status !== 'failed') {
+      throw new ValidationError(`This session was already ${proposal.status}`);
+    }
+
+    if (action === 'cancel') {
+      await messageRepository.updateProposedRunnerSession(messageId, { ...proposal, status: 'cancelled' });
+    } else {
+      // The card is a web/app surface, so relay this session's gates/result to the Stewra chat thread.
+      await runnerIntentService.startProposedSession(
+        userId,
+        messageId,
+        proposal,
+        message.conversationId,
+        'stewra_chat',
+      );
+    }
+
     const refreshed = await messageRepository.findById(messageId, userId);
     if (refreshed === undefined) throw new NotFoundError('Message not found');
     return refreshed;

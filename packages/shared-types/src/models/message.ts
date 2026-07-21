@@ -1,4 +1,5 @@
 import type { ISODateString, UUID } from '../common/base';
+import type { RunnerHarnessId } from '../realtime/runner';
 
 /**
  * The kind of a message. `voice` is a spoken turn (carries a `transcript` + `audioUrl`); `audio` is a
@@ -101,6 +102,14 @@ export interface Message {
    * "Send this email?" confirmation card and its post-send state.
    */
   readonly proposedEmail: ProposedEmail | null;
+  /**
+   * A Stewra-proposed coding-agent runner session awaiting the user's confirmation (or its terminal
+   * outcome), when this assistant message offered to run one. Null for every ordinary message. Drives
+   * the in-chat "Start this session?" confirmation card on web/mobile and — crucially — the natural-
+   * language yes/no/correction confirm loop that also works on button-less channels (WhatsApp), since
+   * the pending proposal is what a follow-up "yes"/"no"/"use my other laptop" turn resolves against.
+   */
+  readonly proposedRunnerSession: ProposedRunnerSession | null;
 }
 
 /** A compact last-message projection for conversation-list rows (no reactions/media payload). */
@@ -157,5 +166,29 @@ export interface ProposedEmail {
   /** The delivery backend the send resolved to (e.g. `google`); null while still `pending`. */
   readonly provider: string | null;
   /** Short code explaining a `failed` send (e.g. `no_send_account`, `send_failed`); null otherwise. */
+  readonly failureReason: string | null;
+}
+
+/**
+ * A coding-agent runner session Stewra has parsed from a natural-language request and is proposing to
+ * start, attached to the assistant message that offered it. Like {@link ProposedEmail}, the untrusted
+ * agent only ever produces this PROPOSAL — the actual start is performed by the trusted control plane
+ * after the user explicitly confirms (a "yes"/tap), and the per-action permission prompts during the
+ * run remain a second, independent gate. `status` reuses {@link ProposedActionStatus}: `pending` awaits
+ * confirmation, `sent` means the session was started (its id in `sessionId`), `cancelled` means the user
+ * declined, `failed` means the start could not be dispatched (e.g. the device went offline). The
+ * resolved `deviceName`/`workspaceName` are carried so the confirm line reads naturally on any channel.
+ */
+export interface ProposedRunnerSession {
+  readonly status: ProposedActionStatus;
+  readonly deviceId: UUID;
+  readonly deviceName: string;
+  readonly workspaceId: string;
+  readonly workspaceName: string;
+  readonly harness: RunnerHarnessId;
+  readonly prompt: string;
+  /** The started session's id once confirmed (`status='sent'`); null while pending/cancelled/failed. */
+  readonly sessionId: UUID | null;
+  /** Short code explaining a `failed` start (e.g. `device_offline`, `refused`); null otherwise. */
   readonly failureReason: string | null;
 }

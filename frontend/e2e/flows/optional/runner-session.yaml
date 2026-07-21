@@ -1,0 +1,63 @@
+# Phase 5 control-surface check (mobile): the in-chat "Run coding agent" card.
+#
+# Opt-in / precondition-gated, so it lives under flows/optional/ — OUTSIDE the depth-1 sweep
+# `run-all-features.sh` runs (Maestro has no test.skip, so a flow that needs a live runner can't
+# gracefully no-op; keeping it out of the default suite is the mobile analogue of the web spec's
+# `test.skip`). Run it explicitly, only when a runner is paired + online:
+#
+#   ./run-features.sh flows/optional/runner-session.yaml android
+#
+# Requires a runner ONLINE with the harness available and the workspace exposed, plus these in the
+# shared ../../.env.e2e (passed through by run-features.sh — no hardcoding, no defaults here, since a
+# flow-level default would override the injected value in Maestro 2.6.x):
+#   E2E_RUNNER_MACHINE    exact machine name as it appears in `npx @stewra/runner` / GET /runner/devices
+#   E2E_RUNNER_WORKSPACE  exact workspace/repo name the runner exposes
+#   E2E_RUNNER_HARNESS    human label of the agent, e.g. "Claude Code"
+#
+# It drives the REAL system: ask Stewra (in the pinned "Stewra" thread) to run a tiny throwaway edit on
+# that machine → the intent classifier proposes → the card renders → tap Start → a real session begins in
+# an isolated worktree. The web twin is website/e2e/tests/runner.spec.ts.
+appId: com.stewra.app
+---
+# Safe both standalone and chained: return to the Chats list first.
+- runFlow:
+    when:
+      notVisible: "Chats"
+    commands:
+      - pressKey: Back
+- assertVisible: "Chats"
+- tapOn:
+    id: "tab-chats"
+# Stewra's thread is pinned first and titled "Stewra" (ChatListScreen.titleFor); tapping it opens the
+# ConversationScreen that renders the runner card. It's a fixed system thread, not user-generated, but the
+# row is dynamic content so it's targeted by its visible title, per the suite's testID conventions.
+- tapOn: "Stewra"
+- assertVisible:
+    id: "conversation-input"
+# Ask, in natural language, naming the machine / repo / agent so the classifier has an unambiguous
+# proposal to make. The edit lands in an isolated worktree, never the base branch.
+- tapOn:
+    id: "conversation-input"
+- inputText: 'Run "echo stewra-e2e > .stewra-e2e-check.txt" on ${RUNNER_MACHINE} in ${RUNNER_WORKSPACE} using ${RUNNER_HARNESS}.'
+# Dismiss the keyboard so the bottom-anchored Send button is on-screen (same reason as send-message.yaml).
+- hideKeyboard
+- tapOn:
+    id: "conversation-send"
+# Stewra classifies + proposes: the card appears. Generous timeout — a real LLM turn.
+- extendedWaitUntil:
+    visible:
+      id: "runner-session-card"
+    timeout: 90000
+# The card names what will run — proves the proposal carried the machine/agent, not just that a node mounted.
+- assertVisible: "Run coding agent"
+- assertVisible: ${RUNNER_MACHINE}
+# Approve: Start dispatches the session to the machine.
+- tapOn:
+    id: "runner-session-start"
+# It resolves to a terminal status line — "Started on <machine>" on success. Generous timeout covers the
+# dispatch + the machine accepting the session.
+- extendedWaitUntil:
+    visible:
+      id: "runner-session-status"
+    timeout: 60000
+- assertVisible: "Started on ${RUNNER_MACHINE}"

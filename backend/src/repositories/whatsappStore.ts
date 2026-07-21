@@ -94,6 +94,23 @@ class WhatsappStore {
     return { id: row.id, jid: decryptField(row.jid_ciphertext), isSelfChat: row.is_self_chat };
   }
 
+  /**
+   * The user's own self-chat (their "Message yourself" thread), the ONLY chat Stewra ever answers in.
+   * Null when the user hasn't linked WhatsApp / has no self-chat yet — the caller then simply has no
+   * WhatsApp surface to deliver to. Used to relay unsolicited lines (e.g. a runner session's progress)
+   * back to the medium the user is watching.
+   */
+  async findSelfChat(userId: string): Promise<StoredChat | null> {
+    const row = await db
+      .selectFrom('whatsapp_chats')
+      .select(['id', 'jid_ciphertext', 'is_self_chat'])
+      .where('user_id', '=', userId)
+      .where('is_self_chat', '=', true)
+      .executeTakeFirst();
+    if (row === undefined) return null;
+    return { id: row.id, jid: decryptField(row.jid_ciphertext), isSelfChat: row.is_self_chat };
+  }
+
   /** The allowed chat with this id, scoped to its owner so an id alone is never enough to read one. */
   async findChatById(userId: string, chatId: string): Promise<StoredChat | null> {
     const row = await db

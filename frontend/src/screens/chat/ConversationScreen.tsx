@@ -21,6 +21,7 @@ import type {
   ChatDeliveredEvent,
   ChatReadEvent,
   ConfirmEmailAction,
+  ConfirmRunnerSessionAction,
   Message,
   PresenceStatus,
   PresenceUpdateEvent,
@@ -38,6 +39,7 @@ import type { IconProps } from '../../components/icons/Icons';
 import { ImageIcon, MicIcon, PhoneIcon, PhoneOffIcon, VideoIcon } from '../../components/icons/Icons';
 import { MessageStatusIndicator } from '../../components/chat/MessageStatusIndicator';
 import { ProposedEmailCard } from '../../components/chat/ProposedEmailCard';
+import { ProposedRunnerSessionCard } from '../../components/chat/ProposedRunnerSessionCard';
 import { TypingIndicator } from '../../components/chat/TypingIndicator';
 import { TinyAvatar } from '../../components/chat/TinyAvatar';
 import { ReadReceiptManager } from '../../components/chat/ReadReceiptManager';
@@ -121,6 +123,8 @@ export default function ConversationScreen({ route, navigation }: Props): React.
   const [receiptsFor, setReceiptsFor] = useState<Message | null>(null);
   // The assistant message whose proposed-email confirm request is currently in flight (disables its card).
   const [confirmingEmailId, setConfirmingEmailId] = useState<string | null>(null);
+  // Same, for a proposed runner-session confirm request (disables its card while the start/cancel is in flight).
+  const [confirmingRunnerId, setConfirmingRunnerId] = useState<string | null>(null);
   const listRef = useRef<FlatList<Message> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -165,6 +169,27 @@ export default function ConversationScreen({ route, navigation }: Props): React.
         // Leave the proposal `pending` so the user can retry; a transient failure shouldn't lose the draft.
       } finally {
         setConfirmingEmailId((current) => (current === messageId ? null : current));
+      }
+    },
+    [upsertMessage],
+  );
+
+  /**
+   * Start (or dismiss) a coding-agent session Stewra proposed. Mirrors {@link handleConfirmEmail}: the
+   * backend runs the confirm-gated start on the chosen machine and returns the updated message (its
+   * `proposedRunnerSession.status` now terminal or `failed`); we upsert it so the card re-renders. The
+   * same message also arrives over the socket — upsert-by-id makes that idempotent.
+   */
+  const handleConfirmRunnerSession = useCallback(
+    async (messageId: string, action: ConfirmRunnerSessionAction): Promise<void> => {
+      setConfirmingRunnerId(messageId);
+      try {
+        const res = await api.confirmRunnerSession(messageId, { action });
+        upsertMessage(res.message);
+      } catch {
+        // Leave the proposal actionable so the user can retry; a transient failure shouldn't lose it.
+      } finally {
+        setConfirmingRunnerId((current) => (current === messageId ? null : current));
       }
     },
     [upsertMessage],
@@ -472,6 +497,13 @@ export default function ConversationScreen({ route, navigation }: Props): React.
                 onConfirm={(action) => void handleConfirmEmail(item.id, action)}
               />
             ) : null}
+            {item.proposedRunnerSession !== null ? (
+              <ProposedRunnerSessionCard
+                proposal={item.proposedRunnerSession}
+                busy={confirmingRunnerId === item.id}
+                onConfirm={(action) => void handleConfirmRunnerSession(item.id, action)}
+              />
+            ) : null}
             <View style={styles.metaRow}>
               <Text style={styles.metaTime}>{time}</Text>
               {mine ? <MessageStatusIndicator status={item.status} /> : null}
@@ -487,7 +519,15 @@ export default function ConversationScreen({ route, navigation }: Props): React.
         </View>
       );
     },
-    [user?.id, messages, participantsById, confirmingEmailId, handleConfirmEmail],
+    [
+      user?.id,
+      messages,
+      participantsById,
+      confirmingEmailId,
+      handleConfirmEmail,
+      confirmingRunnerId,
+      handleConfirmRunnerSession,
+    ],
   );
 
   const peer = participants.find((p) => p.id !== user?.id) ?? null;

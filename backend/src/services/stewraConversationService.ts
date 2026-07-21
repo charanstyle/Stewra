@@ -4,6 +4,8 @@ import { agentRuntime } from '../agent-host/agentHost.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
 import { messageRepository } from '../repositories/messageRepository.js';
 import { emailComposeService } from './emailComposeService.js';
+import { runnerIntentService } from './runnerIntentService.js';
+import type { RunnerChatChannel } from './runnerChatRelayService.js';
 import { mediaService } from './mediaService.js';
 import { ttsService } from './ttsService.js';
 import { logger } from '../utils/logger.js';
@@ -30,18 +32,37 @@ class StewraConversationService {
     userId: string,
     conversation: Conversation,
     userMessage: Message,
+    channel: RunnerChatChannel,
   ): Promise<Message> {
     const history = await this.loadHistory(conversation.id, userMessage.id);
     const latestUserText = userMessage.transcript ?? userMessage.content ?? '';
 
-    // If the user is asking Stewra to send an email, the (trusted) compose service drafts it for the
-    // user to confirm and gives us the chat line to reply with. Otherwise we fall back to the ordinary
-    // advice-only agent turn. The agent itself never sends — the draft rides on the message as a
-    // `pending` proposal until the user taps Send (the confirm-gated executor).
-    const proposal = await emailComposeService.maybePropose(history, latestUserText);
-    const reply = proposal
-      ? proposal.reply
-      : await agentRuntime.converse(userId, history, latestUserText);
+    // Two trusted control-plane "tools" get first refusal on the turn, in priority order, before the
+    // advice-only agent. Each may attach a `pending` proposal to the message (confirm-gated: nothing
+    // executes until the user says so) or, for the runner, resolve an in-flight "yes"/"no"/"push it".
+    //
+    //   1. Runner: start/confirm/approve a coding-agent session on the user's own machine. Its reply and
+    //      any permission/result relay come back on `channel` — the SAME medium the user asked from.
+    //   2. Email: draft an email for the user to review and send.
+    //
+    // The agent itself never sends or executes — it only produces conversational text when neither tool
+    // claims the turn.
+    const runnerOutcome = await runnerIntentService.handle({
+      userId,
+      conversationId: conversation.id,
+      channel,
+      history,
+      latestUserText,
+    });
+    const emailProposal = runnerOutcome
+      ? null
+      : await emailComposeService.maybePropose(history, latestUserText);
+
+    const reply = runnerOutcome
+      ? runnerOutcome.reply
+      : emailProposal
+        ? emailProposal.reply
+        : await agentRuntime.converse(userId, history, latestUserText);
 
     const audioUrl = await this.synthesize(userId, conversation.id, reply);
 
@@ -52,16 +73,17 @@ class StewraConversationService {
       type: 'text',
       content: reply,
       audioUrl,
-      proposedEmail: proposal
+      proposedEmail: emailProposal
         ? {
             status: 'pending',
-            to: proposal.draft.to,
-            subject: proposal.draft.subject,
-            body: proposal.draft.body,
+            to: emailProposal.draft.to,
+            subject: emailProposal.draft.subject,
+            body: emailProposal.draft.body,
             provider: null,
             failureReason: null,
           }
         : null,
+      proposedRunnerSession: runnerOutcome?.proposal ?? null,
     });
 
     await auditWriter.write({
@@ -71,7 +93,11 @@ class StewraConversationService {
       resourceId: conversation.id,
       summary: reply,
       success: true,
-      metadata: { spoke: audioUrl !== null, proposedEmail: proposal !== null },
+      metadata: {
+        spoke: audioUrl !== null,
+        proposedEmail: emailProposal !== null,
+        proposedRunnerSession: runnerOutcome?.proposal != null,
+      },
     });
 
     return assistantMessage;

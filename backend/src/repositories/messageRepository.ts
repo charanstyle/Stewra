@@ -6,11 +6,13 @@ import type {
   MessageType,
   ProposedActionStatus,
   ProposedEmail,
+  ProposedRunnerSession,
   ReactionType,
   ReadReceipt,
+  RunnerHarnessId,
   SenderKind,
 } from '@stewra/shared-types';
-import { PROPOSED_ACTION_STATUSES } from '@stewra/shared-types';
+import { PROPOSED_ACTION_STATUSES, RUNNER_HARNESS_IDS } from '@stewra/shared-types';
 import { db } from '../database/index.js';
 import type { JsonMetadata, JsonValue } from '../database/types.js';
 import { conversationRepository } from './conversationRepository.js';
@@ -148,6 +150,50 @@ function parseProposedEmail(metadata: JsonMetadata | null | undefined): Proposed
   };
 }
 
+/** Narrow a raw string to the `RunnerHarnessId` union without a type assertion. */
+function isRunnerHarnessId(value: string): value is RunnerHarnessId {
+  return RUNNER_HARNESS_IDS.some((id) => id === value);
+}
+
+/**
+ * Recover a `ProposedRunnerSession` from a message's `metadata` jsonb bag (stored under the
+ * `proposedRunnerSession` key by the runner-intent/confirm paths). Defensive like
+ * {@link parseProposedEmail}: a missing or malformed shape yields null.
+ */
+function parseProposedRunnerSession(
+  metadata: JsonMetadata | null | undefined,
+): ProposedRunnerSession | null {
+  const raw = metadata?.['proposedRunnerSession'];
+  if (!isJsonObject(raw)) {
+    return null;
+  }
+  const { status, deviceId, deviceName, workspaceId, workspaceName, harness, prompt, sessionId, failureReason } = raw;
+  if (
+    typeof status !== 'string' ||
+    typeof deviceId !== 'string' ||
+    typeof deviceName !== 'string' ||
+    typeof workspaceId !== 'string' ||
+    typeof workspaceName !== 'string' ||
+    typeof harness !== 'string' ||
+    typeof prompt !== 'string' ||
+    !isProposedActionStatus(status) ||
+    !isRunnerHarnessId(harness)
+  ) {
+    return null;
+  }
+  return {
+    status,
+    deviceId,
+    deviceName,
+    workspaceId,
+    workspaceName,
+    harness,
+    prompt,
+    sessionId: typeof sessionId === 'string' ? sessionId : null,
+    failureReason: typeof failureReason === 'string' ? failureReason : null,
+  };
+}
+
 function toMessage(
   row: MessageRow,
   reactions: ReadonlyArray<MessageReaction>,
@@ -176,6 +222,7 @@ function toMessage(
     createdAt: row.created_at.toISOString(),
     reactions,
     proposedEmail: parseProposedEmail(row.metadata),
+    proposedRunnerSession: parseProposedRunnerSession(row.metadata),
   };
 }
 
@@ -241,11 +288,26 @@ export interface NewMessage {
   readonly replyToId?: string | null;
   /** A Stewra-proposed email to attach to this (assistant) message; stored in the `metadata` bag. */
   readonly proposedEmail?: ProposedEmail | null;
+  /** A Stewra-proposed runner session to attach to this (assistant) message; same `metadata` bag. */
+  readonly proposedRunnerSession?: ProposedRunnerSession | null;
 }
 
-/** Serialize a proposal into the jsonb `metadata` insert/update string, or `undefined` for none. */
-function serializeMetadata(proposedEmail: ProposedEmail | null | undefined): string | undefined {
-  return proposedEmail ? JSON.stringify({ proposedEmail }) : undefined;
+/**
+ * Serialize whichever proposal(s) an assistant message carries into the jsonb `metadata` insert string,
+ * or `undefined` for none. Both keys share the one bag; a message carries at most one in practice, but
+ * the shape supports either without clobbering the other.
+ */
+function serializeMetadata(input: {
+  readonly proposedEmail?: ProposedEmail | null | undefined;
+  readonly proposedRunnerSession?: ProposedRunnerSession | null | undefined;
+}): string | undefined {
+  const bag: {
+    proposedEmail?: ProposedEmail;
+    proposedRunnerSession?: ProposedRunnerSession;
+  } = {};
+  if (input.proposedEmail) bag.proposedEmail = input.proposedEmail;
+  if (input.proposedRunnerSession) bag.proposedRunnerSession = input.proposedRunnerSession;
+  return Object.keys(bag).length > 0 ? JSON.stringify(bag) : undefined;
 }
 
 export class MessageRepository {
@@ -269,7 +331,10 @@ export class MessageRepository {
           thumbnail_url: input.thumbnailUrl ?? null,
           audio_url: input.audioUrl ?? null,
           transcript: input.transcript ?? null,
-          metadata: serializeMetadata(input.proposedEmail),
+          metadata: serializeMetadata({
+            proposedEmail: input.proposedEmail,
+            proposedRunnerSession: input.proposedRunnerSession,
+          }),
           reply_to_message_id: input.replyToId ?? null,
         })
         .returning(MESSAGE_COLUMNS)
@@ -292,6 +357,47 @@ export class MessageRepository {
       .set({ metadata: JSON.stringify({ proposedEmail }) })
       .where('id', '=', messageId)
       .execute();
+  }
+
+  /**
+   * Replace the proposed-runner-session payload in a message's `metadata` bag (the confirm-gated
+   * pending→sent/failed/cancelled transition, driven by a "yes"/"no"/tap). Mirrors
+   * {@link updateProposedEmail}: overwrites the whole bag, which is safe because a proposal-bearing
+   * assistant message carries no other metadata.
+   */
+  async updateProposedRunnerSession(
+    messageId: string,
+    proposedRunnerSession: ProposedRunnerSession,
+  ): Promise<void> {
+    await db
+      .updateTable('messages')
+      .set({ metadata: JSON.stringify({ proposedRunnerSession }) })
+      .where('id', '=', messageId)
+      .execute();
+  }
+
+  /**
+   * The most recent assistant message in a conversation that carries a still-`pending`
+   * proposedRunnerSession — what a natural-language "yes"/"no"/"use my other laptop" follow-up resolves
+   * against. Returns undefined when there is nothing awaiting confirmation.
+   */
+  async findPendingRunnerProposal(conversationId: string): Promise<Message | undefined> {
+    const rows = await db
+      .selectFrom('messages')
+      .select(MESSAGE_COLUMNS)
+      .where('conversation_id', '=', conversationId)
+      .where('sender_kind', '=', 'assistant')
+      .where('is_deleted', '=', false)
+      .orderBy('created_at', 'desc')
+      .limit(20)
+      .execute();
+    for (const row of rows) {
+      const proposal = parseProposedRunnerSession(row.metadata);
+      if (proposal && proposal.status === 'pending') {
+        return toMessage(row, [], [], '');
+      }
+    }
+    return undefined;
   }
 
   /** A single message hydrated for `viewerId` (drives that viewer's own-message status ticks). */

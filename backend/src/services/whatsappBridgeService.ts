@@ -148,6 +148,21 @@ class WhatsappBridgeService {
     await this.dispatch(userId, outboxId, chat.jid, reply);
   }
 
+  /**
+   * Send an UNSOLICITED line into the user's self-chat — not a reply to a turn, but a proactive relay
+   * (e.g. a runner session asking for permission, or reporting it finished) back to the medium the user
+   * is watching. Routed through the SAME echo-guarded, budgeted {@link dispatch} path as every reply, so
+   * it inherits the loop protection and the send circuit-breaker. No self-chat / no linked WhatsApp is a
+   * normal no-op: the caller has no WhatsApp surface for this user. If no bridge is online the line is
+   * enqueued and drains on the next connect, exactly like a reply.
+   */
+  async sendUnsolicitedSelfChat(userId: string, text: string): Promise<void> {
+    const chat = await whatsappStore.findSelfChat(userId);
+    if (chat === null) return;
+    const outboxId = await whatsappStore.enqueueSend(userId, chat.id, text);
+    await this.dispatch(userId, outboxId, chat.jid, text);
+  }
+
   /** Hand every still-pending send to whichever bridge is online. Called on `bridge:hello`. */
   async drainOutbox(userId: string): Promise<void> {
     const pending = await whatsappStore.pendingSends(userId);

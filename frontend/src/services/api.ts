@@ -39,6 +39,8 @@ import type {
   ReactResponse,
   ConfirmEmailRequest,
   ConfirmEmailResponse,
+  ConfirmRunnerSessionRequest,
+  ConfirmRunnerSessionResponse,
   GetMessageResponse,
   DeleteMessageResponse,
   SendVoiceMessageResponse,
@@ -297,6 +299,13 @@ export const api = {
   /** Confirm (send) or dismiss (cancel) an email Stewra proposed on an assistant message. */
   confirmEmail: (messageId: string, body: ConfirmEmailRequest): Promise<ConfirmEmailResponse> =>
     request(`/messages/${messageId}/confirm-email`, { method: 'POST', body }),
+
+  /** Confirm (start) or dismiss (cancel) a coding-agent runner session Stewra proposed on a message. */
+  confirmRunnerSession: (
+    messageId: string,
+    body: ConfirmRunnerSessionRequest,
+  ): Promise<ConfirmRunnerSessionResponse> =>
+    request(`/messages/${messageId}/confirm-runner-session`, { method: 'POST', body }),
 
   /** Per-participant read acknowledgements for one message (drives the read-receipt detail view). */
   listMessageReceipts: (messageId: string): Promise<ListReadReceiptsResponse> =>

@@ -50,6 +50,10 @@ router.post('/:id/confirm-email', requireAuth, verified, (req, res) => {
   void messagesController.confirmEmail(req, res);
 });
 
+router.post('/:id/confirm-runner-session', requireAuth, verified, (req, res) => {
+  void messagesController.confirmRunnerSession(req, res);
+});
+
 router.delete('/:id', requireAuth, verified, (req, res) => {
   void messagesController.delete(req, res);
 });

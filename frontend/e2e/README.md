@@ -77,6 +77,24 @@ use the first conversation in the list.
 | `flows/call-smoke.yaml` | Tap **Start voice call**; the call screen appears and **End call** ends it. Caller side only — see below. |
 | `flows/logout.yaml` | Tap the header **Log out**; app returns to **Sign in** (guards the logout hardening). |
 | `flows/full.yaml` | Runs all four in order. |
+| `flows/optional/runner-session.yaml` | Opt-in — the in-chat "Run coding agent" card. See below. |
+
+### Opt-in: runner coding-agent session
+
+`flows/optional/runner-session.yaml` asks Stewra (in the pinned **Stewra** thread) to run a coding
+agent on one of your machines, waits for the proposal card, taps **Start**, and asserts the session
+begins. It needs a runner **paired and online** (`npx @stewra/runner pair <code>`) plus
+`E2E_RUNNER_MACHINE` / `E2E_RUNNER_WORKSPACE` / `E2E_RUNNER_HARNESS` in the shared `../../.env.e2e`.
+
+It lives under `flows/optional/` so `run-all-features.sh` (a depth-1 sweep) does **not** pick it up:
+Maestro has no `test.skip`, so a flow that requires a live runner can't gracefully no-op like the web
+`runner.spec.ts` does. Run it explicitly when the precondition holds:
+
+```bash
+./run-features.sh flows/optional/runner-session.yaml android
+```
+
+The web twin is `website/e2e/tests/runner.spec.ts` (auto-discovers the runner, skips if none online).
 
 ### Why the call *flow* is caller-side only
 
