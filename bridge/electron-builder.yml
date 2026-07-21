@@ -47,6 +47,25 @@ mac:
     - dmg
   category: public.app-category.utilities
   icon: build/icon.png
+  # Sign with the org's "Developer ID Application" certificate. This is the ONLY signature type macOS
+  # will notarize for distribution outside the App Store; with a stapled notarization ticket, users get a
+  # clean double-click (no Gatekeeper prompt at all). An ad-hoc seal ("-") only downgrades the hard
+  # "damaged" block to the "unidentified developer / Open Anyway" gate — acceptable as a stopgap but not
+  # for real users. The cert's private key lives in the Mac build machine's login keychain, so the mac
+  # target must be built in an interactive login session there (codesign can't reach the key over SSH).
+  # NB: give the cert common-name WITHOUT the "Developer ID Application:" prefix — electron-builder adds
+  # the type itself and picks the matching Developer ID Application cert automatically.
+  identity: 'Nurturing Lab Limited Company (35JR7LFXPF)'
+  # Notarization REQUIRES the hardened runtime. electron-builder applies its default mac entitlements
+  # (allow-jit / allow-unsigned-executable-memory / disable-library-validation) which Electron needs to
+  # launch under hardened runtime — so no custom entitlements file is required here.
+  hardenedRuntime: true
+  # Don't let electron-builder run its own Gatekeeper assessment mid-build; the app isn't notarized yet
+  # at sign time (we notarize + staple the .dmg afterward with `xcrun notarytool` / `stapler`).
+  gatekeeperAssess: false
+  # NOTE: notarization is a SEPARATE post-build step (notarytool submit --wait → stapler staple the .dmg),
+  # driven by scripts/notarize-dmg so a contributor without notary credentials can still produce a signed
+  # (un-notarized) build. See bridge/scripts/notarize-dmg.sh.
 
 win:
   target:
