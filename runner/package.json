@@ -14,7 +14,8 @@
     "test": "vitest run && npm run test:esm-interop",
     "test:esm-interop": "node --input-type=module -e \"import { RUNNER_CLIENT_EVENTS } from '@stewra/shared-types'; if (!RUNNER_CLIENT_EVENTS?.HELLO) { throw new Error('ESM named-export interop is broken'); }\"",
     "start": "npm run build && node dist/cli.js",
-    "clean": "rm -rf dist"
+    "package": "node scripts/package-binary.mjs",
+    "clean": "rm -rf dist build"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
@@ -24,6 +25,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.17.6",
+    "esbuild": "^0.28.1",
+    "postject": "^1.0.0-alpha.6",
     "typescript": "^5.6.3",
     "vitest": "^3.2.0"
   }

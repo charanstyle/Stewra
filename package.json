@@ -24,6 +24,7 @@
     "dev:backend": "npm run dev -w backend",
     "dev:web": "npm run dev -w website",
     "db:migrate": "npm run db:migrate -w backend",
+  "package:release": "node scripts/package-release.mjs",
     "test": "npm test -w backend && npm test -w @stewra/bridge && npm test -w @stewra/runner",
     "boundaries": "depcruise --config .dependency-cruiser.cjs packages/agent-runtime/src",
     "tunnel": "ssh -f -N -o ExitOnForwardFailure=yes -L 127.0.0.1:5433:127.0.0.1:5433 home && echo 'tunnel up: local 5433 -> home:5433'"

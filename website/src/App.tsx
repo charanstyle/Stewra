@@ -14,6 +14,7 @@ import ConversationPage from './app/chats/ConversationPage';
 import ContactsPage from './app/contacts/ContactsPage';
 import StewraPage from './app/stewra/StewraPage';
 import SettingsPage from './app/settings/SettingsPage';
+import RunnerDownloadPage from './app/runner/RunnerDownloadPage';
 
 export default function App(): React.JSX.Element {
   return (
@@ -21,6 +22,8 @@ export default function App(): React.JSX.Element {
       <CallProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          {/* Public: the RUNNER_DOWNLOAD_URL target — opened on the machine that will host agents. */}
+          <Route path="/runner" element={<RunnerDownloadPage />} />
           <Route
             path="/verify-email"
             element={

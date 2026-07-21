@@ -1,0 +1,54 @@
+# Packaging config for the Stewra Bridge desktop app.
+#
+# Produces installable artifacts per OS. Build each platform's target ON that OS (electron-builder can
+# only build macOS .dmg on macOS and codesign Windows on Windows); this repo verifies the Linux targets.
+# Artifacts are UNSIGNED here — code-signing/notarization certs are supplied at release time via CI env.
+appId: com.stewra.bridge
+productName: Stewra Bridge
+copyright: Stewra
+
+# electron-builder needs an exact Electron version to fetch the right platform binaries; package.json
+# carries a "^33.2.0" range, so pin the resolved version here. Keep in step with the electron devDep.
+electronVersion: 33.4.11
+
+directories:
+  # NOT `dist` — that is the TypeScript compiler's output; installers go somewhere separate.
+  output: release
+  buildResources: build
+
+# Keep the scoped npm name (@stewra/bridge) out of artifact filenames — the "/" and "@" break paths.
+artifactName: ${productName}-${version}-${arch}.${ext}
+
+# `main` in package.json (dist/main/main.js) is the entry; electron-builder includes the compiled
+# app plus production dependencies automatically and prunes devDependencies. We only need to keep the
+# TypeScript sources and configs out of the shipped asar.
+files:
+  - '**/*'
+  - '!**/*.ts'
+  - '!tsconfig*.json'
+  - '!electron-builder.yml'
+  - '!scripts/**'
+
+# Baileys / socket.io-client / zod are pure JS — no native addons to rebuild against Electron's ABI.
+npmRebuild: false
+
+linux:
+  # The npm package is scoped (@stewra/bridge); an executable/file name can't contain "@" or "/".
+  executableName: stewra-bridge
+  target:
+    - deb
+    - AppImage
+  category: Network
+  maintainer: Stewra <noreply@stewra.com>
+  icon: build/icon.png
+
+mac:
+  target:
+    - dmg
+  category: public.app-category.utilities
+  icon: build/icon.png
+
+win:
+  target:
+    - nsis
+  icon: build/icon.png
