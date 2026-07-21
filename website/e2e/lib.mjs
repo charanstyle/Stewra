@@ -175,9 +175,19 @@ export function storageStateFor(user) {
  * been deployed yet). Specs use this to `test.skip(...)` with a clear "deploy first"
  * message instead of failing with an opaque selector timeout. `page` must already be on
  * an authenticated route.
+ *
+ * Waits briefly for the sentinel rather than sampling once: after `waitUntil:'domcontentloaded'`
+ * the React app has not yet hydrated, so an instantaneous `.count()` races the mount and can read
+ * 0 on a build that DOES carry the testids. We resolve true as soon as `app-nav` attaches, and
+ * false only after a real timeout (the running build genuinely predates the contract).
  */
 export async function uiHasTestids(page) {
-  return (await page.getByTestId('app-nav').count()) > 0;
+  try {
+    await page.getByTestId('app-nav').first().waitFor({ state: 'attached', timeout: 10000 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Chromium flags that make WebRTC + voice work headless without real hardware. */

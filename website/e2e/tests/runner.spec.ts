@@ -32,7 +32,8 @@ test.describe('runner', () => {
     // 2. Find a real machine to target: online, with an available harness AND at least one workspace.
     const devicesRes = await apiCall('/runner/devices');
     expect(devicesRes.status, 'GET /runner/devices').toBe(200);
-    const devices = devicesRes.json?.devices ?? [];
+    // apiCall returns the raw envelope `{ success, data }`; the devices live under `.data`.
+    const devices = devicesRes.json?.data?.devices ?? [];
     const device = devices.find(
       (d: {
         online: boolean;
@@ -60,7 +61,7 @@ test.describe('runner', () => {
     // 3. Open the singleton Stewra conversation, where the intent classifier proposes and the card renders.
     const convRes = await apiCall('/conversations/stewra');
     expect(convRes.status, 'GET /conversations/stewra').toBe(200);
-    const convId = convRes.json?.conversation?.conversation?.id;
+    const convId = convRes.json?.data?.conversation?.conversation?.id;
     expect(convId, 'Stewra conversation id').toBeTruthy();
     await pageA.goto(`${WEB}/chats/${convId}`, { waitUntil: 'domcontentloaded' });
 
@@ -77,15 +78,17 @@ test.describe('runner', () => {
     await pageA.getByRole('button', { name: 'Send' }).click();
 
     // 5. Stewra classifies + proposes: the card appears in a `pending` state. Generous timeout — this is a
-    //    real LLM turn.
-    const card = pageA.getByTestId('runner-session-card');
-    await card.waitFor({ timeout: 90000 });
-    await expect(card, 'proposed session starts pending').toHaveAttribute('data-status', 'pending');
+    //    real LLM turn. The singleton Stewra conversation is long-lived and accumulates cards from prior
+    //    runs, so always target the NEWEST card (`.last()`) — the one this run just proposed.
+    const card = pageA.getByTestId('runner-session-card').last();
+    await expect(card, 'proposed session starts pending')
+      .toHaveAttribute('data-status', 'pending', { timeout: 90000 });
     console.log('[runner] proposal card rendered (pending)');
 
     // 6. Approve: Start dispatches to the machine. Card goes busy, then resolves — `sent` on success, or
-    //    `failed` if the machine hiccupped (still a real, informative outcome, not a card bug).
-    await pageA.getByTestId('runner-session-start').click();
+    //    `failed` if the machine hiccupped (still a real, informative outcome, not a card bug). Scope the
+    //    Start button to THIS card so a prior run's collapsed card can't steal the click.
+    await card.getByTestId('runner-session-start').click();
     await expect
       .poll(async () => (await card.getAttribute('data-status')) ?? 'pending', { timeout: 60000 })
       .not.toBe('pending');
@@ -98,7 +101,7 @@ test.describe('runner', () => {
     ).not.toBe('pending');
 
     if (finalStatus === 'sent') {
-      await expect(pageA.getByTestId('runner-session-status')).toContainText('Started on');
+      await expect(card.getByTestId('runner-session-status')).toContainText('Started on');
     }
   });
 });
