@@ -66,7 +66,9 @@ const OSES: readonly OsBlock[] = [
       { label: 'Runner (Apple Silicon)', href: asset('stewra-runner-macos-arm64') },
       { label: 'Runner (Intel)', href: asset('stewra-runner-macos-x64') },
     ],
-    bridge: [{ label: 'Bridge · .dmg', href: asset('Stewra-Bridge.dmg') }],
+    // Only an Apple Silicon build is published today, so the link says so rather than handing an
+    // Intel visitor a bundle that won't launch. Add the x64/universal asset here when it exists.
+    bridge: [{ label: 'Bridge · .dmg (Apple Silicon)', href: asset('Stewra-Bridge-arm64.dmg') }],
   },
   {
     id: 'windows',
