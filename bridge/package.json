@@ -19,7 +19,7 @@
     "start": "npm run build && electron dist/main/main.js",
     "package": "npm run build && node scripts/inject-config.mjs && electron-builder",
     "package:linux": "npm run build && node scripts/inject-config.mjs && electron-builder --linux",
-    "package:mac": "npm run build && node scripts/inject-config.mjs && electron-builder --mac",
+    "package:mac": "npm run build && node scripts/inject-config.mjs && bash scripts/package-mac.sh",
     "package:win": "npm run build && node scripts/inject-config.mjs && electron-builder --win",
     "clean": "rm -rf dist release"
   },

@@ -2,7 +2,11 @@
 #
 # Produces installable artifacts per OS. Build each platform's target ON that OS (electron-builder can
 # only build macOS .dmg on macOS and codesign Windows on Windows); this repo verifies the Linux targets.
-# Artifacts are UNSIGNED here — code-signing/notarization certs are supplied at release time via CI env.
+#
+# macOS artifacts ARE signed here, with the Developer ID cert from the build machine's login keychain
+# (see `mac.identity` below); notarization is a separate step, scripts/notarize-dmg.sh. Linux and
+# Windows targets are unsigned. Build the mac target via `npm run package:mac`, never by invoking
+# electron-builder directly — the wrapper guards a filesystem trap documented in scripts/package-mac.sh.
 appId: com.stewra.bridge
 productName: Stewra Bridge
 copyright: Stewra
@@ -28,6 +32,15 @@ files:
   - '!tsconfig*.json'
   - '!electron-builder.yml'
   - '!scripts/**'
+  # Exclude the output dir EXPLICITLY. electron-builder does this implicitly, but only while `output`
+  # resolves inside this package — and scripts/package-mac.sh deliberately moves it out (see there).
+  # Without this line that build packs the previous release/ INTO the new app.asar: 24 MB -> 396 MB,
+  # app bundle 293M -> 611M, dmg 102 MB -> 307 MB. Silent; nothing fails, the artifact is just huge.
+  - '!release/**'
+  # AppleDouble sidecars, which macOS scatters on filesystems that can't store xattrs natively. Junk
+  # in the asar rather than a correctness problem — the signature-breaking ones appear in the OUTPUT
+  # bundle, not here, and are handled by scripts/package-mac.sh.
+  - '!**/._*'
 
 # Baileys / socket.io-client / zod are pure JS — no native addons to rebuild against Electron's ABI.
 npmRebuild: false
