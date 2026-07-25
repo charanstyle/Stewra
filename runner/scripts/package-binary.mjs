@@ -21,7 +21,24 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 const out = join(root, 'build');
 const platform = process.platform;
-const exeName = platform === 'win32' ? 'stewra-runner.exe' : 'stewra-runner';
+
+// Name the output for the platform+arch it was ACTUALLY built for, using the exact asset names the
+// download page links to (website/src/app/runner/RunnerDownloadPage.tsx), so scripts/package-release.mjs
+// can stage it by name with nothing to map and therefore nothing to get wrong.
+//
+// A bare `stewra-runner` used to be the name on every non-Windows OS, and package-release.mjs mapped
+// that one path to `stewra-runner-linux-x64` — so a macOS build would have been published under the
+// Linux name. Nothing would have failed here; it fails on the user's machine, after the download.
+//
+// SEA cannot cross-compile (the artifact is a copy of the running `node`), so the host's platform+arch
+// IS the target's. Corollary: to build the Intel binary on Apple Silicon, run this under an x64 Node
+// via Rosetta — process.arch then reports x64 and the name follows automatically.
+const OS_LABEL = { darwin: 'macos', linux: 'linux', win32: 'win' };
+const osLabel = OS_LABEL[platform];
+if (osLabel === undefined) {
+  throw new Error(`unsupported build platform: ${platform}`);
+}
+const exeName = `stewra-runner-${osLabel}-${process.arch}${platform === 'win32' ? '.exe' : ''}`;
 const exePath = join(out, exeName);
 const bundle = join(out, 'runner.cjs');
 const blob = join(out, 'sea-prep.blob');

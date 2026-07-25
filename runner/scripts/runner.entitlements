@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the notarized macOS runner binary (see scripts/sign-macos.sh).
+
+  Notarization requires the hardened runtime, and the hardened runtime forbids writable-executable
+  memory by default. The runner is a Node Single Executable Application, so it carries V8, which JITs
+  JavaScript at runtime — without these two it is signed and notarized and still dies on first script
+  execution. Keep the list this short: each entry is a hole in the runtime's defenses.
+-->
+<plist version="1.0">
+<dict>
+  <!-- V8's JIT: map pages as executable. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <!-- V8 also writes code into pages not covered by the JIT-specific MAP_JIT path. -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+</dict>
+</plist>
