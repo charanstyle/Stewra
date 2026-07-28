@@ -83,7 +83,7 @@ class WhatsappCloudSender implements ChannelSender {
     if (!response.ok) {
       // Meta returns a structured error body; surface it, because "why didn't my reply send" is
       // otherwise invisible — there's no failure on our side, the message simply never appears.
-      const detail = await response.text().catch(() => '<unreadable body>');
+      const detail = await response.text().catch(() => '<unreadable body>'); // fallback-ok: self-describing, and it goes into a thrown error rather than a returned result
       throw new Error(`WhatsApp send failed (${response.status}): ${detail}`);
     }
   }

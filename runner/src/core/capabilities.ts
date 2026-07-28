@@ -62,7 +62,9 @@ function workspaceId(absPath: string): string {
  * then treat as `local`, rather than crash the hello loop.
  */
 export async function detectWorkspaces(): Promise<RunnerWorkspace[]> {
-  const mode = (process.env['STEWRA_RUNNER_WORKSPACE_MODE'] ?? 'local').trim().toLowerCase();
+  // fallback-ok: 'local' names BEHAVIOUR (where repos come from), not a target the work is sent to.
+  // Both modes act only on this machine, and an unrecognised value is reported loudly just below.
+  const mode = (process.env['STEWRA_RUNNER_WORKSPACE_MODE'] ?? 'local').trim().toLowerCase(); // fallback-ok
   if (mode === 'clone') return detectClonedWorkspaces();
   if (mode !== 'local') {
     process.stderr.write(`Stewra Runner: unknown STEWRA_RUNNER_WORKSPACE_MODE="${mode}" (expected local|clone); using local\n`);

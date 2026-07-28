@@ -33,10 +33,10 @@ export async function confirmDeviceOwner(promptMessage: string): Promise<Identit
       promptMessage,
       disableDeviceFallback: false,
     });
-    return result.success ? 'passed' : 'failed';
+    return result.success ? 'passed' : 'failed'; // fallback-ok: a member of the IdentityCheck union
   } catch {
     // Treat an unexpected auth error as a denial, not a pass. Failing closed is the only safe default
     // for a check whose entire job is to stand between a draft and an irreversible send.
-    return 'failed';
+    return 'failed'; // fallback-ok: fails CLOSED — this substitution can only deny, never grant
   }
 }

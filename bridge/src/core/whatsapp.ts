@@ -270,7 +270,7 @@ export class WhatsappClient {
     // The one line that turns "it is not working" into a diagnosis. Baileys' own log says only
     // "Connection Failure"; the status code is the actual reason WhatsApp gave.
     console.error(
-      `Stewra Bridge: WhatsApp connection closed (status ${statusCode ?? 'unknown'}):`,
+      `Stewra Bridge: WhatsApp connection closed (status ${statusCode ?? 'unknown'}):`, // fallback-ok: log copy, not a value any caller reads
       lastDisconnect?.error?.message ?? 'no error reported',
     );
 

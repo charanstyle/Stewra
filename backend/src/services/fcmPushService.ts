@@ -195,7 +195,7 @@ class FcmPushService {
       const body = await res.text();
       logger.warn(`FCM ${context} push rejected`, { status: res.status, body: body.slice(0, 300) });
       // 404 = the token is no longer registered (app uninstalled / token rotated). Prune it.
-      return res.status === 404 ? 'unregistered' : 'failed';
+      return res.status === 404 ? 'unregistered' : 'failed'; // fallback-ok: a member of the declared result union
     } catch (error) {
       logger.warn(`FCM ${context} push failed`, {
         error: error instanceof Error ? error.message : String(error),

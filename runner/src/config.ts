@@ -33,7 +33,9 @@ export interface RunnerEnv {
 /** Build the config or throw. Loud, at boot, where a human is watching — never a silent fallback. */
 export function loadRunnerConfig(env: RunnerEnv, appVersion: string): RunnerConfig {
   // Default to the production proxy prefix; trim any trailing slash so `${prefix}/socket.io` is clean.
-  const rawPrefix = env.STEWRA_API_PREFIX ?? '/api';
+  // A path prefix ON the required STEWRA_API_URL, not a destination of its own: the server is
+  // still chosen entirely by configuration, and '' is settable for a runner talking to a direct port.
+  const rawPrefix = env.STEWRA_API_PREFIX ?? '/api'; // fallback-ok
   const apiPrefix = rawPrefix.replace(/\/+$/, '');
   const parsed = schema.safeParse({ apiBaseUrl: env.STEWRA_API_URL, apiPrefix, appVersion });
   if (!parsed.success) {

@@ -577,8 +577,10 @@ class RunnerIntentService {
     } else {
       lines.push('Online machines:');
       for (const d of online) {
-        const harnesses = d.harnesses.filter((h) => h.available).map((h) => h.id).join(', ') || 'none';
-        const workspaces = d.workspaces.map((w) => `${w.name} [id=${w.id}]`).join(', ') || 'none';
+        // fallback-ok (both): this is prose being rendered for the model. An empty list genuinely
+        // IS "none" here — nothing failed, and no caller branches on the string.
+        const harnesses = d.harnesses.filter((h) => h.available).map((h) => h.id).join(', ') || 'none'; // fallback-ok
+        const workspaces = d.workspaces.map((w) => `${w.name} [id=${w.id}]`).join(', ') || 'none'; // fallback-ok
         lines.push(`- ${d.name} [deviceId=${d.id}] (${d.os}); harnesses: ${harnesses}; workspaces: ${workspaces}`);
       }
     }

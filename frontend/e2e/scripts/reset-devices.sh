@@ -16,6 +16,7 @@
 # Requires: adb on PATH (Android platform-tools).
 set -euo pipefail
 
+# fallback-ok: this repo's OWN package id — a constant of the product, not a per-environment target.
 APP_ID="${APP_ID:-com.stewra.app}"
 
 if ! command -v adb >/dev/null 2>&1; then
