@@ -101,8 +101,10 @@ class VoipCallService {
       if (existing) {
         this.sendPushToken(existing);
       }
-    } catch {
-      // Degrade gracefully: the socket call flow still rings while foregrounded.
+    } catch (error) {
+      // Degrade gracefully: the socket call flow still rings while foregrounded. Logged rather
+      // than rethrown because initialize() runs at app start and must not block the UI.
+      console.error('[voip] VoIP push registration failed — background calls will not ring', error);
     }
 
     // A push may have cold-started the app and reported a call natively before
@@ -112,8 +114,9 @@ class VoipCallService {
       if (active) {
         this.onSessionAppeared(active);
       }
-    } catch {
-      // No active session to adopt.
+    } catch (error) {
+      // A missing session is normal (not a push cold-start); a THROW is not, so it gets said.
+      console.error('[voip] getActiveCallSession failed — a cold-start call cannot be adopted', error);
     }
   }
 
@@ -122,7 +125,14 @@ class VoipCallService {
       voip.type === 'FCM'
         ? { platform: 'android' as const, fcmToken: voip.token }
         : { platform: 'ios' as const, voipToken: voip.token };
-    void api.registerCallPushToken(body).catch(() => {});
+    // Not fatal — the socket flow still rings while the app is foregrounded — but it is the
+    // difference between receiving calls in the background and not, so it must never be silent.
+    void api.registerCallPushToken(body).catch((error: unknown) => {
+      console.error(
+        '[voip] Failed to register the VoIP push token — background calls will not ring',
+        error,
+      );
+    });
   }
 
   // === callService → OS ===
@@ -154,7 +164,9 @@ class VoipCallService {
           displayName: info.peer.displayName,
         },
         metadata: { conversationId: info.conversationId, callKind: info.callKind },
-      }).catch(() => {});
+      }).catch((error: unknown) => {
+        console.error('[voip] reportIncomingCall failed — the native ringer will not show', error);
+      });
     });
 
     callService.on('ended', () => {
@@ -166,7 +178,9 @@ class VoipCallService {
     void startOutgoingCall(
       { id: peerId || displayName, displayName },
       { hasVideo: kind === 'video' },
-    ).catch(() => {});
+    ).catch((error: unknown) => {
+      console.error('[voip] startOutgoingCall failed — no native call UI for this call', error);
+    });
   }
 
   private reportConnected(): void {
@@ -176,9 +190,19 @@ class VoipCallService {
     }
     this.connectedReported = true;
     if (active.isCaller && this.systemCallId) {
-      void reportOutgoingCallConnected(this.systemCallId).catch(() => {});
+      void reportOutgoingCallConnected(this.systemCallId).catch((error: unknown) => {
+        console.error(
+          '[voip] reportOutgoingCallConnected failed — the OS still shows this call as ringing',
+          error,
+        );
+      });
     } else if (!active.isCaller && this.incomingRequestId) {
-      void fulfillIncomingCallConnected(this.incomingRequestId).catch(() => {});
+      void fulfillIncomingCallConnected(this.incomingRequestId).catch((error: unknown) => {
+        console.error(
+          '[voip] fulfillIncomingCallConnected failed — the OS still shows this call as ringing',
+          error,
+        );
+      });
     }
   }
 
@@ -188,8 +212,10 @@ class VoipCallService {
     this.resetCallState();
     if (id) {
       this.appInitiatedEnd = true;
-      void endCall(id).catch(() => {
+      void endCall(id).catch((error: unknown) => {
+        // Undo the flag so a later native 'ended' is still treated as user-initiated.
         this.appInitiatedEnd = false;
+        console.error('[voip] endCall failed — the native call UI may be left on screen', error);
       });
     }
   }
@@ -215,7 +241,12 @@ class VoipCallService {
     addCallAnsweredListener((event) => {
       this.systemCallId = event.id;
       this.incomingRequestId = event.requestId ?? null;
-      void callService.acceptIncoming().catch(() => {});
+      void callService.acceptIncoming().catch((error: unknown) => {
+        console.error(
+          '[voip] acceptIncoming failed after the user answered on the OS UI — the native call is up but ours is not',
+          error,
+        );
+      });
     });
 
     addCallEndedListener(() => {
