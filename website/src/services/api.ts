@@ -275,7 +275,7 @@ export const api = {
   listContacts: (): Promise<ListContactsResponse> => request('/contacts'),
 
   sendInvite: (body: SendInviteRequest): Promise<SendInviteResponse> =>
-    request('/contacts/invite', { method: 'POST', body }),
+    request('/contacts/invites', { method: 'POST', body }),
 
   listInvites: (): Promise<ListInvitesResponse> => request('/contacts/invites'),
 

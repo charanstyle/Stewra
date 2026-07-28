@@ -41,10 +41,17 @@ test.describe('contacts', () => {
     await pageA.getByPlaceholder('name@example.com').fill(B.email);
     await pageA.getByRole('button', { name: 'Send invite' }).click();
     await pageA.waitForTimeout(2000);
-    // Either a success notice or a graceful error — both are acceptable (already contacts).
-    const notice = await pageA.locator('body').innerText();
-    const handled = /Invite sent|already|contact|cannot|error/i.test(notice);
-    console.log(`[contacts] invite-by-email produces a notice (no crash): handled=${handled}`);
+    // Either a success notice or a domain-level refusal (already contacts) is fine. What is
+    // NOT fine is the request never reaching the handler: the old version of this check only
+    // logged a regex that also matched the word "error", so a 404 from the website posting to
+    // the wrong path (`/contacts/invite` vs the backend's `/contacts/invites`) passed silently.
+    const notice = await pageA.locator('main').innerText();
+    expect(notice, 'invite POST must reach the contacts handler, not 404').not.toMatch(
+      /Route not found|Not Found/i,
+    );
+    expect(notice, 'invite must produce a success notice or a domain-level refusal').toMatch(
+      /Invite sent|already|contact/i,
+    );
   });
 
   test('Block then Unblock a contact (state restored)', async ({ pageA }) => {
