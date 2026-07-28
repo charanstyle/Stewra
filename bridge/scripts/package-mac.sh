@@ -55,7 +55,10 @@ else
   mkdir -p "$build_dir"
 fi
 
-npx electron-builder --mac -c.directories.output="$build_dir" "$@"
+# PASS 1 of 2: build and sign the .app only. The dmg is built separately, below, AFTER the app has
+# been notarized and stapled — a bundle sealed inside a read-only disk image can no longer be stapled,
+# and an app with no ticket of its own forces Gatekeeper online on first launch. See notarize-app.sh.
+npx electron-builder --mac --dir -c.directories.output="$build_dir" "$@"
 
 # --- guards -------------------------------------------------------------------------------------
 # Both failure modes are silent, so assert against them rather than trusting the build.
@@ -89,6 +92,65 @@ fi
 
 codesign --verify --deep --strict "$app"
 echo ">> signature verifies; app.asar $asar_bytes bytes; 0 AppleDouble files"
+
+# --- notarize the app, then build the dmg around it -----------------------------------------------
+NOTARY_PROFILE="${STEWRA_NOTARY_PROFILE:-stewra-notary}"
+if [ -n "${STEWRA_SKIP_NOTARIZE:-}" ]; then
+  echo ">> STEWRA_SKIP_NOTARIZE set — skipping app notarization"
+  notarized=0
+elif xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+  bash "$(dirname "$0")/notarize-app.sh" "$app" "$NOTARY_PROFILE"
+  notarized=1
+else
+  # Deliberately not fatal: a contributor without notary credentials should still get a signed build.
+  # It must be loud, though — the difference is invisible in the artifact and only shows up on a user's
+  # machine, offline, at first launch.
+  echo "!! no usable notary keychain profile '$NOTARY_PROFILE' — building an UN-NOTARIZED dmg" >&2
+  echo "!! the app inside will carry no ticket; first launch will need a network. Do not publish it." >&2
+  notarized=0
+fi
+
+# PASS 2 of 2: wrap the (now stapled) .app in the dmg. --prepackaged makes electron-builder reuse this
+# exact bundle instead of rebuilding and re-signing it, which would discard the ticket just stapled in.
+#
+# It takes the path to the .app ITSELF, not the directory containing it. Pointing it at the parent does
+# not fail — electron-builder copies that directory into the image under the app's name, producing a
+# dmg holding "Stewra Bridge.app/Stewra Bridge.app". The dmg builds, is the right size, and is entirely
+# broken ("bundle format unrecognized"). Hence the assertion below.
+npx electron-builder --mac dmg --prepackaged "$app" \
+  -c.directories.output="$build_dir" "$@"
+
+# Inspect what actually ended up in the image rather than trusting that pass 2 did the right thing.
+# Both failure modes here produce a dmg of entirely plausible size that nothing else complains about.
+staged_dmg="$(find "$build_dir" -maxdepth 1 -name '*.dmg' -print -quit)"
+if [ -z "$staged_dmg" ]; then
+  echo "!! no .dmg produced in $build_dir" >&2
+  exit 1
+fi
+mnt="$(mktemp -d)"
+hdiutil attach "$staged_dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null
+inner="$(find "$mnt" -maxdepth 1 -name '*.app' -print -quit)"
+# Structure first: a wrong --prepackaged argument yields Stewra Bridge.app/Stewra Bridge.app, where
+# Contents/ is one level deeper than macOS will look.
+structure_ok=0
+[ -n "$inner" ] && [ -d "$inner/Contents" ] && structure_ok=1
+# Then the ticket, which is the reason for building in two passes at all.
+ticket_ok=0
+xcrun stapler validate "$inner" >/dev/null 2>&1 && ticket_ok=1
+hdiutil detach "$mnt" >/dev/null 2>&1 || true
+rmdir "$mnt" 2>/dev/null || true
+
+if [ "$structure_ok" -ne 1 ]; then
+  echo "!! the .app in the dmg has no Contents/ — check the --prepackaged argument (it takes the" >&2
+  echo "!! .app itself; given its parent, electron-builder nests the bundle inside itself)" >&2
+  exit 1
+fi
+if [ "$notarized" -eq 1 ] && [ "$ticket_ok" -ne 1 ]; then
+  echo "!! the .app inside the dmg has no stapled ticket, though it had one before pass 2 —" >&2
+  echo "!! electron-builder rebuilt or re-signed it instead of reusing the prepackaged bundle" >&2
+  exit 1
+fi
+echo ">> dmg contents verified: valid bundle$([ "$ticket_ok" -eq 1 ] && echo ', ticket stapled')"
 
 # --- collect ------------------------------------------------------------------------------------
 if [ "$build_dir" != "$OUT_DIR" ]; then
