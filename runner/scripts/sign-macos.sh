@@ -61,9 +61,29 @@ xcrun notarytool submit "$zip" --keychain-profile "$NOTARY_PROFILE" --wait
 rm -f "$zip"
 
 echo ">> verifying the notarized binary ..."
-# Gatekeeper's own verdict, checked the way it will be checked on a user's machine. `-t exec` is the
-# assessment type for a plain executable; the ticket is fetched online, so this needs a network.
-spctl -a -vvv -t exec "$BIN" 2>&1 || true
+# Do NOT use `spctl -a -t exec` here. On a bare Mach-O it always answers
+#
+#     rejected (the code is valid but does not seem to be an app)
+#
+# because spctl's execute assessment only understands app bundles. That is a statement about the
+# artifact's shape, not about the ticket, and it prints identically before and after notarization —
+# so reading it as a verdict tells you nothing and looks like a failure on a successful run.
+#
+# The verdict that matters is the one the user's machine renders: set the quarantine flag a browser
+# would set and actually run the thing. Ad-hoc signed, this is SIGKILLed (exit 137). Signed and
+# notarized, it runs. The ticket is fetched online on first launch, so this needs a network.
+echo "   (running it under com.apple.quarantine, as a downloaded copy)"
+probe="${TMPDIR:-/tmp}/$(basename "$BIN").gatekeeper-probe"
+cp "$BIN" "$probe"
+xattr -w com.apple.quarantine "0081;00000000;Safari;" "$probe"
+if "$probe" --version >/dev/null 2>&1; then
+  echo "   PASS — quarantined copy executed"
+else
+  echo "   FAIL (exit $?) — Gatekeeper blocked the quarantined copy; do not publish this binary" >&2
+  rm -f "$probe"
+  exit 1
+fi
+rm -f "$probe"
 
 echo ">> shasum:"
 shasum -a 256 "$BIN"
