@@ -213,8 +213,16 @@ class WhatsappBridgeService {
 
     const { deviceId, ack } = result;
     if (!ack.ok || ack.providerMessageId === undefined) {
-      await whatsappStore.markAttemptFailed(outboxId, ack.error ?? 'unknown', MAX_SEND_ATTEMPTS);
-      logger.warn('bridge: send failed', { userId, outboxId, error: ack.error });
+      // A bridge that fails without saying why still has two DISTINGUISHABLE shapes, so the stored
+      // reason names which one it was. Recording 'unknown' collapsed them into a word that tells
+      // whoever reads the outbox row nothing at all.
+      const reason =
+        ack.error ??
+        (ack.ok
+          ? 'bridge acked ok but returned no providerMessageId'
+          : 'bridge nacked with no error message');
+      await whatsappStore.markAttemptFailed(outboxId, reason, MAX_SEND_ATTEMPTS);
+      logger.warn('bridge: send failed', { userId, outboxId, error: reason });
       return;
     }
 
