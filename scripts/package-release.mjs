@@ -122,6 +122,17 @@ console.log(`\n${staged.length} artifact(s) in dist-release/ (+ SHA256SUMS.txt).
 if (missing.length > 0) {
   // Loud about what is NOT covered — the mac/win builds must run on those OSes.
   console.log(`Not built on this OS (skipped): ${missing.join(', ')}`);
+  // SHA256SUMS.txt lists ONLY what was staged here, but it is a whole-release file with a fixed name.
+  // Uploading it with --clobber therefore replaces the published one and silently deletes the checksums
+  // of every asset built on another machine. The file looks complete either way; the only symptom is a
+  // user checking a Linux download against a list that no longer mentions it.
+  console.log(
+    '\n!! SHA256SUMS.txt covers ONLY the artifacts staged above.\n' +
+      '!! Do NOT `gh release upload --clobber` it as-is — that drops the checksums of the assets\n' +
+      '!! built elsewhere. Merge it with the published one first:\n' +
+      '!!   gh release download <tag> --pattern SHA256SUMS.txt --dir /tmp\n' +
+      '!!   then keep /tmp lines for the skipped assets and take these for the staged ones.',
+  );
 }
 console.log('\nPublish (runs against GitHub — do this yourself):');
 console.log('  gh release create <tag> dist-release/* --title "..." --notes "..."');
