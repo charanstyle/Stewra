@@ -47,5 +47,8 @@ production, additionally `REVOKE UPDATE, DELETE ON audit_log FROM <app_role>`.
 ## Production
 
 `docker-compose.prod.yml` is the deploy artifact for `/media/WDHD/docker/stewra/` on the host. It
-reuses the existing shared `postgres` container. Deploy from the host, not the dev machine. Not yet
-applied.
+brings up `backend`, `website`, `redis` and `coturn`, and reuses the existing shared `postgres`
+container. Deploy from the host, not the dev machine.
+
+It is applied and serving https://www.stewra.com. `curl https://www.stewra.com/api/health` returning
+`{"success":true,"data":{"status":"ok"}}` is the quickest check that the stack is up.
