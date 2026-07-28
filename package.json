@@ -27,6 +27,7 @@
     "package:release": "node scripts/package-release.mjs",
     "test": "npm test -w backend && npm test -w @stewra/bridge && npm test -w @stewra/runner",
     "boundaries": "depcruise --config .dependency-cruiser.cjs packages/agent-runtime/src",
+    "scan:fallbacks": "node scripts/fallback-scan.mjs",
     "tunnel": "bash scripts/tunnel.sh"
   },
   "devDependencies": {
