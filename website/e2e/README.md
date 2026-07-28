@@ -37,6 +37,9 @@ authenticate as the wrong user.
 | `E2E_AUDIO_FILE` | — | 16 kHz mono WAV fed to WebRTC as fake mic input, so speech-to-text yields a real transcript. |
 | `E2E_USER_A_EMAIL` / `E2E_USER_A_PASSWORD` | ✅ | User A's login credentials. |
 | `E2E_USER_B_EMAIL` / `E2E_USER_B_PASSWORD` | ✅ | User B's login credentials. |
+| `E2E_SIGNUP_MAILBOX` | — | Real mailbox whose maildir holds the emailed verification codes. Setting it enables the UI sign-up test; leaving it unset skips that test. Plus-addressed per run (`qa@x.com` → `qa+signup<rand>@x.com`), so one mailbox covers unlimited sign-ups. |
+| `E2E_SIGNUP_SSH_HOST` | ⚠️ | ssh host running the mail server's Docker daemon. **Required once `E2E_SIGNUP_MAILBOX` is set** — never defaulted, so a half-configured run fails loudly instead of ssh-ing somewhere unintended. |
+| `E2E_SIGNUP_IMAP_CONTAINER` | ⚠️ | Container whose `/mail/<mailbox>/` maildir is read via `docker exec`. Same rule as above. |
 
 ```bash
 cp ../../.env.e2e.example ../../.env.e2e   # repo-root, gitignored — fill in real values
@@ -96,12 +99,18 @@ A few flows are real product features but unsafe to fully exercise against a liv
 with `workers: 1` accounts. These use `test.skip(condition, reason)` (visible in the report
 as **skipped**, not passed or failed) with the original safety reasoning preserved:
 
-- **Email sign-up / verification** (`auth.spec.ts`) — no throwaway inbox available.
+- **Email sign-up / verification** (`auth.spec.ts`) — fully implemented and driven through
+  the UI (register → read the emailed 6-digit code from the real mailbox → `/verify-email`
+  → `/today`), but gated on `E2E_SIGNUP_MAILBOX`. It is not free to run: `audit_log`
+  references `users` with `ON DELETE SET NULL` and the append-only trigger rejects that
+  `UPDATE`, so a signed-up account **cannot be deleted** and every run leaves one behind.
 - **Completing Google OAuth** (`activity.spec.ts`) — the in-page consent modal is opened
   and asserted, then cancelled with "Not now" rather than following the real external
   Google redirect.
-- **Delete memory / Delete rule / Dismiss rule** (`memory.spec.ts`) — irreversibly
-  destroys real learned data on a live account; located but never clicked.
+- **Delete memory** (`memory.spec.ts`) — runs for real, but only against a throwaway memory
+  the suite seeds itself (`seed.mjs`, gated on `E2E_DATABASE_URL`), targeted by its
+  distinctive label so genuinely learned data is never touched. Without a DB URL the seed
+  is skipped and so is the delete.
 
 ## `data-testid` contract
 
