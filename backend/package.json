@@ -2,7 +2,7 @@
   "name": "backend",
   "version": "0.0.0",
   "private": true,
-  "description": "Stewra backend \u2014 control plane + agent host + HTTP API",
+  "description": "Stewra backend — control plane + agent host + HTTP API",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -48,6 +48,7 @@
     "@types/node": "^20.17.6",
     "@types/pg": "^8.11.10",
     "@types/supertest": "^6.0.2",
+    "socket.io-client": "^4.8.3",
     "supertest": "^7.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",

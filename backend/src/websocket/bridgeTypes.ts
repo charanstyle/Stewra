@@ -25,12 +25,15 @@ export type BridgeSocket = Socket<
 /**
  * The slices of Socket.IO that the bridge code actually touches.
  *
- * The handler and the emitter are typed against THESE, not against `Socket`/`Namespace`, for two reasons.
- * It states the surface honestly — a bridge socket is something we listen to, put in a room, and hang up
- * on, and nothing else. And it means the tests can drive the whole namespace with a fake bridge client and
- * no transport at all, which is the point of Phase 2: every rule that protects a user's WhatsApp account
- * (the allowlist gate, the dedupe, the echo-loop break, the send budget) is provable with no Electron, no
- * Baileys, and no real socket in sight. A real `Socket`/`Namespace` satisfies these structurally.
+ * The handler and the emitter are typed against THESE, not against `Socket`/`Namespace`, to state the
+ * surface honestly: a bridge socket is something we listen to, put in a room, and hang up on, and
+ * nothing else. A narrow interface is what stops a handler from reaching for the rest of Socket.IO.
+ *
+ * It is NOT a test seam. `whatsappBridge.test.ts` drives this namespace over a real Socket.IO server
+ * and a real `socket.io-client` connection, so every rule that protects a user's WhatsApp account (the
+ * allowlist gate, the dedupe, the echo-loop break, the send budget) is proved against the transport
+ * that actually runs in production — only Electron and Baileys are absent. A real `Socket`/`Namespace`
+ * satisfies these structurally.
  */
 export interface BridgeSocketLike {
   readonly id: string;

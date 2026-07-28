@@ -6,6 +6,8 @@ dist/
 !.env.example
 # Shared E2E QA credentials for both suites — real creds gitignored, template tracked.
 !.env.e2e.example
+# Backend test-suite credentials (real Postgres + Redis) — real creds gitignored, template tracked.
+!.env.test.example
 # Production runtime secrets that live beside the deployed app on the host — NEVER commit these.
 stewra.env
 # Firebase client config for the RN Android app — tied to a specific Firebase project,

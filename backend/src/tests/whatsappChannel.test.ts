@@ -1,112 +1,211 @@
-import { createHmac } from 'node:crypto';
-import type { Mock } from 'vitest';
-import type { NextFunction, Request, Response } from 'express';
+import { createHmac, randomBytes } from 'node:crypto';
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import express from 'express';
+import request from 'supertest';
 
-// Vitest hoists `vi.mock` above the module body, so a factory that closed over a plain `const` would
-// read it as undefined. `vi.hoisted` lifts the value with it — and hands the same binding back here, so
-// the tests below sign with exactly the secret the mocked config serves.
-const { APP_SECRET } = vi.hoisted(() => ({ APP_SECRET: 'test-app-secret' }));
+/**
+ * No module in this file is mocked. Everything below runs the real thing:
+ *
+ *   * the real `unifiedConfig` — its real Zod schema, parsing real environment variables, including the
+ *     real "WHATSAPP_ENABLED=true requires ..." guard. The old version of this suite `vi.mock`ed the
+ *     config module, which meant a typo in the schema, a missing post-parse guard, or a `graphBaseUrl`
+ *     that never actually reached the sender were all invisible here.
+ *   * the real Express router, real `express.raw()`, real HTTP, real `errorHandler` — so the assertions
+ *     are on status codes a caller would genuinely receive, not on whether a spy was invoked.
+ *   * a real HTTP server on a real port, standing in for Meta's Graph host. The sender makes a real
+ *     `fetch` over a real socket. Nothing patches `globalThis.fetch`.
+ *
+ * Env has to be set BEFORE `unifiedConfig` is imported (it parses at import time), which is why the
+ * modules under test are pulled in with `await import` below rather than by static import.
+ */
 
-// The middleware and sender read the master switch + secrets from config; pin them so these tests don't
-// depend on whatever the developer's .env happens to say.
-vi.mock('../config/unifiedConfig.js', () => ({
-  config: {
-    whatsapp: {
-      enabled: true,
-      phoneNumberId: '123456',
-      businessNumber: '15550001111',
-      accessToken: 'test-token',
-      verifyToken: 'test-verify-token',
-      appSecret: APP_SECRET,
-      graphVersion: 'v21.0',
-      graphBaseUrl: 'https://graph.example.test',
-      linkCodeTtlMs: 600000,
+// Generated, never hardcoded: a literal here would be a committed secret, and generating it also proves
+// the config pipeline plumbs through whatever value it is handed rather than a baked-in default.
+const APP_SECRET = randomBytes(32).toString('hex');
+const ACCESS_TOKEN = `test-access-${randomBytes(8).toString('hex')}`;
+const PHONE_NUMBER_ID = '123456';
+const GRAPH_VERSION = 'v21.0';
+
+/** One real inbound HTTP request, as our stand-in Graph host actually received it off the wire. */
+interface ReceivedRequest {
+  readonly method: string;
+  readonly path: string;
+  readonly authorization: string;
+  readonly body: string;
+}
+
+const receivedRequests: ReceivedRequest[] = [];
+
+/**
+ * A real HTTP server playing the role of Meta's Graph host.
+ *
+ * This is not a stand-in for the *sender* — the sender is real, and so is its `fetch`. It is a real
+ * server at the other end of a real socket, which is what `WHATSAPP_GRAPH_BASE_URL` exists to allow
+ * (see the comment on that var in unifiedConfig). Because we own the origin, "the sender did not fall
+ * back to graph.facebook.com" is proven by this server having received the request at all.
+ */
+const graphServer: Server = createServer((req, res) => {
+  const chunks: Buffer[] = [];
+  req.on('data', (chunk: Buffer) => chunks.push(chunk));
+  req.on('end', () => {
+    receivedRequests.push({
+      method: req.method ?? '',
+      path: req.url ?? '',
+      authorization: req.headers.authorization ?? '',
+      body: Buffer.concat(chunks).toString('utf8'),
+    });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{}');
+  });
+});
+
+await new Promise<void>((resolve) => graphServer.listen(0, '127.0.0.1', resolve));
+const graphOrigin = `http://127.0.0.1:${(graphServer.address() as AddressInfo).port}`;
+
+// Pinned explicitly rather than read from the developer's .env, so this suite gives the same answer on
+// every machine. Set before the import below, and dotenv does not override an already-set process.env.
+process.env['WHATSAPP_ENABLED'] = 'true';
+process.env['WHATSAPP_PHONE_NUMBER_ID'] = PHONE_NUMBER_ID;
+process.env['WHATSAPP_BUSINESS_NUMBER'] = '15550001111';
+process.env['WHATSAPP_ACCESS_TOKEN'] = ACCESS_TOKEN;
+process.env['WHATSAPP_VERIFY_TOKEN'] = `test-verify-${randomBytes(8).toString('hex')}`;
+process.env['WHATSAPP_APP_SECRET'] = APP_SECRET;
+process.env['WHATSAPP_GRAPH_VERSION'] = GRAPH_VERSION;
+process.env['WHATSAPP_GRAPH_BASE_URL'] = graphOrigin;
+
+// Required by the schema for any import of the config at all. Nothing in this file opens a database
+// connection or mints a token, so these only have to satisfy the shape the schema demands.
+process.env['DATABASE_URL'] ??= 'postgresql://unused:unused@127.0.0.1:1/unused-by-this-suite';
+process.env['JWT_SECRET'] ??= randomBytes(32).toString('hex');
+process.env['VAULT_KEY'] ??= randomBytes(32).toString('hex');
+process.env['WEB_APP_URL'] ??= 'http://127.0.0.1:5173';
+process.env['GOOGLE_CLIENT_ID'] ??= 'unused-by-this-suite.apps.googleusercontent.com';
+process.env['GOOGLE_CLIENT_SECRET'] ??= 'unused-by-this-suite';
+process.env['GOOGLE_REDIRECT_URI'] ??= 'http://127.0.0.1:3001/auth/google/callback';
+process.env['GMAIL_LOOKBACK_DAYS'] ??= '7';
+process.env['SMTP_HOST'] ??= '127.0.0.1';
+process.env['SMTP_PORT'] ??= '465';
+process.env['SMTP_SECURE'] ??= 'true';
+process.env['SMTP_USER'] ??= 'unused-by-this-suite';
+process.env['SMTP_PASSWORD'] ??= 'unused-by-this-suite';
+process.env['EMAIL_FROM'] ??= 'stewra@unused-by-this-suite.test';
+process.env['REDIS_URL'] ??= 'redis://127.0.0.1:6379';
+
+const { config } = await import('../config/unifiedConfig.js');
+const { errorHandler } = await import('../middleware/errorHandler.js');
+const { verifyWhatsappSignature } = await import('../middleware/verifyWhatsappSignature.js');
+const { splitForWhatsapp } = await import('../services/channelSenders/index.js');
+const { whatsappCloudSender } = await import('../services/channelSenders/whatsappCloudSender.js');
+
+afterAll(async () => {
+  await new Promise<void>((resolve, reject) =>
+    graphServer.close((err) => (err ? reject(err) : resolve())),
+  );
+});
+
+/** The HMAC Meta would attach to exactly these bytes. */
+function signature(body: string, secretUsedToSign: string = APP_SECRET): string {
+  return `sha256=${createHmac('sha256', secretUsedToSign).update(Buffer.from(body)).digest('hex')}`;
+}
+
+/**
+ * A real Express app mounting the real middleware and the real terminal error handler.
+ *
+ * `rawBody: false` reproduces a MISORDERED router (express.json() ahead of the webhook), which is a
+ * real deployment mistake rather than a hypothetical — hence a test for it.
+ */
+function webhookApp(options: { rawBody: boolean } = { rawBody: true }): express.Express {
+  const app = express();
+  app.post(
+    '/webhooks/whatsapp',
+    options.rawBody ? express.raw({ type: '*/*' }) : express.json({ type: '*/*' }),
+    verifyWhatsappSignature,
+    (_req, res) => {
+      res.status(200).json({ success: true });
     },
-  },
-}));
-
-import { verifyWhatsappSignature } from '../middleware/verifyWhatsappSignature.js';
-import { splitForWhatsapp } from '../services/channelSenders/index.js';
-import { whatsappCloudSender } from '../services/channelSenders/whatsappCloudSender.js';
-import { AuthenticationError } from '../utils/errors.js';
-
-/** Build a request carrying `body` and the signature Meta would have sent for it. */
-function signedRequest(body: string, secretUsedToSign: string = APP_SECRET): Request {
-  const digest = createHmac('sha256', secretUsedToSign).update(Buffer.from(body)).digest('hex');
-  return requestWith(body, `sha256=${digest}`);
+  );
+  app.use(errorHandler);
+  return app;
 }
-
-function requestWith(body: string, signatureHeader: string | undefined): Request {
-  const headers: Record<string, string> = {};
-  if (signatureHeader !== undefined) headers['x-hub-signature-256'] = signatureHeader;
-  const req = {
-    body: Buffer.from(body),
-    get: (name: string): string | undefined => headers[name.toLowerCase()],
-  };
-  // The middleware only touches `body` and `get`; this is the whole surface it needs.
-  return req as unknown as Request;
-}
-
-const noopResponse = {} as Response;
 
 /**
  * The webhook is UNAUTHENTICATED — Meta holds no Stewra credentials — so this HMAC is the only thing
- * standing between an attacker who guessed the URL and the agent. These tests pin that gate.
+ * standing between an attacker who guessed the URL and the agent. These tests pin that gate, over real
+ * HTTP, so what they assert is the status code an attacker would actually get back.
  */
-describe('verifyWhatsappSignature', () => {
+describe('POST /webhooks/whatsapp signature gate', () => {
   const payload = JSON.stringify({ object: 'whatsapp_business_account', entry: [] });
 
-  it('calls next() for a body signed with the app secret', () => {
-    const next = vi.fn<() => void>() as unknown as NextFunction;
-    verifyWhatsappSignature(signedRequest(payload), noopResponse, next);
-    expect(next).toHaveBeenCalledTimes(1);
+  it('accepts a body signed with the app secret', async () => {
+    await request(webhookApp())
+      .post('/webhooks/whatsapp')
+      .set('content-type', 'application/json')
+      .set('x-hub-signature-256', signature(payload))
+      .send(payload)
+      .expect(200, { success: true });
   });
 
-  it('rejects a body signed with the WRONG secret (a forged request)', () => {
-    const next = vi.fn<() => void>() as unknown as NextFunction;
-    expect(() =>
-      verifyWhatsappSignature(signedRequest(payload, 'attacker-guess'), noopResponse, next),
-    ).toThrow(AuthenticationError);
-    expect(next).not.toHaveBeenCalled();
+  it('rejects a body signed with the WRONG secret (a forged request)', async () => {
+    // The test that matters: an attacker who can reach the URL but does not hold the app secret.
+    const response = await request(webhookApp())
+      .post('/webhooks/whatsapp')
+      .set('content-type', 'application/json')
+      .set('x-hub-signature-256', signature(payload, 'attacker-guess'))
+      .send(payload)
+      .expect(401);
+
+    expect(response.body.success).toBe(false);
   });
 
-  it('rejects a TAMPERED body whose signature was valid for the original', () => {
-    const original = signedRequest(payload);
-    const tampered = requestWith(
-      JSON.stringify({ object: 'whatsapp_business_account', entry: ['injected'] }),
-      original.get('x-hub-signature-256'),
-    );
-    expect(() => verifyWhatsappSignature(tampered, noopResponse, vi.fn() as unknown as NextFunction)).toThrow(
-      AuthenticationError,
-    );
+  it('rejects a TAMPERED body whose signature was valid for the original', async () => {
+    const tampered = JSON.stringify({ object: 'whatsapp_business_account', entry: ['injected'] });
+
+    await request(webhookApp())
+      .post('/webhooks/whatsapp')
+      .set('content-type', 'application/json')
+      .set('x-hub-signature-256', signature(payload))
+      .send(tampered)
+      .expect(401);
   });
 
-  it('rejects a request with no signature header at all', () => {
-    expect(() =>
-      verifyWhatsappSignature(requestWith(payload, undefined), noopResponse, vi.fn() as unknown as NextFunction),
-    ).toThrow(AuthenticationError);
+  it('rejects a request with no signature header at all', async () => {
+    await request(webhookApp())
+      .post('/webhooks/whatsapp')
+      .set('content-type', 'application/json')
+      .send(payload)
+      .expect(401);
   });
 
-  it('rejects a malformed signature header rather than crashing on it', () => {
-    expect(() =>
-      verifyWhatsappSignature(requestWith(payload, 'garbage'), noopResponse, vi.fn() as unknown as NextFunction),
-    ).toThrow(AuthenticationError);
+  it('rejects a malformed signature header rather than crashing on it', async () => {
+    await request(webhookApp())
+      .post('/webhooks/whatsapp')
+      .set('content-type', 'application/json')
+      .set('x-hub-signature-256', 'garbage')
+      .send(payload)
+      .expect(401);
+
     // A short/odd-length hex digest must not blow up timingSafeEqual's length precondition.
-    expect(() =>
-      verifyWhatsappSignature(requestWith(payload, 'sha256=abcd'), noopResponse, vi.fn() as unknown as NextFunction),
-    ).toThrow(AuthenticationError);
+    await request(webhookApp())
+      .post('/webhooks/whatsapp')
+      .set('content-type', 'application/json')
+      .set('x-hub-signature-256', 'sha256=abcd')
+      .send(payload)
+      .expect(401);
   });
 
-  it('fails LOUD (not silently open) if the raw body was already parsed away', () => {
-    const parsed = {
-      body: { object: 'whatsapp_business_account' },
-      get: (): string => 'sha256=deadbeef',
-    } as unknown as Request;
-    // A misordered router (express.json() before the webhook) must break the build/boot, never
-    // "authenticate" a body it can't actually verify.
-    expect(() =>
-      verifyWhatsappSignature(parsed, noopResponse, vi.fn() as unknown as NextFunction),
-    ).toThrow(/raw body unavailable/);
+  it('fails LOUD (not silently open) when the router is misordered and the raw body is gone', async () => {
+    // express.json() ahead of the webhook leaves a parsed object on req.body, so there are no original
+    // bytes left to verify. That must surface as a 500, never as an authenticated request.
+    const response = await request(webhookApp({ rawBody: false }))
+      .post('/webhooks/whatsapp')
+      .set('content-type', 'application/json')
+      .set('x-hub-signature-256', signature(payload))
+      .send(payload)
+      .expect(500);
+
+    expect(response.body.error.code).toBe('INTERNAL_ERROR');
   });
 });
 
@@ -152,41 +251,93 @@ describe('splitForWhatsapp', () => {
 /**
  * The Graph origin must come from config, never a literal. WHATSAPP_GRAPH_BASE_URL exists so a
  * regional/proxied Graph endpoint (or a local stand-in) is a config change rather than a code change —
- * and it silently did nothing until this was wired up, which is exactly the failure this test pins.
+ * and it silently did nothing until this was wired up, which is exactly the failure this pins.
+ *
+ * Every assertion below is on a request that genuinely crossed a socket into the server above. If the
+ * sender ignored the configured origin, `receivedRequests` would simply be empty.
  */
-describe('whatsappCloudSender endpoint', () => {
-  const okResponse = { ok: true, status: 200, text: async (): Promise<string> => '' };
-  let fetchMock: Mock;
+describe('whatsappCloudSender against a real Graph endpoint', () => {
+  const expectedPath = `/${GRAPH_VERSION}/${PHONE_NUMBER_ID}/messages`;
 
   beforeEach(() => {
-    fetchMock = vi.fn().mockResolvedValue(okResponse);
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    receivedRequests.length = 0;
+  });
+
+  it('reads the Graph origin from config rather than a hardcoded default', () => {
+    // Guards the test itself: if this ever reverted to graph.facebook.com, the assertions below would
+    // be attempting real calls to Meta, and their failure would be confusing rather than obvious.
+    expect(config.whatsapp.graphBaseUrl).toBe(graphOrigin);
   });
 
   it('composes the send URL from config (base URL, version, phone-number id)', async () => {
     await whatsappCloudSender.send('15550002222', 'hello');
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      'https://graph.example.test/v21.0/123456/messages',
-    );
+    expect(receivedRequests).toHaveLength(1);
+    expect(receivedRequests[0]?.method).toBe('POST');
+    expect(receivedRequests[0]?.path).toBe(expectedPath);
   });
 
-  it('never falls back to a hardcoded graph.facebook.com origin', async () => {
+  it('authenticates the call with the configured access token', async () => {
     await whatsappCloudSender.send('15550002222', 'hello');
 
-    const url = String(fetchMock.mock.calls[0]?.[0]);
-    expect(url.startsWith('https://graph.example.test/')).toBe(true);
-    expect(url).not.toContain('graph.facebook.com');
+    // A send that reaches Meta without this header is rejected there, which is invisible from our side.
+    expect(receivedRequests[0]?.authorization).toBe(`Bearer ${ACCESS_TOKEN}`);
+  });
+
+  it('sends the text as a WhatsApp individual text message', async () => {
+    await whatsappCloudSender.send('15550002222', 'hello');
+
+    expect(JSON.parse(receivedRequests[0]?.body ?? '{}')).toMatchObject({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: '15550002222',
+      type: 'text',
+      text: { preview_url: false, body: 'hello' },
+    });
   });
 
   it('sends each split part in order, to the same endpoint', async () => {
     // Two parts: the sender must issue two POSTs, sequentially, so WhatsApp renders them in order.
     await whatsappCloudSender.send('15550002222', `${'a'.repeat(4000)} ${'b'.repeat(4000)}`);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    for (const call of fetchMock.mock.calls) {
-      expect(call[0]).toBe('https://graph.example.test/v21.0/123456/messages');
+    expect(receivedRequests).toHaveLength(2);
+    for (const received of receivedRequests) expect(received.path).toBe(expectedPath);
+
+    const bodies = receivedRequests.map((r) => String(JSON.parse(r.body).text.body));
+    expect(bodies[0]?.startsWith('a')).toBe(true);
+    expect(bodies[1]?.startsWith('b')).toBe(true);
+  });
+
+  it('throws with the status and body when Graph rejects the send', async () => {
+    // Now that a real server answers, the failure path is reachable without patching anything: a reply
+    // that never left the building must surface loudly, not be swallowed.
+    const failing = createServer((_req, res) => {
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: 'Invalid OAuth access token' } }));
+    });
+    await new Promise<void>((resolve) => failing.listen(0, '127.0.0.1', resolve));
+    const failingOrigin = `http://127.0.0.1:${(failing.address() as AddressInfo).port}`;
+    const originalBaseUrl = config.whatsapp.graphBaseUrl;
+
+    try {
+      // The config object is what the sender reads on every call, so pointing it at the failing server
+      // is the same switch a deploy would make — no interception involved.
+      Object.defineProperty(config.whatsapp, 'graphBaseUrl', {
+        value: failingOrigin,
+        configurable: true,
+      });
+
+      await expect(whatsappCloudSender.send('15550002222', 'hello')).rejects.toThrow(
+        /WhatsApp send failed \(401\).*Invalid OAuth access token/s,
+      );
+    } finally {
+      Object.defineProperty(config.whatsapp, 'graphBaseUrl', {
+        value: originalBaseUrl,
+        configurable: true,
+      });
+      await new Promise<void>((resolve, reject) =>
+        failing.close((err) => (err ? reject(err) : resolve())),
+      );
     }
   });
 });
