@@ -1,6 +1,7 @@
 import { stat } from 'node:fs/promises';
 import type { Conversation, ConversationTurn, Message } from '@stewra/shared-types';
 import { agentRuntime } from '../agent-host/agentHost.js';
+import { config } from '../config/unifiedConfig.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
 import { messageRepository } from '../repositories/messageRepository.js';
 import { emailComposeService } from './emailComposeService.js';
@@ -141,6 +142,12 @@ class StewraConversationService {
     conversationId: string,
     reply: string,
   ): Promise<string | null> {
+    // Voice off means there is no Piper binary configured (`piperBin` is ''), so attempting synthesis
+    // would spawn an empty command that can only fail. Every turn would then log a warning about a
+    // feature the deploy deliberately switched off. Text-only is the correct, quiet answer here — the
+    // /messages/voice route 503s for the same reason.
+    if (!config.voice.enabled) return null;
+
     try {
       const { filename, absPath } = await mediaService.reserve('.wav');
       await ttsService.synthesize(reply, absPath);
