@@ -106,12 +106,21 @@ export async function findDirect(user, otherId) {
   );
 }
 
-/** Make A and B mutual contacts (idempotent — accepts any pending invite B has from A). */
+/**
+ * Make A and B mutual contacts (idempotent — accepts any pending invite B has from A).
+ *
+ * Each STEP is tolerant on purpose: re-run against the same production accounts, "already invited"
+ * and "no pending invite" are the normal case, not a problem. The POSTCONDITION is not tolerant.
+ * This function is named for a guarantee, so it checks the guarantee and throws with the failed
+ * steps attached. Previously every step swallowed its error, so a setup that had not worked
+ * surfaced later as "User B must appear in User A contacts" — the symptom, with the cause gone.
+ */
 export async function ensureContacts(a, b) {
+  const failedSteps = [];
   try {
     await api(a, 'POST', '/contacts/invites', { inviteeEmail: b.email });
-  } catch {
-    /* already invited / already contacts */
+  } catch (error) {
+    failedSteps.push(`invite: ${error.message}`);
   }
   try {
     const inv = await api(b, 'GET', '/contacts/invites');
@@ -119,11 +128,23 @@ export async function ensureContacts(a, b) {
       const id = entry.invite?.id ?? entry.id;
       const status = entry.invite?.status ?? entry.status;
       if (id && (status === undefined || status === 'pending')) {
-        await api(b, 'POST', `/contacts/invites/${id}/respond`, { action: 'accept' }).catch(() => {});
+        try {
+          await api(b, 'POST', `/contacts/invites/${id}/respond`, { action: 'accept' });
+        } catch (error) {
+          failedSteps.push(`accept ${id}: ${error.message}`);
+        }
       }
     }
-  } catch {
-    /* no invites endpoint data — fall through */
+  } catch (error) {
+    failedSteps.push(`list invites: ${error.message}`);
+  }
+
+  const { contacts } = await api(a, 'GET', '/contacts');
+  if (!contacts.some((entry) => entry.user?.email === b.email)) {
+    throw new Error(
+      `ensureContacts: ${b.email} is not a contact of ${a.email} after setup` +
+        (failedSteps.length > 0 ? ` — ${failedSteps.join('; ')}` : ''),
+    );
   }
 }
 
