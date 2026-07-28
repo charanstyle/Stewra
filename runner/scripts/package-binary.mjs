@@ -45,8 +45,14 @@ const blob = join(out, 'sea-prep.blob');
 const seaConfig = join(out, 'sea-config.json');
 const FUSE = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
 
-rmSync(out, { recursive: true, force: true });
+// Clear only what THIS build writes, not the whole directory. Both macOS binaries have to be built on
+// one Mac (arm64 natively, x64 under an x64 Node via Rosetta), and each is signed and notarized right
+// after it is built — a blanket rmSync here silently deletes the notarized binary from the previous
+// run, which costs another round trip to Apple to discover.
 mkdirSync(out, { recursive: true });
+for (const stale of [exePath, bundle, blob, seaConfig]) {
+  rmSync(stale, { force: true });
+}
 
 // 1. Bundle. Optional native ws accelerators are left external — ws falls back to pure JS when they
 //    are absent, which is exactly what a portable binary wants.
