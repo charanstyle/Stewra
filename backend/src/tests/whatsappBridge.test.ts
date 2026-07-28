@@ -12,6 +12,16 @@ import type { Socket as ClientSocket } from 'socket.io-client';
 import { BRIDGE_CLIENT_EVENTS, BRIDGE_SERVER_EVENTS } from '@stewra/shared-types';
 import type { BridgeSendPayload } from '@stewra/shared-types';
 import type { AppServer } from '../websocket/types.js';
+// Type-only, so they are erased and do NOT load these modules here — the graph is still imported
+// dynamically below, after this file has set the environment the config reads at module load.
+import type { db, closeDb } from '../database/index.js';
+import type { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository.js';
+import type { whatsappStore } from '../repositories/whatsappStore.js';
+import type { authService } from '../services/authService.js';
+import type { redis } from '../services/redisClient.js';
+import type { whatsappPersonalService } from '../services/whatsappPersonalService.js';
+import type { bridgeUserRoom } from '../websocket/bridgeTypes.js';
+import type { initSockets } from '../websocket/index.js';
 
 /**
  * Phase 2 of the experimental companion-device channel, end to end and with nothing stood in for.
@@ -103,15 +113,15 @@ process.env['MODEL_BASE_URL'] = `http://127.0.0.1:${modelPort}/v1`;
 process.env['UPLOADS_DIR'] = mkdtempSync(join(tmpdir(), 'stewra-bridge-test-'));
 
 interface Graph {
-  readonly initSockets: (typeof import('../websocket/index.js'))['initSockets'];
-  readonly whatsappPersonalService: (typeof import('../services/whatsappPersonalService.js'))['whatsappPersonalService'];
-  readonly bridgeDeviceRepository: (typeof import('../repositories/bridgeDeviceRepository.js'))['bridgeDeviceRepository'];
-  readonly whatsappStore: (typeof import('../repositories/whatsappStore.js'))['whatsappStore'];
-  readonly authService: (typeof import('../services/authService.js'))['authService'];
-  readonly bridgeUserRoom: (typeof import('../websocket/bridgeTypes.js'))['bridgeUserRoom'];
-  readonly db: (typeof import('../database/index.js'))['db'];
-  readonly closeDb: (typeof import('../database/index.js'))['closeDb'];
-  readonly redis: (typeof import('../services/redisClient.js'))['redis'];
+  readonly initSockets: typeof initSockets;
+  readonly whatsappPersonalService: typeof whatsappPersonalService;
+  readonly bridgeDeviceRepository: typeof bridgeDeviceRepository;
+  readonly whatsappStore: typeof whatsappStore;
+  readonly authService: typeof authService;
+  readonly bridgeUserRoom: typeof bridgeUserRoom;
+  readonly db: typeof db;
+  readonly closeDb: typeof closeDb;
+  readonly redis: typeof redis;
 }
 
 async function loadGraph(enabled: boolean): Promise<Graph> {

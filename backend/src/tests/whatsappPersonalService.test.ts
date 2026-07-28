@@ -4,6 +4,12 @@ import {
   WHATSAPP_PERSONAL_CONSENT_SENTENCE,
   WHATSAPP_PERSONAL_CONSENT_VERSION,
 } from '@stewra/shared-types';
+// Type-only, so they are erased and do NOT load these modules here — each graph is still imported
+// dynamically below, after the flag it is named for has been set in the environment.
+import type * as errorTypes from '../utils/errors.js';
+import type { config } from '../config/unifiedConfig.js';
+import type { db, closeDb } from '../database/index.js';
+import type { whatsappPersonalService } from '../services/whatsappPersonalService.js';
 
 /**
  * The chain that authorises a bridge to speak for a user runs: typed sentence → consent row → pairing
@@ -25,11 +31,11 @@ process.env['WHATSAPP_PERSONAL_DOWNLOAD_URL'] = DOWNLOAD_URL;
 process.env['WHATSAPP_PERSONAL_MIN_BRIDGE_VERSION'] = MIN_BRIDGE_VERSION;
 
 interface ServiceGraph {
-  readonly config: (typeof import('../config/unifiedConfig.js'))['config'];
-  readonly service: (typeof import('../services/whatsappPersonalService.js'))['whatsappPersonalService'];
-  readonly db: (typeof import('../database/index.js'))['db'];
-  readonly closeDb: (typeof import('../database/index.js'))['closeDb'];
-  readonly errors: typeof import('../utils/errors.js');
+  readonly config: typeof config;
+  readonly service: typeof whatsappPersonalService;
+  readonly db: typeof db;
+  readonly closeDb: typeof closeDb;
+  readonly errors: typeof errorTypes;
 }
 
 /**
