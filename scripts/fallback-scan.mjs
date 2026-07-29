@@ -36,7 +36,12 @@ const TARGET_NAME =
  */
 const NON_TARGETS = new Set(['/dev/null', '/dev/stdout', '/dev/stderr', '/tmp', '.', './', '/']);
 
-const SCANNABLE = /\.(ts|tsx|js|jsx|mjs|cjs|sh|bash|ya?ml)$/;
+/**
+ * `.mts`/`.cts` are ordinary TypeScript and are included deliberately: the global guard skips them,
+ * so leaving them out here left `bridge/src/main/ipc.cts` — production Electron main-process code —
+ * covered by no scanner at all.
+ */
+const SCANNABLE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|sh|bash|ya?ml)$/;
 
 /** Values that look like a destination: a URL, a hostname, an absolute path, an email, an IP. */
 function looksLikeTarget(value) {
