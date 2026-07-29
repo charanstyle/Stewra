@@ -37,35 +37,49 @@ test.describe('activity', () => {
 
   test('Gmail window Save (re-save current value, non-destructive)', async ({ pageA }) => {
     await pageA.goto(`${WEB}/activity`, { waitUntil: 'domcontentloaded' });
-    const saveBtn = pageA
-      .locator('section, div')
-      .filter({ hasText: 'Gmail window' })
-      .getByRole('button', { name: 'Save' })
-      .first();
-    if (await saveBtn.isVisible().catch(() => false)) {
-      await saveBtn.click();
-      await pageA.waitForTimeout(1200);
-      console.log('[activity] Gmail window Save works: re-saved existing value (no change)');
-    } else {
-      console.log('[activity] Gmail window Save: Save button not found');
-    }
+    const card = pageA.locator('div').filter({ hasText: 'Gmail window' }).last();
+    const saveBtn = card.getByRole('button', { name: 'Save' });
+    // Wait for the button rather than sampling it. After `domcontentloaded` React has not mounted, so
+    // the old instantaneous `isVisible()` raced the render and logged "Save button not found" on every
+    // run — a false negative, since ActivityPage renders this button unconditionally. The `if/else`
+    // around it meant the test passed either way, so nothing ever surfaced the gap.
+    await saveBtn.waitFor({ timeout: 12000 });
+
+    // "Currently N days." only renders once preferences have loaded, and it is the server's value —
+    // which makes it the thing worth asserting: re-saving must round-trip and come back unchanged.
+    const current = card.getByText(/^Currently \d+ days\.$/);
+    await current.waitFor({ timeout: 12000 });
+    const before = await current.textContent();
+
+    await saveBtn.click();
+
+    // The value must survive the round-trip, and no error banner may appear. `toHaveText` retries, so
+    // this waits for the PATCH rather than guessing at a sleep.
+    await expect(current).toHaveText(String(before));
+    await expect(pageA.getByText('Choose a whole number of days', { exact: false })).toHaveCount(0);
+    console.log(`[activity] Gmail window Save re-saved existing value unchanged (${before})`);
   });
 
   test('Learn-my-writing-style toggle (flip + restore)', async ({ pageA }) => {
     await pageA.goto(`${WEB}/activity`, { waitUntil: 'domcontentloaded' });
-    const cb = pageA.locator('input[type="checkbox"]').first();
-    if (await cb.isVisible().catch(() => false)) {
-      const orig = await cb.isChecked();
-      await cb.click({ force: true });
-      await pageA.waitForTimeout(1000);
-      const flipped = (await cb.isChecked()) !== orig;
-      await cb.click({ force: true }); // RESTORE
-      await pageA.waitForTimeout(800);
-      const restored = (await cb.isChecked()) === orig;
-      console.log(`[activity] writing-style toggle flips and restores: flipped=${flipped}, restored=${restored}`);
-    } else {
-      console.log('[activity] writing-style toggle: checkbox not found');
-    }
+    const cb = pageA
+      .locator('div')
+      .filter({ hasText: 'Learn my writing style' })
+      .last()
+      .locator('input[type="checkbox"]');
+    // Same race as the Save button above: the old instant `isVisible()` ran before React mounted and
+    // logged "checkbox not found" every time, inside an `if/else` that passed regardless. The input is
+    // also `disabled` until preferences load, so wait for enabled — clicking it earlier does nothing.
+    await expect(cb).toBeEnabled({ timeout: 12000 });
+
+    const orig = await cb.isChecked();
+    await cb.click({ force: true });
+    // `toBeChecked` retries, so it waits out the PATCH instead of a fixed sleep that could pass on a
+    // toggle the server rejected.
+    await expect(cb).toBeChecked({ checked: !orig });
+    await cb.click({ force: true }); // RESTORE — this is a real preference on a real account
+    await expect(cb).toBeChecked({ checked: orig });
+    console.log(`[activity] writing-style toggle flipped to ${!orig} and restored to ${orig}`);
   });
 
   test('generate an insight + submit feedback', async ({ pageA }) => {
@@ -88,8 +102,12 @@ test.describe('activity', () => {
       const firstRating = fb.getByRole('button').first();
       await firstRating.click();
       await pageA.getByRole('button', { name: 'Send feedback' }).click();
-      const thanks = await pageA.getByText('Thanks', { exact: false }).isVisible().catch(() => false);
-      console.log(`[activity] submit insight feedback (feedback learning loop): confirmation shown=${thanks}`);
+      // FeedbackControl only swaps in the "✓ Thanks …" panel after `await api.submitFeedback(...)`
+      // resolves, so the old instantaneous `isVisible()` sampled before the POST could possibly have
+      // returned and reported `confirmation shown=false` on every run. `toBeVisible` retries, which is
+      // what makes this a real check on the feedback learning loop rather than a guaranteed miss.
+      await expect(pageA.getByText('Thanks', { exact: false })).toBeVisible();
+      console.log('[activity] submit insight feedback (feedback learning loop): confirmation shown');
     } else {
       console.log('[activity] feedback control: FeedbackControl not shown for this insight');
     }
