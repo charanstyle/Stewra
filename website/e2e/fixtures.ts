@@ -31,9 +31,13 @@ type TestFixtures = {
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
   session: [
-    // `_` rather than `{}`: this fixture consumes no other fixture, and an empty destructuring pattern is
-    // indistinguishable from one someone emptied by accident.
-    async (_, use) => {
+    // `{}` is required, not a style choice: Playwright's runner statically parses this parameter to work
+    // out which fixtures this one depends on, and rejects anything that is not a destructuring pattern
+    // ("First argument must use the object destructuring pattern"). Empty is the honest expression of "this
+    // fixture consumes no other fixture". Removable if `no-empty-pattern` ever grows an exception for
+    // parameters, or if Playwright stops deriving dependencies from the source text.
+    // eslint-disable-next-line no-empty-pattern -- see above; `_` fails at runtime
+    async ({}, use) => {
       await loginAll(); // mutates A/B with fresh tokens for this worker
       const convId = await ensureConversation(A, B);
       await use({ convId });
