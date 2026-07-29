@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "test": "vitest run && npm run test:esm-interop",
     "test:esm-interop": "node --input-type=module -e \"import { RUNNER_CLIENT_EVENTS } from '@stewra/shared-types'; if (!RUNNER_CLIENT_EVENTS?.HELLO) { throw new Error('ESM named-export interop is broken'); }\"",
     "start": "npm run build && node dist/cli.js",

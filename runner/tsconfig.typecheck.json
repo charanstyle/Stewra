@@ -1,0 +1,8 @@
+// The full typecheck surface. `tsconfig.json` covers only `src/**/*`, which left the root-level
+// `smoke-*.mts` live drivers checked by nothing — they had accumulated real type errors nobody could
+// see. Build still uses tsconfig.build.json; this config exists so those drivers cannot rot again.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true, "rootDir": "." },
+  "include": ["src/**/*", "smoke-*.mts"]
+}
