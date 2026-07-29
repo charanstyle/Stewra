@@ -198,7 +198,10 @@ export async function openPullRequest(
     ({ stdout } = await execFileAsync('gh', args, { cwd: worktree.path, timeout: GIT_NETWORK_TIMEOUT_MS }));
   } catch (error) {
     if (isCommandNotFound(error)) {
-      throw new Error('gh_missing: the GitHub CLI (gh) is not installed on this machine');
+      // `cause` keeps the spawn failure (its errno/path) attached. Without it the only thing that ever
+      // reached a log was our own summary, so a `gh` that exists but fails to exec was indistinguishable
+      // from one that isn't installed.
+      throw new Error('gh_missing: the GitHub CLI (gh) is not installed on this machine', { cause: error });
     }
     throw error instanceof Error ? error : new Error(String(error));
   }
