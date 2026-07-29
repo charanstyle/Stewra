@@ -24,7 +24,8 @@ let pass = 0;
 let fail = 0;
 function check(label: string, ok: boolean): void {
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}`);
-  ok ? (pass += 1) : (fail += 1);
+  if (ok) pass += 1;
+  else fail += 1;
 }
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
@@ -48,9 +49,11 @@ async function main(): Promise<void> {
 
   const workspace: RunnerWorkspace = { id: 'ws_ft', name: 'ft', path: repo, defaultBranch: 'main' };
 
-  let done: RunnerSessionDonePayload | null = null;
-  let resolveDone: () => void = () => undefined;
-  const doneReceived = new Promise<void>((resolve) => {
+  // The payload rides the promise rather than a mutable `done` the callback fills in. A `let` only
+  // ever assigned inside a callback stays narrowed to `null` for TypeScript, so every assertion below
+  // was reading a `never` — checks that looked like they ran but could not have been type-correct.
+  let resolveDone: (d: RunnerSessionDonePayload) => void = () => undefined;
+  const doneReceived = new Promise<RunnerSessionDonePayload>((resolve) => {
     resolveDone = resolve;
   });
 
@@ -60,8 +63,7 @@ async function main(): Promise<void> {
         if (u.kind === 'status' || u.kind === 'diff') console.log(`    [${u.kind}] ${(u.text ?? '').split('\n')[0]}`);
       },
       done: (d: RunnerSessionDonePayload) => {
-        done = d;
-        resolveDone();
+        resolveDone(d);
       },
       permission: (p: RunnerPermissionPromptPayload) => {
         const pick = p.options.find((o) => o.kind === 'allow_always')
@@ -88,20 +90,19 @@ async function main(): Promise<void> {
     );
     check('session accepted', ack.accepted);
 
-    await withTimeout(doneReceived, 240_000, 'session-done');
-    const d: RunnerSessionDonePayload | null = done;
-    check('session completed', d?.status === 'completed');
-    check('reported a branch', typeof d?.branch === 'string' && d.branch.length > 0);
-    check('auto-committed the work', d?.committed === true);
-    check('reported a head sha', typeof d?.headSha === 'string' && (d.headSha ?? '').length === 40);
+    const d = await withTimeout(doneReceived, 240_000, 'session-done');
+    check('session completed', d.status === 'completed');
+    check('reported a branch', typeof d.branch === 'string' && d.branch.length > 0);
+    check('auto-committed the work', d.committed === true);
+    check('reported a head sha', typeof d.headSha === 'string' && d.headSha.length === 40);
 
     console.log('pushing the session branch to the remote…');
     const pushAck = await withTimeout(manager.push({ sessionId }), 60_000, 'manager.push');
     check('push ok', pushAck.ok === true);
     check('push returned the remote url', pushAck.remoteUrl === bare);
 
-    const { stdout: ls } = await execFileAsync('git', ['ls-remote', '--heads', bare, d?.branch ?? ''], { cwd: repo });
-    check('branch really exists on the remote', ls.includes(`refs/heads/${d?.branch ?? ''}`));
+    const { stdout: ls } = await execFileAsync('git', ['ls-remote', '--heads', bare, d.branch ?? ''], { cwd: repo });
+    check('branch really exists on the remote', ls.includes(`refs/heads/${d.branch ?? ''}`));
 
     // The main checkout must be untouched — isolation still holds through follow-through.
     const { stdout: mainStatus } = await execFileAsync('git', ['status', '--porcelain'], { cwd: repo });
