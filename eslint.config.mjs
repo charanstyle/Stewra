@@ -16,13 +16,19 @@ import globals from 'globals';
 
 export default tseslint.config(
   {
-    // Don't lint build output, deps, or the hooks' own tooling.
-    ignores: ['**/dist/**', '**/node_modules/**', '.claude/**'],
+    // Don't lint build output, deps, or the hooks' own tooling. `build/` is listed alongside `dist/`
+    // because runner/package.json's `clean` removes both — without it, `eslint .` spent all its findings
+    // on the generated runner/build/runner.cjs bundle (627 of 690) and buried the real ones.
+    ignores: ['**/dist/**', '**/build/**', '**/node_modules/**', '.claude/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['**/*.ts', '**/*.tsx'],
+    // `.mts`/`.cts` are listed deliberately. typescript-eslint's recommended presets already match them,
+    // so they picked up `no-explicit-any`/`prefer-const` — but this block's own rules did not, which
+    // exempted every `.mts`/`.cts` file from job 1 above. That silently excused the repo's production
+    // CommonJS Electron code (bridge/src/main/ipc.cts) from the one rule this config exists to enforce.
+    files: ['**/*.ts', '**/*.tsx', '**/*.mts', '**/*.cts'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
@@ -40,6 +46,23 @@ export default tseslint.config(
       'prefer-const': 'error',
       'no-var': 'error',
     },
+  },
+  {
+    // The repo's plain-JS tooling — build scripts, tool configs, e2e helpers — all runs on Node. The
+    // `globals.node` above is scoped to the TS block, so without this every `process`/`console`/`__dirname`
+    // in those files was reported as `no-undef`: 371 findings that were entirely an artifact of the config.
+    files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      globals: { ...globals.node },
+    },
+  },
+  {
+    // `.cjs` is CommonJS by definition, so `require`/`module`/`exports` are the module system rather than a
+    // smell. Scoped to `.cjs` only — `.ts`/`.mts` keep the rule.
+    files: ['**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs' },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
   {
     // Plane boundary: the agent runtime has no direct DB / control-plane / egress access.
