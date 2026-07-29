@@ -231,7 +231,6 @@ export default function RunnerSessions(): React.JSX.Element | null {
     setPrTitle(s ? (s.prompt.split('\n')[0] ?? '').slice(0, 72) : '');
     setFollowMsg(null);
     // Intentionally keyed on activeId only: re-running on every `sessions` poll would clobber a title edit.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
   if (status === null || !status.enabled) return null;

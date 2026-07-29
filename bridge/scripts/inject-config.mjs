@@ -28,7 +28,6 @@ if (!apiBaseUrl) {
 }
 
 try {
-  // eslint-disable-next-line no-new
   new URL(apiBaseUrl);
 } catch {
   console.error(`inject-config: STEWRA_API_URL / stewra.apiBaseUrl is not a valid URL: ${apiBaseUrl}`);

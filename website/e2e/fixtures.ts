@@ -31,7 +31,9 @@ type TestFixtures = {
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
   session: [
-    async ({}, use) => {
+    // `_` rather than `{}`: this fixture consumes no other fixture, and an empty destructuring pattern is
+    // indistinguishable from one someone emptied by accident.
+    async (_, use) => {
       await loginAll(); // mutates A/B with fresh tokens for this worker
       const convId = await ensureConversation(A, B);
       await use({ convId });

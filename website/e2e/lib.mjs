@@ -60,12 +60,16 @@ export async function apiCall(path, { method = 'GET', token = A.accessToken, bod
   });
   const text = await res.text();
   let json = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = null;
+  if (text !== '') {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // A body that isn't JSON is a real outcome here (an HTML error page from a proxy, a truncated
+      // response). `json` stays null and the raw `text` goes back with it, so a caller can tell an
+      // unparseable body from an absent one — as `json: null` alone could not.
+    }
   }
-  return { status: res.status, ok: res.ok, json };
+  return { status: res.status, ok: res.ok, json, text };
 }
 
 /** The user's own id, read from their access-token JWT `sub`. */

@@ -1,6 +1,8 @@
 import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
-import {
+// Type-only: these constants appear solely as computed keys in the interfaces below, never as runtime
+// values in this module.
+import type {
   CLIENT_EVENTS,
   SERVER_EVENTS,
   RUNNER_UI_EVENTS,

@@ -64,8 +64,8 @@ export async function waitForVerificationCode({
     try {
       body = ssh(sshHost, find);
     } catch {
-      // No match yet (grep exits non-zero) or a transient ssh hiccup — both just mean "retry".
-      body = '';
+      // No match yet (grep exits non-zero) or a transient ssh hiccup — both just mean "retry", and `body`
+      // keeps its empty initial value so the regex below simply misses and the loop goes round again.
     }
     const m = /verification code is\s*(\d{6})/i.exec(body);
     if (m) {
