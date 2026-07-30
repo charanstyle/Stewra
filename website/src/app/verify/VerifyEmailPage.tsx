@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { EMAIL_VERIFICATION_CODE_LENGTH } from '@stewra/shared-types';
 import { useAuth } from '../../hooks/useAuth';
 import { api, ApiError } from '../../services/api';

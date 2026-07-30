@@ -12,7 +12,7 @@
     "runner"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "scripts": {
     "build:types": "npm run build -w @stewra/shared-types",
@@ -29,6 +29,14 @@
     "boundaries": "depcruise --config .dependency-cruiser.cjs packages/agent-runtime/src",
     "scan:fallbacks": "node scripts/fallback-scan.mjs",
     "tunnel": "bash scripts/tunnel.sh"
+  },
+  "overrides": {
+    "body-parser": "^1.20.6",
+    "brace-expansion": "^5.0.8",
+    "fast-uri": "^3.1.4",
+    "postcss": "^8.5.25",
+    "sharp": "^0.35.3",
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

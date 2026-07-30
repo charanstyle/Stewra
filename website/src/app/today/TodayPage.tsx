@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import type { Briefing, Connection, Suggestion } from '@stewra/shared-types';
 import { useAuth } from '../../hooks/useAuth';
 import { api, ApiError } from '../../services/api';

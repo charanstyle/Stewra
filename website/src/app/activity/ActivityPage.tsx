@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router';
 import {
   GMAIL_LOOKBACK_MIN_DAYS,
   GMAIL_LOOKBACK_MAX_DAYS,

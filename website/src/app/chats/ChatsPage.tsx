@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import type { ConversationSummary } from '@stewra/shared-types';
 import { AppNav } from '../../components/AppNav/AppNav';
 import { useConversations } from '../../hooks/useConversations';

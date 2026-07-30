@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import clsx from 'clsx';
 import type { Suggestion, SuggestionKind, SuggestionOption } from '@stewra/shared-types';
 import { api, ApiError } from '../../services/api';

@@ -5,7 +5,7 @@
 # Base is debian bookworm-slim (glibc), NOT alpine: the talk-to-Stewra voice layer bakes in the Piper
 # TTS release binaries (glibc-linked) and a cmake-built whisper.cpp. Keeping build + runtime on the same
 # libc means node's native modules (compiled during `npm ci`) also match the runtime.
-FROM node:20-bookworm-slim AS build
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
 # Install all workspace deps from manifests first, for better layer caching on source-only changes.
@@ -58,7 +58,7 @@ RUN if [ "$INSTALL_VOICE" = "true" ]; then \
       echo "INSTALL_VOICE=false — skipping voice toolchain (VOICE_ENABLED must be false at runtime)" ; \
     fi
 
-FROM node:20-bookworm-slim AS runtime
+FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 # Piper's bundled shared libraries live beside its binary; add that dir so the dynamic loader finds them

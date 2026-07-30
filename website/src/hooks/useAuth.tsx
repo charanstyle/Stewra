@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router';
 import type { User } from '@stewra/shared-types';
 import { api, clearTokens, readTokens, writeTokens } from '../services/api';
 

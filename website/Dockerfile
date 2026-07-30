@@ -1,6 +1,6 @@
 # Stewra website — builds the Vite SPA (with the API origin baked in at build time) and serves the
 # static output via nginx. Build context is the REPO ROOT, because the SPA imports @stewra/shared-types.
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./

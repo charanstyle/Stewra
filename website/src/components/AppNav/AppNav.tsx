@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router';
 import clsx from 'clsx';
 import { useAuth } from '../../hooks/useAuth';
 import styles from './AppNav.module.css';
