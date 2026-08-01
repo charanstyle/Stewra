@@ -78,12 +78,16 @@ export class SessionManager {
   /** Finished sessions whose worktree/branch we keep so the user can push / open a PR after the run. */
   private readonly completed = new Map<string, CompletedSession>();
   /** Cap on retained finished sessions; oldest evicted first (its branch survives, only the dir is freed). */
-  private static readonly MAX_COMPLETED = 100;
+  private readonly maxCompleted: number;
 
   constructor(
     private readonly emitter: SessionEmitter,
     private readonly resolveWorkspace: WorkspaceResolver,
-  ) {}
+    // Injectable so a test can hit the eviction path with a handful of REAL sessions instead of 101.
+    options?: { readonly maxCompleted?: number },
+  ) {
+    this.maxCompleted = options?.maxCompleted ?? 100;
+  }
 
   /**
    * Begin a session: resolve the workspace, cut a worktree, launch the harness, and — once it's genuinely
@@ -164,8 +168,11 @@ export class SessionManager {
     if (live === undefined) return;
     await live.acp.cancel().catch(() => undefined);
     this.rejectPending(live);
-    await this.teardown(payload.sessionId, live, true);
+    // Finish BEFORE teardown: killing the subprocess makes the in-flight turn reject (EPIPE on the
+    // dead pipe), and that failure path must find the session already finished — otherwise it races
+    // this method and reports the user's own cancellation as 'failed'.
     this.finish(payload.sessionId, live, { sessionId: payload.sessionId, status: 'cancelled' });
+    await this.teardown(payload.sessionId, live, true);
   }
 
   /** Stop everything — used when the device is revoked or the runner is shutting down. */
@@ -237,7 +244,7 @@ export class SessionManager {
   /** Register a finished session for later push/PR, evicting the oldest to stay within the retention cap. */
   private retainCompleted(sessionId: string, live: LiveSession, headSha: string): void {
     this.completed.set(sessionId, { worktree: live.worktree, workspace: live.workspace, headSha, pushed: false });
-    while (this.completed.size > SessionManager.MAX_COMPLETED) {
+    while (this.completed.size > this.maxCompleted) {
       const oldest = this.completed.keys().next().value;
       if (oldest === undefined) break;
       const evicted = this.completed.get(oldest);
