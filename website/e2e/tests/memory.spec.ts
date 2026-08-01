@@ -55,40 +55,41 @@ test.describe('memory', () => {
   test('memory card Edit → Cancel (non-mutating)', async ({ pageA }) => {
     await pageA.goto(`${WEB}/memory`, { waitUntil: 'domcontentloaded' });
     await pageA.getByRole('heading', { name: /What Stewra has learned/i }).waitFor({ timeout: 12000 });
+    // Precondition, not an outcome: with no memory to edit there is nothing to exercise, so skip
+    // visibly instead of logging "no editable memory present" and reporting a green pass. When a
+    // card IS present the editor behaviour is a hard assertion.
     const editBtn = pageA.getByRole('button', { name: 'Edit' }).first();
-    if (await editBtn.isVisible().catch(() => false)) {
-      await editBtn.click();
-      const cancel = pageA.getByRole('button', { name: 'Cancel' }).first();
-      const inEdit = await cancel.isVisible().catch(() => false);
-      if (inEdit) {
-        await cancel.click();
-        console.log('[memory] Edit opens editor, Cancel discards (no write)');
-      } else {
-        console.log('[memory] Edit/Cancel: edit form did not open as expected');
-      }
-    } else {
-      console.log('[memory] Edit/Cancel: no editable memory/rule present');
-    }
+    test.skip(
+      !(await editBtn.isVisible().catch(() => false)),
+      'no editable memory/rule present — set E2E_DATABASE_URL to seed one (see seed.mjs)',
+    );
+
+    await editBtn.click();
+    const cancel = pageA.getByRole('button', { name: 'Cancel' }).first();
+    await expect(cancel, 'Edit did not open the editor').toBeVisible();
+    await cancel.click();
+    await expect(cancel, 'Cancel did not close the editor').toBeHidden();
   });
 
   test('hide/use-for-recall toggle (reversible)', async ({ pageA }) => {
     await pageA.goto(`${WEB}/memory`, { waitUntil: 'domcontentloaded' });
     await pageA.getByRole('heading', { name: /What Stewra has learned/i }).waitFor({ timeout: 12000 });
+    // Same shape as Edit → Cancel above: absent data skips, present data asserts. The toggle
+    // flipping back is what proves it is reversible, so it must fail if the flip never happens.
     const hideBtn = pageA.getByRole('button', { name: 'Hide from recall' }).first();
-    if (await hideBtn.isVisible().catch(() => false)) {
-      await hideBtn.click();
-      await pageA.waitForTimeout(800);
-      const useBtn = pageA.getByRole('button', { name: 'Use for recall' }).first();
-      const flipped = await useBtn.isVisible().catch(() => false);
-      if (flipped) {
-        await useBtn.click(); // RESTORE
-        console.log('[memory] Hide↔Use for recall toggle works (restored)');
-      } else {
-        console.log('[memory] Hide/Use toggle: did not flip to "Use for recall"');
-      }
-    } else {
-      console.log('[memory] Hide/Use toggle: no "Hide from recall" button present');
-    }
+    test.skip(
+      !(await hideBtn.isVisible().catch(() => false)),
+      'no "Hide from recall" button present — set E2E_DATABASE_URL to seed a memory (see seed.mjs)',
+    );
+
+    await hideBtn.click();
+    const useBtn = pageA.getByRole('button', { name: 'Use for recall' }).first();
+    await expect(useBtn, 'Hide did not flip the control to "Use for recall"').toBeVisible();
+    await useBtn.click(); // RESTORE
+    await expect(
+      pageA.getByRole('button', { name: 'Hide from recall' }).first(),
+      'restore did not flip the control back to "Hide from recall"',
+    ).toBeVisible();
   });
 
   // Original: skip('memory', 'Delete memory / Delete rule / Dismiss rule', 'irreversibly destroys

@@ -9,9 +9,13 @@ test.describe('chats', () => {
     void convId; // ensures the A↔B direct conversation exists so the list is non-empty
     await pageA.goto(`${WEB}/chats`, { waitUntil: 'domcontentloaded' });
     await pageA.getByRole('heading', { name: 'Chats' }).waitFor({ timeout: 12000 });
+    // The heading renders before the list finishes loading, so counting rows immediately raced it
+    // and reported 0 — which this test then logged and passed anyway. Wait for the first row (the
+    // A↔B conversation the `convId` fixture guarantees) before asserting the list is non-empty.
     const rows = pageA.locator('li');
+    await rows.first().waitFor({ timeout: 12000 });
     const n = await rows.count();
-    console.log(`[chats] conversation list renders ${n} row(s)`);
+    expect(n, `conversation list rendered ${n} row(s), expected at least 1`).toBeGreaterThan(0);
   });
 
   test('New chat button routes to Contacts', async ({ pageA }) => {

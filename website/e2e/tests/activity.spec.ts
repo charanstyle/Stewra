@@ -7,9 +7,10 @@ test.describe('activity', () => {
     await pageA.goto(`${WEB}/activity`, { waitUntil: 'domcontentloaded' });
     // "Stewra" is only the nav brand, not a card heading — wait for a real, always-present card.
     await pageA.getByRole('heading', { name: 'Your sources' }).first().waitFor({ timeout: 12000 });
+    // These five cards are unconditionally rendered for every account, so assert them rather than
+    // logging a boolean the runner ignores — a missing card used to pass as `visible=false`.
     for (const h of ['Your sources', 'Gmail window', 'Learn my writing style', 'Ask for an insight', 'Activity']) {
-      const vis = await pageA.getByRole('heading', { name: h }).isVisible().catch(() => false);
-      console.log(`[activity] card "${h}" renders: visible=${vis}`);
+      await expect(pageA.getByRole('heading', { name: h }), `card "${h}" missing`).toBeVisible();
     }
   });
 
@@ -17,8 +18,15 @@ test.describe('activity', () => {
     await pageA.goto(`${WEB}/activity`, { waitUntil: 'domcontentloaded' });
     const connectBtn = pageA.getByRole('button', { name: 'Connect a Google account' });
     await connectBtn.waitFor({ timeout: 12000 });
-    const disabled = await connectBtn.isDisabled().catch(() => false);
-    test.skip(disabled, 'Connect button disabled (email not verified) — modal not exercised');
+    // `emailVerified` is `user?.emailVerified ?? false`, so the button renders DISABLED until
+    // useAuth() resolves. Sampling isDisabled() the instant it appears therefore skipped this
+    // test on every run against a perfectly verified account. Wait for enabled instead, and
+    // only treat a button that is still disabled after the wait as a genuine precondition.
+    const enabled = await connectBtn
+      .isEnabled({ timeout: 12000 })
+      .then(() => true)
+      .catch(() => false);
+    test.skip(!enabled, 'Connect button still disabled after load (email not verified)');
 
     await connectBtn.click();
     // The "One quick check" modal only appears after an async startGoogleConnection() round-trip,
@@ -86,11 +94,12 @@ test.describe('activity', () => {
     await pageA.goto(`${WEB}/activity`, { waitUntil: 'domcontentloaded' });
     const calBtn = pageA.getByRole('button', { name: 'Look at my calendar' });
     await calBtn.waitFor({ timeout: 12000 });
-    const disabled = await calBtn.isDisabled().catch(() => false);
-    test.skip(
-      disabled,
-      'insight buttons disabled (needs verified email / connected source) — not exercised',
-    );
+    // Same load race as the Connect button above — see the comment there.
+    const enabled = await calBtn
+      .isEnabled({ timeout: 12000 })
+      .then(() => true)
+      .catch(() => false);
+    test.skip(!enabled, 'insight buttons still disabled after load (email not verified)');
 
     await calBtn.click();
     // insight card renders 💡 …; may take a while (reads real calendar via LLM).

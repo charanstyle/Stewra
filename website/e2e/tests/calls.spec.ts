@@ -9,7 +9,7 @@
 // ../../frontend/e2e/scripts/reset-devices.sh.
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { test, expect } from '../fixtures';
-import { A, B, WEB, contextFor } from '../lib.mjs';
+import { A, B, WEB, apiCall, contextFor } from '../lib.mjs';
 
 /** Number of fresh-context attempts for the connect-reliability probes (matches the old
  * scripts' default `node calls.audio.mjs [attempts=3]`). */
@@ -30,6 +30,55 @@ async function placeCall(
   await pageA.locator(`button[title="${title}"]`).click();
   await pageB.getByText(incomingText).waitFor({ timeout: 15000 });
 }
+
+/**
+ * Calls force-relay (`iceTransportPolicy: 'relay'`), so every one of them dies the same opaque way
+ * when coturn is unreachable: the banner rings, Answer works, and then "Connected" simply never
+ * appears until the 30s timeout. That timeout says nothing about WHY, and the cause is usually the
+ * router port-forward documented in deploy/coturn-stewra.md ("the one manual step") rather than
+ * anything in the app.
+ *
+ * So ask the question directly before the suite runs: fetch real TURN credentials and try to gather a
+ * relay candidate from them. This never skips a test — a broken TURN is a broken product, and the
+ * call tests below must still fail — it only names the cause in the log.
+ *
+ * `session` is what logs A in; without it the credentials call runs unauthenticated and 401s. Probing
+ * once per worker keeps Playwright's per-test retries from paying the 10s gather again.
+ */
+let turnProbed = false;
+test.beforeAll(async ({ browser, session }) => {
+  void session; // ensures A has a token before the credentials call below
+  if (turnProbed) return;
+  turnProbed = true;
+  const res = await apiCall('/calls/turn-credentials');
+  const iceServers = res.json?.data?.iceServers;
+  if (!iceServers) {
+    console.log(`[call] TURN preflight: /calls/turn-credentials returned HTTP ${res.status} with no iceServers`);
+    return;
+  }
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  const relays = await page.evaluate(async (servers) => {
+    const pc = new RTCPeerConnection({ iceServers: servers, iceTransportPolicy: 'relay' });
+    const found: string[] = [];
+    pc.onicecandidate = (e): void => {
+      if (e.candidate) found.push(e.candidate.candidate);
+    };
+    pc.createDataChannel('turn-preflight');
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise((r) => setTimeout(r, 10000));
+    pc.close();
+    return found.length;
+  }, iceServers);
+  await ctx.close();
+  console.log(
+    relays > 0
+      ? `[call] TURN preflight: ${relays} relay candidate(s) from ${JSON.stringify(iceServers[0].urls)} — relay path is up`
+      : `[call] TURN preflight: NO relay candidates from ${JSON.stringify(iceServers[0].urls)}. ` +
+          'coturn is unreachable from this network, so no call below can reach "Connected". ' +
+          'See deploy/coturn-stewra.md — the router forward for UDP/TCP 3481 + UDP 49202-49250 is the usual cause.',
+  );
+});
 
 test.describe('call', () => {
   test('AUDIO call: ring → answer → connect → mute → hang up → markers', async ({
