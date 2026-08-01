@@ -361,11 +361,16 @@ export default function ConversationScreen({ route, navigation }: Props): React.
     };
   }, [participants, user?.id]);
 
-  useEffect(() => {
-    if (messages.length > 0) {
-      listRef.current?.scrollToEnd({ animated: true });
-    }
-  }, [messages.length]);
+  // The list is rendered `inverted`, so it wants its data newest-first while `messages` is kept
+  // oldest-first for every other purpose (appending, upserting, patching, read receipts).
+  //
+  // Inverting is what makes a thread OPEN on its newest message. Scrolling there instead cannot be
+  // made reliable: `scrollToEnd` targets the content height FlatList has measured so far, which at
+  // mount covers only the first batch of rows, so a busy thread opened parked partway up its own
+  // history and a just-received message stayed invisible until the user scrolled down. Re-issuing
+  // the scroll as later batches measure narrows the gap but still loses the race often enough to
+  // fail. An inverted list has no race to lose: the newest message IS scroll offset 0.
+  const rows = useMemo(() => [...messages].reverse(), [messages]);
 
   const handleChangeDraft = useCallback(
     (text: string): void => {
@@ -462,7 +467,11 @@ export default function ConversationScreen({ route, navigation }: Props): React.
     ({ item, index }: { item: Message; index: number }): React.JSX.Element => {
       const mine = item.senderId !== null && item.senderId === user?.id;
       const Icon = bubbleIcon(item.type);
-      const next = messages[index + 1];
+      // `rows` runs newest-first (the list is inverted), so the message that follows this one in
+      // time sits at the LOWER index. Grouping and the read-by decoration both hang off "is this
+      // the last message of a same-sender run", so reading the neighbour from the wrong end would
+      // silently move the avatars to the top of each run instead of the bottom.
+      const next = rows[index - 1];
       const isLastInGroup = next === undefined || next.senderId !== item.senderId;
       // The read-by decoration: the readers' small avatars under the last message of a same-sender run,
       // once that message has actually been read (positional, not a separate data concept).
@@ -521,7 +530,7 @@ export default function ConversationScreen({ route, navigation }: Props): React.
     },
     [
       user?.id,
-      messages,
+      rows,
       participantsById,
       confirmingEmailId,
       handleConfirmEmail,
@@ -594,11 +603,11 @@ export default function ConversationScreen({ route, navigation }: Props): React.
       <View style={[styles.flex, { paddingBottom: Math.max(keyboardHeight - insets.bottom, 0) }]}>
         <FlatList
           ref={listRef}
-          data={messages}
+          data={rows}
+          inverted
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
-          removeClippedSubviews
           maxToRenderPerBatch={16}
           windowSize={8}
         />
