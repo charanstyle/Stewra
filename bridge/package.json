@@ -2,6 +2,7 @@
   "name": "@stewra/bridge",
   "version": "1.0.0",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "description": "Stewra Bridge — the companion-device app that runs on the user's OWN computer. It holds the WhatsApp connection; Stewra's servers never do.",
   "author": "Stewra",
   "homepage": "https://www.stewra.com",
@@ -20,7 +21,6 @@
     "package": "npm run build && node scripts/inject-config.mjs && electron-builder",
     "package:linux": "npm run build && node scripts/inject-config.mjs && electron-builder --linux",
     "package:mac": "npm run build && node scripts/inject-config.mjs && bash scripts/package-mac.sh",
-    "package:win": "npm run build && node scripts/inject-config.mjs && electron-builder --win",
     "clean": "rm -rf dist release"
   },
   "dependencies": {

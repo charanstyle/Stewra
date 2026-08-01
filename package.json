@@ -2,6 +2,7 @@
   "name": "@stewra/monorepo",
   "private": true,
   "version": "0.0.0",
+  "license": "SEE LICENSE IN LICENSE",
   "description": "Stewra — trust-first personal assistant (Milestone 0)",
   "workspaces": [
     "packages/*",

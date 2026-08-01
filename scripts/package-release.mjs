@@ -9,7 +9,7 @@
 // Build the inputs first (on each OS for its targets):
 //   ( cd runner && npm run package )        -> runner/build/stewra-runner-<os>-<arch>
 //   ( cd bridge && npm run package:linux )  -> bridge/release/*.AppImage, *.deb
-//   ...and npm run package:mac / :win on those platforms.
+//   ...and npm run package:mac on the Mac. (No Windows targets yet — no machine to build/test on.)
 import { createHash } from 'node:crypto';
 import {
   closeSync,
@@ -40,13 +40,15 @@ const artifacts = [
   runner('linux', 'stewra-runner-linux-x64'),
   runner('macos', 'stewra-runner-macos-arm64'),
   runner('macos', 'stewra-runner-macos-x64'),
-  runner('win', 'stewra-runner-win-x64.exe'),
   { name: 'Stewra-Bridge-x86_64.AppImage', dir: join(root, 'bridge', 'release'), match: /x86_64\.AppImage$/ },
   { name: 'stewra-bridge-amd64.deb', dir: join(root, 'bridge', 'release'), match: /amd64\.deb$/ },
   // Arch-qualified: only an Apple Silicon dmg is published, and the download page links it by this
   // exact name. `Stewra-Bridge.dmg` here would stage under a name nothing links to — a silent 404.
   { name: 'Stewra-Bridge-arm64.dmg', dir: join(root, 'bridge', 'release'), match: /arm64\.dmg$/ },
-  { name: 'Stewra-Bridge-Setup.exe', dir: join(root, 'bridge', 'release'), match: /Setup.*\.exe$|\.exe$/ },
+  // License terms ship with every release: the download page footer links
+  // `releases/latest/download/EULA.md`, so the asset must exist under exactly that name.
+  { name: 'EULA.md', file: join(root, 'EULA.md') },
+  { name: 'LICENSE', file: join(root, 'LICENSE') },
 ];
 
 // Executable-format magic numbers, read as a big-endian u32 so the byte order in the literal matches
@@ -54,7 +56,6 @@ const artifacts = [
 const MAGIC = {
   linux: { label: 'ELF', ok: (m) => (m & 0xffffff00) >>> 0 === 0x7f454c00 },
   macos: { label: 'Mach-O', ok: (m) => [0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca].includes(m) },
-  win: { label: 'PE', ok: (m) => m >>> 16 === 0x4d5a },
 };
 
 // The bug this replaced published a darwin binary under the linux-x64 name. That is invisible until a

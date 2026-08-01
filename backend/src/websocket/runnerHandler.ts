@@ -124,9 +124,9 @@ function normalizeWorkspace(w: z.infer<typeof workspaceSchema>): RunnerWorkspace
  * clients chat rooms, presence, and a per-socket event budget — none of which a runner may have. Keeping
  * the machinery unreachable is surer than a rule someone must remember not to break.
  *
- * Phase 1 handles only `runner:hello` — announce + persist capabilities so the "Runners" panel can render
- * what each machine can do. The session lifecycle handlers (session-update, session-done,
- * permission-request) land in Phase 2, when the runner actually hosts an ACP session.
+ * Handles `runner:hello` (announce + persist capabilities so the "Runners" panel can render what each
+ * machine can do) and the session lifecycle events a hosting runner emits: session-update,
+ * session-done, and permission-request.
  */
 export function registerRunnerHandler(socket: RunnerSocketLike): void {
   const { userId, deviceId } = socket.data;

@@ -1,6 +1,8 @@
 {
   "name": "@stewra/agent-runtime",
   "version": "0.0.0",
+  "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "description": "Stewra agent runtime — UNTRUSTED data plane. Depends ONLY on @stewra/shared-types.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

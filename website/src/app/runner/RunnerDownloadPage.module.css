@@ -190,3 +190,21 @@
   font-weight: 600;
   text-decoration: none;
 }
+
+.comingSoon {
+  margin: 0;
+  font-size: 0.95rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.eula {
+  margin: var(--spacing-2, 0.5rem) 0 0;
+  font-size: 0.8rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.eula a {
+  color: hsl(var(--muted-foreground));
+  text-decoration: underline;
+  font-weight: 500;
+}

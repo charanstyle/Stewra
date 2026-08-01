@@ -27,6 +27,8 @@ interface OsBlock {
   readonly icon: React.JSX.Element;
   readonly runner: readonly Download[];
   readonly bridge: readonly Download[];
+  /** No builds published for this OS yet — the tab stays (honest), the downloads don't. */
+  readonly comingSoon?: boolean;
 }
 
 const LinuxIcon = (
@@ -71,11 +73,14 @@ const OSES: readonly OsBlock[] = [
     bridge: [{ label: 'Bridge · .dmg (Apple Silicon)', href: asset('Stewra-Bridge-arm64.dmg') }],
   },
   {
+    // No Windows builds are published (or signed) yet. The tab stays so a Windows visitor gets an
+    // honest answer instead of a download link that 404s.
     id: 'windows',
     name: 'Windows',
     icon: WindowsIcon,
-    runner: [{ label: 'Runner (x64)', href: asset('stewra-runner-win-x64.exe') }],
-    bridge: [{ label: 'Bridge · Setup', href: asset('Stewra-Bridge-Setup.exe') }],
+    runner: [],
+    bridge: [],
+    comingSoon: true,
   },
 ];
 
@@ -102,10 +107,7 @@ const RunnerDownloadPage: React.FC = () => {
   const apiUrl = typeof window !== 'undefined' ? window.location.origin : 'https://www.stewra.com';
   const active = OSES.find((o) => o.id === os) ?? OSES[0];
 
-  const runCmd =
-    os === 'windows'
-      ? `set STEWRA_API_URL=${apiUrl}\nstewra-runner-win-x64.exe pair <code>\nstewra-runner-win-x64.exe run`
-      : `chmod +x stewra-runner-*\nSTEWRA_API_URL=${apiUrl} ./stewra-runner-* pair <code>\nSTEWRA_API_URL=${apiUrl} ./stewra-runner-* run`;
+  const runCmd = `chmod +x stewra-runner-*\nSTEWRA_API_URL=${apiUrl} ./stewra-runner-* pair <code>\nSTEWRA_API_URL=${apiUrl} ./stewra-runner-* run`;
 
   return (
     <div className={styles.page}>
@@ -136,49 +138,67 @@ const RunnerDownloadPage: React.FC = () => {
 
       <section className={styles.card}>
         <h2 className={styles.cardHeading}>{active.name} downloads</h2>
-        <div className={styles.group}>
-          <span className={styles.groupLabel}>Runner</span>
-          <div className={styles.buttons}>
-            {active.runner.map((d) => (
-              <a key={d.href} className={styles.download} href={d.href} rel="noreferrer">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                  <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                {d.label}
-              </a>
-            ))}
-          </div>
-        </div>
-        <div className={styles.group}>
-          <span className={styles.groupLabel}>WhatsApp Bridge</span>
-          <div className={styles.buttons}>
-            {active.bridge.map((d) => (
-              <a key={d.href} className={styles.downloadSecondary} href={d.href} rel="noreferrer">
-                {d.label}
-              </a>
-            ))}
-          </div>
-        </div>
+        {active.comingSoon ? (
+          <p className={styles.comingSoon}>
+            {active.name} builds aren&apos;t available yet. Use the macOS or Linux downloads on a machine
+            you own — {active.name} support is coming.
+          </p>
+        ) : (
+          <>
+            <div className={styles.group}>
+              <span className={styles.groupLabel}>Runner</span>
+              <div className={styles.buttons}>
+                {active.runner.map((d) => (
+                  <a key={d.href} className={styles.download} href={d.href} rel="noreferrer">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    {d.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+            <div className={styles.group}>
+              <span className={styles.groupLabel}>WhatsApp Bridge</span>
+              <div className={styles.buttons}>
+                {active.bridge.map((d) => (
+                  <a key={d.href} className={styles.downloadSecondary} href={d.href} rel="noreferrer">
+                    {d.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
-      <section className={styles.card}>
-        <h2 className={styles.cardHeading}>Pair it</h2>
-        <ol className={styles.steps}>
-          <li>
-            Open <a href="/activity">Activity → Runners</a> in Stewra and copy a pairing code.
-          </li>
-          <li>In a terminal where you downloaded the runner, run:</li>
-        </ol>
-        <pre className={styles.code}>{runCmd}</pre>
-        <p className={styles.hint}>
-          The runner comes online in Activity → Runners the moment it pairs. Revoke it there any time.
-        </p>
-      </section>
+      {!active.comingSoon && (
+        <section className={styles.card}>
+          <h2 className={styles.cardHeading}>Pair it</h2>
+          <ol className={styles.steps}>
+            <li>
+              Open <a href="/activity">Activity → Runners</a> in Stewra and copy a pairing code.
+            </li>
+            <li>In a terminal where you downloaded the runner, run:</li>
+          </ol>
+          <pre className={styles.code}>{runCmd}</pre>
+          <p className={styles.hint}>
+            The runner comes online in Activity → Runners the moment it pairs. Revoke it there any time.
+          </p>
+        </section>
+      )}
 
       <footer className={styles.footer}>
         <a href={RELEASES} rel="noreferrer">
           All releases, checksums &amp; other platforms →
         </a>
+        <p className={styles.eula}>
+          By downloading you agree to the{' '}
+          <a href={`${RELEASES}/latest/download/EULA.md`} rel="noreferrer">
+            end-user license agreement
+          </a>
+          .
+        </p>
       </footer>
     </div>
   );

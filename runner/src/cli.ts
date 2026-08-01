@@ -10,12 +10,12 @@ import { clearToken, loadToken, saveToken } from './core/tokenStore.js';
  * The runner's entry point.
  *
  *   stewra-runner pair <code>   Trade a pairing code (minted in the Stewra web app) for a device token.
- *   stewra-runner run           Hold the socket open, announce capabilities, host sessions (Phase 2).
+ *   stewra-runner run           Hold the socket open, announce capabilities, host coding sessions.
  *   stewra-runner --version     Print the version.
  *
- * Phase 1 covers pairing + registration: after `pair`, `run` connects, reports which coding harnesses and
- * workspaces this machine has, and the machine shows up (online) in the web app. Session execution over
- * ACP arrives in Phase 2.
+ * After `pair`, `run` connects, reports which coding harnesses and workspaces this machine has, shows
+ * up (online) in the web app, and hosts full ACP coding sessions — streaming updates, permission
+ * prompts, per-session git worktrees, and push/PR follow-through.
  */
 const VERSION = '0.1.0';
 

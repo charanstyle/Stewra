@@ -1,19 +1,20 @@
 # Packaging config for the Stewra Bridge desktop app.
 #
 # Produces installable artifacts per OS. Build each platform's target ON that OS (electron-builder can
-# only build macOS .dmg on macOS and codesign Windows on Windows); this repo verifies the Linux targets.
+# only build macOS .dmg on macOS); this repo verifies the Linux targets. Windows is not a target yet —
+# no Windows machine to build or test on; the download page shows it as "coming soon".
 #
 # macOS artifacts ARE signed here, with the Developer ID cert from the build machine's login keychain
-# (see `mac.identity` below); notarization is a separate step, scripts/notarize-dmg.sh. Linux and
-# Windows targets are unsigned. Build the mac target via `npm run package:mac`, never by invoking
+# (see `mac.identity` below); notarization is a separate step, scripts/notarize-dmg.sh. Linux targets
+# are unsigned. Build the mac target via `npm run package:mac`, never by invoking
 # electron-builder directly — the wrapper guards a filesystem trap documented in scripts/package-mac.sh.
 appId: com.stewra.bridge
 productName: Stewra Bridge
 copyright: Stewra
 
-# electron-builder needs an exact Electron version to fetch the right platform binaries; package.json
-# carries a "^33.2.0" range, so pin the resolved version here. Keep in step with the electron devDep.
-electronVersion: 33.4.11
+# The Electron version comes from the installed `electron` devDependency (electron-builder reads the
+# resolved package). Never pin `electronVersion` here — a pin silently drifts from the lockfile and
+# ships a different runtime than the one developed and tested against.
 
 directories:
   # NOT `dist` — that is the TypeScript compiler's output; installers go somewhere separate.
@@ -44,6 +45,14 @@ files:
 
 # Baileys / socket.io-client / zod are pure JS — no native addons to rebuild against Electron's ABI.
 npmRebuild: false
+
+# License terms travel with the installed app (Contents/Resources on macOS, resources/ on Linux).
+# The download page and the GitHub release carry the same files.
+extraResources:
+  - from: ../LICENSE
+    to: LICENSE
+  - from: ../EULA.md
+    to: EULA.md
 
 linux:
   # The npm package is scoped (@stewra/bridge); an executable/file name can't contain "@" or "/".
@@ -79,8 +88,3 @@ mac:
   # NOTE: notarization is a SEPARATE post-build step (notarytool submit --wait → stapler staple the .dmg),
   # driven by scripts/notarize-dmg so a contributor without notary credentials can still produce a signed
   # (un-notarized) build. See bridge/scripts/notarize-dmg.sh.
-
-win:
-  target:
-    - nsis
-  icon: build/icon.png
