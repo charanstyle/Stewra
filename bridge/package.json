@@ -1,6 +1,6 @@
 {
   "name": "@stewra/bridge",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "description": "Stewra Bridge — the companion-device app that runs on the user's OWN computer. It holds the WhatsApp connection; Stewra's servers never do.",
@@ -18,14 +18,15 @@
     "test": "vitest run && npm run test:esm-interop",
     "test:esm-interop": "node --input-type=module -e \"import { BRIDGE_CLIENT_EVENTS } from '@stewra/shared-types'; import { DisconnectReason } from '@whiskeysockets/baileys'; if (!BRIDGE_CLIENT_EVENTS?.HELLO || !DisconnectReason?.loggedOut) { throw new Error('ESM named-export interop is broken'); }\"",
     "start": "npm run build && electron dist/main/main.js",
-    "package": "npm run build && node scripts/inject-config.mjs && electron-builder",
-    "package:linux": "npm run build && node scripts/inject-config.mjs && electron-builder --linux",
+    "package": "npm run build && node scripts/inject-config.mjs && electron-builder --publish never",
+    "package:linux": "npm run build && node scripts/inject-config.mjs && electron-builder --linux --publish never",
     "package:mac": "npm run build && node scripts/inject-config.mjs && bash scripts/package-mac.sh",
     "clean": "rm -rf dist release"
   },
   "dependencies": {
     "@stewra/shared-types": "*",
     "@whiskeysockets/baileys": "6.7.23",
+    "electron-updater": "^6.8.9",
     "qrcode": "^1.5.4",
     "socket.io-client": "^4.8.3",
     "zod": "^3.23.8"

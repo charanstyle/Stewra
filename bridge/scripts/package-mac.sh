@@ -58,7 +58,7 @@ fi
 # PASS 1 of 2: build and sign the .app only. The dmg is built separately, below, AFTER the app has
 # been notarized and stapled — a bundle sealed inside a read-only disk image can no longer be stapled,
 # and an app with no ticket of its own forces Gatekeeper online on first launch. See notarize-app.sh.
-npx electron-builder --mac --dir -c.directories.output="$build_dir" "$@"
+npx electron-builder --mac --dir --publish never -c.directories.output="$build_dir" "$@"
 
 # --- guards -------------------------------------------------------------------------------------
 # Both failure modes are silent, so assert against them rather than trusting the build.
@@ -110,14 +110,17 @@ else
   notarized=0
 fi
 
-# PASS 2 of 2: wrap the (now stapled) .app in the dmg. --prepackaged makes electron-builder reuse this
-# exact bundle instead of rebuilding and re-signing it, which would discard the ticket just stapled in.
+# PASS 2 of 2: wrap the (now stapled) .app in the dmg AND the zip. --prepackaged makes electron-builder
+# reuse this exact bundle instead of rebuilding and re-signing it, which would discard the ticket just
+# stapled in. The zip is not optional: it is the artifact electron-updater actually applies on macOS
+# (Squirrel.Mac cannot update from a dmg) — and building it here, after stapling, is what puts a
+# ticketed app inside it. This pass also emits latest-mac.yml, the update feed the packaged app polls.
 #
-# It takes the path to the .app ITSELF, not the directory containing it. Pointing it at the parent does
-# not fail — electron-builder copies that directory into the image under the app's name, producing a
-# dmg holding "Stewra Bridge.app/Stewra Bridge.app". The dmg builds, is the right size, and is entirely
-# broken ("bundle format unrecognized"). Hence the assertion below.
-npx electron-builder --mac dmg --prepackaged "$app" \
+# --prepackaged takes the path to the .app ITSELF, not the directory containing it. Pointing it at the
+# parent does not fail — electron-builder copies that directory into the image under the app's name,
+# producing a dmg holding "Stewra Bridge.app/Stewra Bridge.app". The dmg builds, is the right size, and
+# is entirely broken ("bundle format unrecognized"). Hence the assertion below.
+npx electron-builder --mac dmg zip --prepackaged "$app" --publish never \
   -c.directories.output="$build_dir" "$@"
 
 # Inspect what actually ended up in the image rather than trusting that pass 2 did the right thing.
@@ -152,7 +155,36 @@ if [ "$notarized" -eq 1 ] && [ "$ticket_ok" -ne 1 ]; then
 fi
 echo ">> dmg contents verified: valid bundle$([ "$ticket_ok" -eq 1 ] && echo ', ticket stapled')"
 
+# --- the update feed must describe the zip that was actually built ---------------------------------
+# electron-updater downloads the zip named in latest-mac.yml and REFUSES it if the sha512 differs. A
+# mismatch here (a stale yml from an earlier pass, a zip rebuilt out of band) ships an auto-update that
+# every installed bridge downloads and then rejects, forever — silent in the release, loud on every
+# user's machine. Assert the pair agrees before anything leaves this script.
+staged_zip="$(find "$build_dir" -maxdepth 1 -name '*.zip' -print -quit)"
+yml="$build_dir/latest-mac.yml"
+if [ -z "$staged_zip" ]; then
+  echo "!! no .zip produced in $build_dir — macOS auto-update has nothing to apply" >&2
+  exit 1
+fi
+if [ ! -f "$yml" ]; then
+  echo "!! no latest-mac.yml produced in $build_dir — check the publish config in electron-builder.yml" >&2
+  exit 1
+fi
+zip_sha512="$(openssl dgst -sha512 -binary "$staged_zip" | base64 | tr -d '\n')"
+if ! grep -qF "$zip_sha512" "$yml"; then
+  echo "!! latest-mac.yml's sha512 does not match $(basename "$staged_zip")" >&2
+  echo "!! shipping this pair would make every installed bridge download and reject the update" >&2
+  exit 1
+fi
+if ! grep -qF "$(basename "$staged_zip")" "$yml"; then
+  echo "!! latest-mac.yml does not reference $(basename "$staged_zip") by name" >&2
+  exit 1
+fi
+echo ">> latest-mac.yml verified against $(basename "$staged_zip")"
+
 # --- collect ------------------------------------------------------------------------------------
+# The dmg (for the download page), the zip and latest-mac.yml (for auto-update) all travel together —
+# scripts/package-release.mjs stages all three and hard-fails on a dmg without its update pair.
 if [ "$build_dir" != "$OUT_DIR" ]; then
   shopt -s nullglob
   dmgs=("$build_dir"/*.dmg)
@@ -160,7 +192,9 @@ if [ "$build_dir" != "$OUT_DIR" ]; then
     echo "!! no .dmg produced in $build_dir" >&2
     exit 1
   fi
-  for d in "${dmgs[@]}"; do
+  # *.blockmap enables differential downloads; electron-updater falls back to a full download when a
+  # blockmap is absent, so they ride along when produced but nothing asserts on them.
+  for d in "${dmgs[@]}" "$build_dir"/*.zip "$build_dir"/*.blockmap "$build_dir"/latest-mac.yml; do
     cp -f "$d" "$OUT_DIR/"
     echo ">> $(basename "$d") -> $OUT_DIR/"
   done

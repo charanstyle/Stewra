@@ -4,7 +4,13 @@
 // This does NOT publish. Publishing uploads dist-release/* to a GitHub Release on charanstyle/Stewra
 // (the URLs use `releases/latest/download/<name>`), which is a live external action — run it yourself:
 //
-//   gh release create runner-v0.1.0 dist-release/* --title "Runner 0.1.0 / Bridge 1.0.0" --notes "..."
+//   gh release create v2026.xx.xx dist-release/* --title "Bridge 1.1.0 / Runner 0.2.0" --notes "..."
+//
+// ⚠️ `releases/latest` is BOTH the download page's link target AND the installed bridges' auto-update
+// feed (latest-mac.yml / latest-linux.yml). So: every normal release must be a COMBINED release
+// carrying the bridge artifacts plus both ymls (this script hard-fails a partial platform below); a
+// deliberately partial release — runner-only, a test build — must be created with `--prerelease`,
+// which keeps it off `releases/latest` so installed bridges never see it.
 //
 // Build the inputs first (on each OS for its targets):
 //   ( cd runner && npm run package )        -> runner/build/stewra-runner-<os>-<arch>
@@ -24,7 +30,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'dist-release');
@@ -34,17 +40,33 @@ const out = join(root, 'dist-release');
 // `os` drives the sanity check below.
 const runner = (os, name) => ({ name, os, file: join(root, 'runner', 'build', name) });
 
+const bridgeRelease = join(root, 'bridge', 'release');
+
 // Map: canonical release-asset name -> how to find the freshly built file.
 // `dir` is scanned and the first file matching `match` is taken (handles version-stamped filenames).
+// `keepName: true` stages under the source's own (version-stamped) basename — REQUIRED for every
+// asset that latest-mac.yml / latest-linux.yml references: electron-updater downloads exactly the
+// name in the yml, so renaming those breaks auto-update with a 404 on every installed bridge.
+// `group` ties a platform's bridge artifacts together for the all-or-nothing check below.
 const artifacts = [
   runner('linux', 'stewra-runner-linux-x64'),
   runner('macos', 'stewra-runner-macos-arm64'),
   runner('macos', 'stewra-runner-macos-x64'),
-  { name: 'Stewra-Bridge-x86_64.AppImage', dir: join(root, 'bridge', 'release'), match: /x86_64\.AppImage$/ },
-  { name: 'stewra-bridge-amd64.deb', dir: join(root, 'bridge', 'release'), match: /amd64\.deb$/ },
+  // Stable names the download page links (releases/latest/download/<name> never changes) …
+  { name: 'Stewra-Bridge-x86_64.AppImage', dir: bridgeRelease, match: /x86_64\.AppImage$/, group: 'bridge-linux' },
+  { name: 'stewra-bridge-amd64.deb', dir: bridgeRelease, match: /amd64\.deb$/, group: 'bridge-linux' },
   // Arch-qualified: only an Apple Silicon dmg is published, and the download page links it by this
   // exact name. `Stewra-Bridge.dmg` here would stage under a name nothing links to — a silent 404.
-  { name: 'Stewra-Bridge-arm64.dmg', dir: join(root, 'bridge', 'release'), match: /arm64\.dmg$/ },
+  { name: 'Stewra-Bridge-arm64.dmg', dir: bridgeRelease, match: /arm64\.dmg$/, group: 'bridge-mac' },
+  // … and the auto-update feed: the versioned AppImage (yes, the same file uploaded twice — the yml
+  // needs the versioned name, the download page the stable one), the macOS zip, and the ymls.
+  { keepName: true, dir: bridgeRelease, match: /^Stewra-Bridge-.*x86_64\.AppImage$/, group: 'bridge-linux' },
+  { name: 'latest-linux.yml', file: join(bridgeRelease, 'latest-linux.yml'), group: 'bridge-linux' },
+  { keepName: true, dir: bridgeRelease, match: /-arm64\.zip$/, group: 'bridge-mac' },
+  { name: 'latest-mac.yml', file: join(bridgeRelease, 'latest-mac.yml'), group: 'bridge-mac' },
+  // Blockmaps make updates differential; without them electron-updater just downloads in full. The
+  // only optional entry — everything else that exists partially is a broken release (see below).
+  { keepName: true, multi: true, optional: true, dir: bridgeRelease, match: /\.blockmap$/ },
   // License terms ship with every release: the download page footer links
   // `releases/latest/download/EULA.md`, so the asset must exist under exactly that name.
   { name: 'EULA.md', file: join(root, 'EULA.md') },
@@ -78,41 +100,75 @@ function assertFormat(a, src) {
   }
 }
 
-function resolveSource(a) {
+function resolveSources(a) {
   if (a.file) {
-    return existsSync(a.file) ? a.file : null;
+    return existsSync(a.file) ? [a.file] : [];
   }
   if (!existsSync(a.dir)) {
-    return null;
+    return [];
   }
   // Skip AppleDouble sidecars. On a filesystem without native xattrs (this repo often lives on exFAT)
   // macOS leaves a `._Stewra Bridge-1.0.0-arm64.dmg` beside the real one — it matches the same pattern,
   // sorts FIRST, and is a few KB of metadata. Staging that as the release artifact would be silent.
-  const hit = readdirSync(a.dir)
+  const hits = readdirSync(a.dir)
     .filter((f) => !f.startsWith('._'))
-    .find((f) => a.match.test(f));
-  return hit ? join(a.dir, hit) : null;
+    .filter((f) => a.match.test(f));
+  return (a.multi ? hits : hits.slice(0, 1)).map((f) => join(a.dir, f));
 }
+
+/** What to call an artifact in "missing" output — keepName entries have no fixed name to print. */
+const describe = (a) => a.name ?? `${a.dir ? basename(a.dir) + '/' : ''}${a.match}`;
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
 const staged = [];
 const missing = [];
+/** group -> { staged: [names], missing: [labels] } for the all-or-nothing check below. */
+const groups = new Map();
+const groupOf = (g) => {
+  if (!groups.has(g)) groups.set(g, { staged: [], missing: [] });
+  return groups.get(g);
+};
+
 for (const a of artifacts) {
-  const src = resolveSource(a);
-  if (src === null) {
-    missing.push(a.name);
+  const sources = resolveSources(a);
+  if (sources.length === 0) {
+    if (!a.optional) {
+      missing.push(describe(a));
+      if (a.group) groupOf(a.group).missing.push(describe(a));
+    }
     continue;
   }
-  if (a.os !== undefined) {
-    assertFormat(a, src);
+  for (const src of sources) {
+    if (a.os !== undefined) {
+      assertFormat(a, src);
+    }
+    const name = a.keepName ? basename(src) : a.name;
+    const dest = join(out, name);
+    copyFileSync(src, dest);
+    const sha = createHash('sha256').update(readFileSync(dest)).digest('hex');
+    staged.push({ name, sha });
+    if (a.group) groupOf(a.group).staged.push(name);
+    console.log(`staged  ${name}`);
   }
-  const dest = join(out, a.name);
-  copyFileSync(src, dest);
-  const sha = createHash('sha256').update(readFileSync(dest)).digest('hex');
-  staged.push({ name: a.name, sha });
-  console.log(`staged  ${a.name}`);
+}
+
+// A platform's bridge artifacts are all-or-nothing. A dmg without its zip + latest-mac.yml (or an
+// AppImage without its versioned twin + latest-linux.yml) publishes fine, downloads fine — and every
+// installed bridge on that platform silently stops receiving updates, or 404s trying. A missing
+// WHOLE platform is legitimate (each OS builds its own artifacts on its own machine); a PARTIAL
+// platform is always a broken build, so it refuses here, at staging, not on users' machines.
+for (const [group, g] of groups) {
+  if (g.staged.length > 0 && g.missing.length > 0) {
+    console.error(
+      `\n!! ${group}: staged ${g.staged.join(', ')} but could not find: ${g.missing.join(', ')}\n` +
+        '!! A bridge artifact without its auto-update metadata breaks updates for every installed\n' +
+        '!! bridge on that platform. Rebuild the platform (the packaging scripts emit all of these\n' +
+        '!! together) instead of publishing a partial set.',
+    );
+    process.exit(1);
+  }
 }
 
 if (staged.length > 0) {
@@ -137,3 +193,4 @@ if (missing.length > 0) {
 }
 console.log('\nPublish (runs against GitHub — do this yourself):');
 console.log('  gh release create <tag> dist-release/* --title "..." --notes "..."');
+console.log('  (partial/test releases: add --prerelease, or installed bridges will treat it as an update)');

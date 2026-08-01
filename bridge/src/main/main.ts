@@ -7,6 +7,7 @@ import type { BridgeConfig } from '../core/config.js';
 import { BAKED_API_URL } from './bakedConfig.js';
 import { createSafeStorageSecretStore } from './secretStore.js';
 import { TokenStore } from './tokenStore.js';
+import { quitAndInstall, startUpdater } from './updater.js';
 import type { SecretStore } from '../core/authState.js';
 import { IPC } from './ipc.cjs';
 import type { BridgeUiState, PairRequest, PairResult } from './ipc.cjs';
@@ -33,6 +34,12 @@ let tokenStore: TokenStore | null = null;
 /** Set only by the tray's Quit item. Closing the window HIDES it — a bridge that quit is a bridge that
  * stopped answering, and the user would not find out until they wondered why Stewra had gone silent. */
 let quitting = false;
+
+/** What the updater has to offer, reflected as tray items. See updater.ts for the mode semantics. */
+let updateNotice:
+  | { kind: 'none' }
+  | { kind: 'available'; version: string; downloadUrl: string }
+  | { kind: 'downloaded'; version: string } = { kind: 'none' };
 
 let uiState: BridgeUiState = {
   paired: false,
@@ -82,6 +89,31 @@ function refreshTray(): void {
     Menu.buildFromTemplate([
       { label: trayTooltip(), enabled: false },
       { type: 'separator' },
+      // deb installs: electron-updater cannot replace a dpkg-managed app, so this only points at the
+      // download page. macOS/AppImage: the update is already staged; restarting applies it.
+      ...(updateNotice.kind === 'available'
+        ? [
+            {
+              label: `Update available (${updateNotice.version}) — download`,
+              click: (): void => {
+                if (updateNotice.kind === 'available') void shell.openExternal(updateNotice.downloadUrl);
+              },
+            },
+            { type: 'separator' as const },
+          ]
+        : []),
+      ...(updateNotice.kind === 'downloaded'
+        ? [
+            {
+              label: `Restart to update (${updateNotice.version})`,
+              click: (): void => {
+                quitting = true;
+                quitAndInstall();
+              },
+            },
+            { type: 'separator' as const },
+          ]
+        : []),
       { label: 'Open Stewra Bridge', click: () => showWindow() },
       {
         label: 'Start at login',
@@ -275,6 +307,20 @@ if (!app.requestSingleInstanceLock()) {
     };
 
     registerIpc(activeConfig, secrets, tokenStore);
+
+    // The download page lives on the same origin as the API (the baked production URL, or the
+    // STEWRA_API_URL override) — derived, never guessed, so a staging build points at staging.
+    const downloadUrl = `${activeConfig.apiBaseUrl}/runner`;
+    startUpdater({
+      onUpdateAvailable: (version) => {
+        updateNotice = { kind: 'available', version, downloadUrl };
+        refreshTray();
+      },
+      onUpdateDownloaded: (version) => {
+        updateNotice = { kind: 'downloaded', version };
+        refreshTray();
+      },
+    });
 
     tray = new Tray(trayIcon(false));
     refreshTray();

@@ -22,7 +22,21 @@ directories:
   buildResources: build
 
 # Keep the scoped npm name (@stewra/bridge) out of artifact filenames — the "/" and "@" break paths.
-artifactName: ${productName}-${version}-${arch}.${ext}
+# Hyphenated LITERAL, not ${productName}: "Stewra Bridge-1.1.0-arm64.zip" contains a space, GitHub
+# rewrites spaces to dots in release-asset names, and then the URL electron-updater builds from
+# latest-mac.yml no longer matches any asset. No spaces means the yml and the assets can't diverge.
+artifactName: Stewra-Bridge-${version}-${arch}.${ext}
+
+# Where UPDATES are looked for at runtime: electron-builder bakes this into the packaged app's
+# app-update.yml, which electron-updater reads. Every build still runs `--publish never` (see the
+# package scripts and package-mac.sh) — publishing a release stays a manual `gh release create` after
+# notarization, per scripts/package-release.mjs. Only non-prerelease releases may carry bridge
+# artifacts, and each must include latest-mac.yml / latest-linux.yml (enforced in package-release.mjs);
+# a partial release (e.g. runner-only) must be marked --prerelease so `releases/latest` skips it.
+publish:
+  provider: github
+  owner: charanstyle
+  repo: Stewra
 
 # `main` in package.json (dist/main/main.js) is the entry; electron-builder includes the compiled
 # app plus production dependencies automatically and prunes devDependencies. We only need to keep the
@@ -65,8 +79,12 @@ linux:
   icon: build/icon.png
 
 mac:
+  # dmg is what users download; zip is what electron-updater applies (Squirrel.Mac cannot update from
+  # a dmg — without the zip, macOS auto-update silently never happens). Both are built in PASS 2 of
+  # scripts/package-mac.sh from the already-notarized, stapled .app.
   target:
     - dmg
+    - zip
   category: public.app-category.utilities
   icon: build/icon.png
   # Sign with the org's "Developer ID Application" certificate. This is the ONLY signature type macOS
