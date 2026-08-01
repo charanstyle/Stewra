@@ -1,0 +1,113 @@
+# CI: typecheck, lint, boundaries, and unit tests for every workspace.
+#
+# Deliberately NOT here: packaging, signing, notarization, releases. The macOS Developer ID private
+# key lives in the build Mac's login keychain and never leaves it; releases stay manual
+# (scripts/package-release.mjs documents the flow). No repo secrets are used — the backend suite's
+# Postgres/Redis run as throwaway service containers, and every credential below is a CI-local
+# well-formed dummy that guards nothing.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  # Throwaway password for the ephemeral Postgres service container this job spins up and destroys.
+  # It protects nothing and never leaves the runner; defined once so the service and the generated
+  # backend/.env.test can never drift apart.
+  CI_POSTGRES_PASSWORD: stewra-test-ci-throwaway
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    services:
+      # The backend suite is not simulated (see backend/vitest.config.ts): it needs a real Postgres
+      # and a real Redis. These containers are the CI stand-ins for the tunnelled home-server pair.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stewra_test
+          POSTGRES_PASSWORD: ${{ env.CI_POSTGRES_PASSWORD }}
+          POSTGRES_DB: stewra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stewra_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # backend/website typecheck against the BUILT workspace packages, not their sources.
+      - name: Build workspace packages
+        run: npm run build:types && npm run build:agent
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Plane boundaries (dependency-cruiser)
+        run: npm run boundaries
+
+      # Every value is a CI-local throwaway shaped to pass unifiedConfig validation — the suite never
+      # reaches Google or SMTP. Contract: backend/.env.test.example.
+      - name: Write backend/.env.test
+        run: |
+          cat > backend/.env.test <<EOF
+          NODE_ENV=test
+          DATABASE_URL=postgresql://stewra_test:${CI_POSTGRES_PASSWORD}@127.0.0.1:5432/stewra_test
+          REDIS_URL=redis://127.0.0.1:6379/15
+          JWT_SECRET=ci-throwaway-jwt-secret-0123456789abcdef0123456789abcdef
+          VAULT_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          WEB_APP_URL=http://127.0.0.1:3000
+          GOOGLE_CLIENT_ID=test.apps.googleusercontent.com
+          GOOGLE_CLIENT_SECRET=ci-throwaway-google-secret
+          GOOGLE_REDIRECT_URI=http://127.0.0.1:3001/api/connections/google/callback
+          GMAIL_LOOKBACK_DAYS=7
+          SMTP_HOST=127.0.0.1
+          SMTP_PORT=1025
+          SMTP_SECURE=false
+          SMTP_USER=stewra-test
+          SMTP_PASSWORD=ci-throwaway-smtp-password
+          EMAIL_FROM=test@stewra.invalid
+          EOF
+
+      - name: Migrate test database
+        working-directory: backend
+        run: |
+          set -a
+          . ./.env.test
+          set +a
+          npm run db:migrate
+
+      - name: Backend tests
+        run: npm test -w backend
+
+      - name: Bridge tests
+        run: npm test -w @stewra/bridge
+
+      - name: Runner tests
+        run: npm test -w @stewra/runner
