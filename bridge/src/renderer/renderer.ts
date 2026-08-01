@@ -1,4 +1,4 @@
-import type { BridgeUiState, StewraBridgeApi } from '../main/ipc.cjs';
+import type { BridgeUiState, ChatPickerState, StewraBridgeApi } from '../main/ipc.cjs';
 
 /**
  * The window. It has no Node, no filesystem and no network of its own (see the CSP in index.html) — it
@@ -73,6 +73,7 @@ const unpairButton = buttonEl('unpair');
 const autostartInput = inputEl('autostart');
 const versionText = el('version');
 const apiText = el('api');
+const chatList = el('chat-list');
 
 /**
  * What the user is told, per state. `banned` and `logged_out` are deliberately not softened into
@@ -151,9 +152,51 @@ unpairButton.addEventListener('click', () => {
   void stewra.unpair();
 });
 
+// ── the chat picker ──────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Repaint the picker. Rows are built with `createElement` and named via `textContent`, never markup:
+ * every display name here originated in WhatsApp — someone else's push name is attacker-adjacent
+ * input, and this window is the one place in the app that renders it.
+ */
+function renderChats(state: ChatPickerState): void {
+  for (const row of Array.from(chatList.querySelectorAll('li:not(.pinned)'))) row.remove();
+  for (const chat of state.chats) {
+    const item = document.createElement('li');
+    item.className = 'chat-row';
+    const label = document.createElement('label');
+    label.className = 'check';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = chat.ticked;
+    box.dataset['jid'] = chat.jid;
+    box.addEventListener('change', submitTicks);
+    const name = document.createElement('span');
+    name.textContent = chat.displayName;
+    name.title = chat.jid;
+    label.append(box, name);
+    item.append(label);
+    chatList.append(item);
+  }
+}
+
+/** Send the full ticked set (bare JIDs; main resolves the names) and repaint from its answer. */
+function submitTicks(): void {
+  const jids: string[] = [];
+  for (const node of Array.from(chatList.querySelectorAll('input[data-jid]'))) {
+    if (node instanceof HTMLInputElement && node.checked) {
+      const jid = node.dataset['jid'];
+      if (jid !== undefined && jid !== '') jids.push(jid);
+    }
+  }
+  void stewra.setTickedChats(jids).then(renderChats);
+}
+
 autostartInput.addEventListener('change', () => {
   void stewra.setAutostart(autostartInput.checked);
 });
 
 stewra.onStateChanged(render);
+stewra.onChatsChanged(renderChats);
 void stewra.getState().then(render);
+void stewra.getChats().then(renderChats);

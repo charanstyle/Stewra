@@ -1,5 +1,7 @@
 import type { BridgeAllowedChat, BridgeSendAck, BridgeSendPayload, BridgeWaState } from '@stewra/shared-types';
 import { AllowlistGate } from './allowlist.js';
+import { ChatDirectory } from './chatDirectory.js';
+import type { ChatSummary } from './chatDirectory.js';
 import type { BridgeConfig } from './config.js';
 import { StewraClient } from './stewraClient.js';
 import { WhatsappClient } from './whatsapp.js';
@@ -20,6 +22,12 @@ export interface BridgeEvents {
    * re-link — collapsing the two would make one of those recoveries wrong.
    */
   onRevoked(): void;
+  /**
+   * The local chat directory changed (new chat seen, rename, fresh activity). Debounced; the shell
+   * re-reads `getChats()` and repaints the picker. Purely local — nothing about this event, or the
+   * directory behind it, is sent anywhere.
+   */
+  onChatsChanged(): void;
 }
 
 export interface BridgeOptions {
@@ -41,8 +49,11 @@ export class Bridge {
   private readonly stewra: StewraClient;
   private gate: AllowlistGate | null = null;
   private waState: BridgeWaState = 'disconnected';
-  /** The chats the user ticked in this app. Empty in v1: the self-chat is enough to prove the loop. */
+  /** The chats the user ticked in this app. The self-chat is not in here; it is unconditional. */
   private tickedChats: BridgeAllowedChat[] = [];
+  /** Every chat this machine has seen — the picker's data source. Local only, never synced. */
+  private readonly directory = new ChatDirectory();
+  private chatsChangedTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly options: BridgeOptions) {
     this.whatsapp = new WhatsappClient({
@@ -54,6 +65,11 @@ export class Bridge {
         onMessage: (message) => this.handleMessage(message),
         onQr: (qrDataUrl) => options.events.onQr(qrDataUrl),
         onSessionDestroyed: () => options.events.onSessionDestroyed(),
+        onChatsMeta: (update) => {
+          if (update.chats !== undefined) this.directory.applyChats(update.chats);
+          if (update.contacts !== undefined) this.directory.applyContacts(update.contacts);
+          this.scheduleChatsChanged();
+        },
       },
     });
 
@@ -83,6 +99,10 @@ export class Bridge {
   }
 
   stop(): void {
+    if (this.chatsChangedTimer !== null) {
+      clearTimeout(this.chatsChangedTimer);
+      this.chatsChangedTimer = null;
+    }
     this.whatsapp.stop();
     this.stewra.disconnect();
   }
@@ -92,6 +112,33 @@ export class Bridge {
     this.tickedChats = [...chats];
     this.gate?.setAllowed(this.tickedChats);
     this.syncAllowedChats();
+  }
+
+  /**
+   * The pickable chats, most recent first. The self-chat is excluded — it is pinned "always on" in the
+   * UI, not a row the user can untick (unticking it would just be a broken bridge).
+   */
+  getChats(): ChatSummary[] {
+    return this.directory.list().filter((chat) => !(this.gate?.isSelfChat(chat.jid) ?? false));
+  }
+
+  /** Snapshot of the directory for the encrypted local cache (so the picker survives a restart). */
+  serializeChatDirectory(): string {
+    return this.directory.serialize();
+  }
+
+  /** Restore a `serializeChatDirectory` snapshot. Additive; live events keep layering on top. */
+  hydrateChatDirectory(json: string): void {
+    this.directory.hydrate(json);
+  }
+
+  /** Debounce ~1s: history sync delivers hundreds of events in bursts, and one repaint is enough. */
+  private scheduleChatsChanged(): void {
+    if (this.chatsChangedTimer !== null) return;
+    this.chatsChangedTimer = setTimeout(() => {
+      this.chatsChangedTimer = null;
+      this.options.events.onChatsChanged();
+    }, 1_000);
   }
 
   private handleWaState(state: BridgeWaState, message?: string): void {

@@ -1,16 +1,18 @@
 import { join } from 'node:path';
 import { BrowserWindow, Menu, Tray, app, dialog, ipcMain, nativeImage, shell } from 'electron';
-import type { BridgeWaState } from '@stewra/shared-types';
+import type { BridgeAllowedChat, BridgeWaState } from '@stewra/shared-types';
+import { normalizeJid } from '../core/allowlist.js';
 import { Bridge } from '../core/bridge.js';
 import { loadBridgeConfig } from '../core/config.js';
 import type { BridgeConfig } from '../core/config.js';
+import { AllowedChatsStore, ChatDirectoryCache } from './allowedChatsStore.js';
 import { BAKED_API_URL } from './bakedConfig.js';
 import { createSafeStorageSecretStore } from './secretStore.js';
 import { TokenStore } from './tokenStore.js';
 import { quitAndInstall, startUpdater } from './updater.js';
 import type { SecretStore } from '../core/authState.js';
 import { IPC } from './ipc.cjs';
-import type { BridgeUiState, PairRequest, PairResult } from './ipc.cjs';
+import type { BridgeUiState, ChatPickerState, PairRequest, PairResult } from './ipc.cjs';
 
 /**
  * Stewra Bridge — the Electron shell.
@@ -31,6 +33,10 @@ let tray: Tray | null = null;
 let window: BrowserWindow | null = null;
 let bridge: Bridge | null = null;
 let tokenStore: TokenStore | null = null;
+let allowedChatsStore: AllowedChatsStore | null = null;
+let directoryCache: ChatDirectoryCache | null = null;
+/** The chats the user ticked, as synced to the gate and the server. Loaded from disk at boot. */
+let tickedChats: readonly BridgeAllowedChat[] = [];
 /** Set only by the tray's Quit item. Closing the window HIDES it — a bridge that quit is a bridge that
  * stopped answering, and the user would not find out until they wondered why Stewra had gone silent. */
 let quitting = false;
@@ -178,9 +184,26 @@ function setAutostart(enabled: boolean): void {
   publish({ autostart: enabled });
 }
 
+/** The picker's view: every known chat, most recent first, with its tick. Composed fresh per ask. */
+function pickerState(): ChatPickerState {
+  const ticked = new Set(tickedChats.map((c) => c.jid));
+  return {
+    chats: (bridge?.getChats() ?? []).map((chat) => ({
+      jid: chat.jid,
+      displayName: chat.displayName,
+      lastActivity: chat.lastActivity,
+      ticked: ticked.has(chat.jid),
+    })),
+  };
+}
+
+function pushChatPickerState(): void {
+  window?.webContents.send(IPC.CHATS_CHANGED, pickerState());
+}
+
 /** Build a Bridge and wire its events to the UI. One instance per WhatsApp session; replaced on re-link. */
 function createBridge(activeConfig: BridgeConfig, secrets: SecretStore): Bridge {
-  return new Bridge({
+  const instance: Bridge = new Bridge({
     config: activeConfig,
     authDir: join(app.getPath('userData'), 'whatsapp'),
     secretStore: secrets,
@@ -201,10 +224,24 @@ function createBridge(activeConfig: BridgeConfig, secrets: SecretStore): Bridge 
       },
       onRevoked: () => {
         void tokenStore?.clear();
+        // The ticks and the directory belong to the account that was just cut off; a future pairing may
+        // be a different account, and inheriting another account's allowlist would be wrong twice over.
+        tickedChats = [];
+        void allowedChatsStore?.clear();
+        void directoryCache?.clear();
         publish({ paired: false, waState: 'disconnected', qrDataUrl: null, detail: null });
+        pushChatPickerState();
+      },
+      onChatsChanged: () => {
+        // `createBridge` also builds short-lived instances during pairing; only the live bridge's
+        // directory drives the picker and the cache.
+        if (instance !== bridge) return;
+        pushChatPickerState();
+        void directoryCache?.write(instance.serializeChatDirectory());
       },
     },
   });
+  return instance;
 }
 
 async function startBridge(
@@ -214,6 +251,11 @@ async function startBridge(
 ): Promise<void> {
   bridge?.stop();
   bridge = createBridge(activeConfig, secrets);
+  // Rehydrate before connecting: the picker should not be empty just because the app restarted, and
+  // the ticks must be in the gate before the first message can possibly arrive.
+  const cachedDirectory = await directoryCache?.read();
+  if (cachedDirectory !== null && cachedDirectory !== undefined) bridge.hydrateChatDirectory(cachedDirectory);
+  bridge.setTickedChats(tickedChats);
   await bridge.start(token);
 }
 
@@ -253,7 +295,33 @@ function registerIpc(activeConfig: BridgeConfig, secrets: SecretStore, store: To
     bridge?.stop();
     bridge = null;
     await store.clear();
+    // Unlinking ends this account's relationship with this machine; its chat list and ticks go too.
+    tickedChats = [];
+    await allowedChatsStore?.clear();
+    await directoryCache?.clear();
     publish({ paired: false, waState: 'disconnected', qrDataUrl: null, detail: null });
+    pushChatPickerState();
+  });
+
+  ipcMain.handle(IPC.GET_CHATS, (): ChatPickerState => pickerState());
+
+  ipcMain.handle(IPC.SET_TICKED_CHATS, async (_event, raw: unknown): Promise<ChatPickerState> => {
+    // The renderer sends bare JIDs and nothing else. Display names are resolved HERE, from the main
+    // process's own directory — the window that renders WhatsApp content does not get to write the
+    // strings that sync to the server — and a JID the directory has never seen is simply dropped.
+    const requested = Array.isArray(raw) ? raw.filter((j): j is string => typeof j === 'string') : [];
+    const known = new Map((bridge?.getChats() ?? []).map((chat) => [chat.jid, chat]));
+    const picked: BridgeAllowedChat[] = [];
+    for (const jid of requested) {
+      const chat = known.get(normalizeJid(jid));
+      if (chat !== undefined) {
+        picked.push({ jid: chat.jid, displayName: chat.displayName, isSelfChat: false });
+      }
+    }
+    tickedChats = picked;
+    await allowedChatsStore?.write(picked);
+    bridge?.setTickedChats(picked);
+    return pickerState();
   });
 }
 
@@ -296,7 +364,10 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     tokenStore = new TokenStore(app.getPath('userData'), secrets);
+    allowedChatsStore = new AllowedChatsStore(app.getPath('userData'), secrets);
+    directoryCache = new ChatDirectoryCache(app.getPath('userData'), secrets);
     const token = await tokenStore.read();
+    tickedChats = (await allowedChatsStore.read()) ?? [];
 
     uiState = {
       ...uiState,

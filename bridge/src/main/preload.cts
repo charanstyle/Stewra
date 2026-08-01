@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { IPC as IPC_CONTRACT } from './ipc.cjs';
-import type { BridgeUiState, PairRequest, PairResult, StewraBridgeApi } from './ipc.cjs';
+import type { BridgeUiState, ChatPickerState, PairRequest, PairResult, StewraBridgeApi } from './ipc.cjs';
 
 /**
  * ⚠️ A sandboxed preload cannot `require` sibling files — only Electron's polyfilled builtins. A value
@@ -15,6 +15,9 @@ const IPC: typeof IPC_CONTRACT = {
   UNPAIR: 'stewra:unpair',
   SET_AUTOSTART: 'stewra:set-autostart',
   STATE_CHANGED: 'stewra:state-changed',
+  GET_CHATS: 'stewra:get-chats',
+  SET_TICKED_CHATS: 'stewra:set-ticked-chats',
+  CHATS_CHANGED: 'stewra:chats-changed',
 };
 
 /**
@@ -37,6 +40,12 @@ const api: StewraBridgeApi = {
     // The event object is dropped deliberately: it carries a `sender` handle that has no business
     // crossing into page context.
     ipcRenderer.on(IPC.STATE_CHANGED, (_event, state: BridgeUiState) => listener(state));
+  },
+  getChats: (): Promise<ChatPickerState> => ipcRenderer.invoke(IPC.GET_CHATS),
+  setTickedChats: (jids: readonly string[]): Promise<ChatPickerState> =>
+    ipcRenderer.invoke(IPC.SET_TICKED_CHATS, [...jids]),
+  onChatsChanged: (listener: (state: ChatPickerState) => void): void => {
+    ipcRenderer.on(IPC.CHATS_CHANGED, (_event, state: ChatPickerState) => listener(state));
   },
 };
 

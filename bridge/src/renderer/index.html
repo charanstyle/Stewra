@@ -102,6 +102,26 @@
           Stewra only answers while this app is running. WhatsApp also unlinks companion devices if your
           phone stays offline for about 14 days.
         </p>
+
+        <!-- THE CHAT PICKER. Rows are appended by renderer.ts; the pinned self-chat row is static
+             because it is not a choice — the self-chat is the product, and unticking it would only
+             mean a broken bridge. -->
+        <div class="chats">
+          <p class="chats-title">Chats Stewra can read</p>
+          <ul class="chat-list" id="chat-list">
+            <li class="chat-row pinned">
+              <label class="check">
+                <input type="checkbox" checked disabled />
+                <span>Message yourself — always on</span>
+              </label>
+            </li>
+          </ul>
+          <p class="chat-hint">
+            Chats appear here as messages arrive. Your chat list never leaves this computer — Stewra
+            only learns about the chats you tick.
+          </p>
+        </div>
+
         <button id="unpair" type="button" class="danger">Unlink this computer</button>
       </section>
 

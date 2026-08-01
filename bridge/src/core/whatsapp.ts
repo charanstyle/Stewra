@@ -5,6 +5,7 @@ import type { BridgeWaState } from '@stewra/shared-types';
 import { decideReconnect } from './reconnect.js';
 import { useEncryptedAuthState } from './authState.js';
 import type { SecretStore } from './authState.js';
+import type { ChatMeta } from './chatDirectory.js';
 
 /** One WhatsApp message, reduced to what the bridge is willing to look at. */
 export interface WhatsappMessage {
@@ -27,6 +28,13 @@ export interface WhatsappEvents {
   onQr(qrDataUrl: string): void;
   /** The session is dead and its local credentials have been wiped. The user must pair again. */
   onSessionDestroyed(): void;
+  /**
+   * Chat/contact metadata arrived — the history snapshot on link, chat and contact upserts, renames,
+   * and live message activity. Feeds the LOCAL chat directory behind the picker; nothing on this path
+   * leaves the machine. Baileys keeps no store and full history sync is off, so this is deliberately
+   * best-effort — every chat that messages while the bridge runs becomes pickable, and the UI says so.
+   */
+  onChatsMeta(update: { readonly chats?: readonly ChatMeta[]; readonly contacts?: readonly ChatMeta[] }): void;
 }
 
 export interface WhatsappOptions {
@@ -178,7 +186,51 @@ export class WhatsappClient {
       }
     });
 
+    // ── the local chat directory's feeds ─────────────────────────────────────────────────────────────
+    // Everything below only ever powers the picker UI on this machine (see onChatsMeta). Baileys hands
+    // metadata over in several shapes; they are all reduced to ChatMeta here so core/chatDirectory.ts
+    // stays free of Baileys types.
+    const toMeta = (item: {
+      id?: string | null | undefined;
+      name?: string | null | undefined;
+      notify?: string | null | undefined;
+      verifiedName?: string | null | undefined;
+      conversationTimestamp?: unknown;
+    }): ChatMeta | null => {
+      if (item.id === null || item.id === undefined || item.id.length === 0) return null;
+      const seconds = Number(item.conversationTimestamp ?? 0);
+      return {
+        id: item.id,
+        // Best label available: the address-book/chat name, else a business's verified name, else the
+        // push name the person broadcasts.
+        name: item.name ?? item.verifiedName ?? item.notify ?? null,
+        timestampSeconds: Number.isFinite(seconds) && seconds > 0 ? seconds : null,
+      };
+    };
+    const metas = (items: readonly Parameters<typeof toMeta>[0][]): ChatMeta[] =>
+      items.map(toMeta).filter((m): m is ChatMeta => m !== null);
+
+    sock.ev.on('messaging-history.set', ({ chats, contacts }) => {
+      this.options.events.onChatsMeta({ chats: metas(chats), contacts: metas(contacts) });
+    });
+    sock.ev.on('chats.upsert', (chats) => this.options.events.onChatsMeta({ chats: metas(chats) }));
+    sock.ev.on('chats.update', (updates) => this.options.events.onChatsMeta({ chats: metas(updates) }));
+    sock.ev.on('contacts.upsert', (contacts) => this.options.events.onChatsMeta({ contacts: metas(contacts) }));
+    sock.ev.on('contacts.update', (updates) => this.options.events.onChatsMeta({ contacts: metas(updates) }));
+
     sock.ev.on('messages.upsert', ({ messages, type }) => {
+      // Directory first, for EVERY batch: 'append' history is never acted on (below), but a chat having
+      // history is exactly what makes it pickable. A fromMe pushName is the USER'S OWN name — never let
+      // it become the label of someone else's chat.
+      const chatActivity = metas(
+        messages.map((message) => ({
+          id: message.key.remoteJid,
+          name: message.key.fromMe === true ? null : (message.pushName ?? null),
+          conversationTimestamp: message.messageTimestamp,
+        })),
+      );
+      if (chatActivity.length > 0) this.options.events.onChatsMeta({ chats: chatActivity });
+
       // `append` is history//sync filling in; only `notify` is a message arriving now. Acting on `append`
       // would make Stewra answer messages from days ago the moment a bridge comes online.
       if (type !== 'notify') {

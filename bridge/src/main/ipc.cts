@@ -21,7 +21,30 @@ export const IPC = {
   SET_AUTOSTART: 'stewra:set-autostart',
   /** main → renderer, send. Pushed on every state change; the UI never polls. */
   STATE_CHANGED: 'stewra:state-changed',
+  /** renderer → main, invoke. The pickable chats + current ticks, for the picker. */
+  GET_CHATS: 'stewra:get-chats',
+  /** renderer → main, invoke. Replace the ticked set with these JIDs. Applies immediately. */
+  SET_TICKED_CHATS: 'stewra:set-ticked-chats',
+  /** main → renderer, send. The chat directory changed; a fresh ChatPickerState rides along. */
+  CHATS_CHANGED: 'stewra:chats-changed',
 } as const;
+
+/** One row in the picker. Names came from WhatsApp — the renderer must treat them as text, never markup. */
+export interface ChatSummary {
+  readonly jid: string;
+  readonly displayName: string;
+  /** Last seen activity, epoch ms. 0 = known only from the cache/contacts, no activity observed. */
+  readonly lastActivity: number;
+  readonly ticked: boolean;
+}
+
+/**
+ * Everything the picker renders. The list NEVER includes the self-chat — that row is pinned "always
+ * on" in the UI and cannot be unticked, because a bridge that ignores the self-chat is just broken.
+ */
+export interface ChatPickerState {
+  readonly chats: readonly ChatSummary[];
+}
 
 /** Everything the window and the tray render from. One object, pushed on change. */
 export interface BridgeUiState {
@@ -60,4 +83,12 @@ export interface StewraBridgeApi {
   unpair(): Promise<void>;
   setAutostart(enabled: boolean): Promise<void>;
   onStateChanged(listener: (state: BridgeUiState) => void): void;
+  getChats(): Promise<ChatPickerState>;
+  /**
+   * JIDs only, on purpose: the main process resolves display names from ITS OWN directory rather than
+   * trusting strings from the window that renders WhatsApp content, and those resolved names are what
+   * sync to the server as the allowlist.
+   */
+  setTickedChats(jids: readonly string[]): Promise<ChatPickerState>;
+  onChatsChanged(listener: (state: ChatPickerState) => void): void;
 }
