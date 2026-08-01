@@ -55,10 +55,18 @@ test.describe('memory', () => {
   test('memory card Edit → Cancel (non-mutating)', async ({ pageA }) => {
     await pageA.goto(`${WEB}/memory`, { waitUntil: 'domcontentloaded' });
     await pageA.getByRole('heading', { name: /What Stewra has learned/i }).waitFor({ timeout: 12000 });
-    // Precondition, not an outcome: with no memory to edit there is nothing to exercise, so skip
-    // visibly instead of logging "no editable memory present" and reporting a green pass. When a
-    // card IS present the editor behaviour is a hard assertion.
-    const editBtn = pageA.getByRole('button', { name: 'Edit' }).first();
+    // With the DB seeded, exercise the throwaway card specifically — and WAIT for it, because the
+    // memory list loads async after the page heading and a bare isVisible() check races that fetch
+    // (this test skipped falsely on green DB runs until it waited). Without a DB, the original
+    // resilient shape holds: skip visibly when no card is present, assert hard when one is.
+    let editBtn = pageA.getByRole('button', { name: 'Edit' }).first();
+    if (dbEnabled) {
+      const seeded = pageA.getByRole('heading', { name: THROWAWAY_MEMORY_LABEL });
+      await seeded.waitFor({ timeout: 12000 });
+      editBtn = seeded
+        .locator('xpath=ancestor::div[contains(@class,"card")][1]')
+        .getByRole('button', { name: 'Edit' });
+    }
     test.skip(
       !(await editBtn.isVisible().catch(() => false)),
       'no editable memory/rule present — set E2E_DATABASE_URL to seed one (see seed.mjs)',
@@ -76,18 +84,26 @@ test.describe('memory', () => {
     await pageA.getByRole('heading', { name: /What Stewra has learned/i }).waitFor({ timeout: 12000 });
     // Same shape as Edit → Cancel above: absent data skips, present data asserts. The toggle
     // flipping back is what proves it is reversible, so it must fail if the flip never happens.
-    const hideBtn = pageA.getByRole('button', { name: 'Hide from recall' }).first();
+    // Scoped to the seeded throwaway card when the DB provisioned one (waiting for it, since the
+    // list fetch lands after the heading) so the flip never touches a real learned memory.
+    let cardScope = pageA.locator('body');
+    if (dbEnabled) {
+      const seeded = pageA.getByRole('heading', { name: THROWAWAY_MEMORY_LABEL });
+      await seeded.waitFor({ timeout: 12000 });
+      cardScope = seeded.locator('xpath=ancestor::div[contains(@class,"card")][1]');
+    }
+    const hideBtn = cardScope.getByRole('button', { name: 'Hide from recall' }).first();
     test.skip(
       !(await hideBtn.isVisible().catch(() => false)),
       'no "Hide from recall" button present — set E2E_DATABASE_URL to seed a memory (see seed.mjs)',
     );
 
     await hideBtn.click();
-    const useBtn = pageA.getByRole('button', { name: 'Use for recall' }).first();
+    const useBtn = cardScope.getByRole('button', { name: 'Use for recall' }).first();
     await expect(useBtn, 'Hide did not flip the control to "Use for recall"').toBeVisible();
     await useBtn.click(); // RESTORE
     await expect(
-      pageA.getByRole('button', { name: 'Hide from recall' }).first(),
+      cardScope.getByRole('button', { name: 'Hide from recall' }).first(),
       'restore did not flip the control back to "Hide from recall"',
     ).toBeVisible();
   });
