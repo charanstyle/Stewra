@@ -1,0 +1,54 @@
+// Gradle init script: move every subproject's build directory off this checkout's exFAT volume.
+//
+// WHY THIS EXISTS
+// ---------------
+// This working copy lives on /Volumes/charan, which macOS mounts as exFAT through the fskit driver:
+//
+//     /dev/disk4s3 on /Volumes/charan (exfat, local, nodev, nosuid, noowners, noatime, fskit)
+//
+// fskit has a write-then-immediate-read-back coherency defect: a file written and re-read within the
+// same build can come back stale or truncated. An Android build does that constantly (R.jar, merged
+// manifests, extracted AARs, dex shards), so native builds fail with corrupt-archive or
+// "no such entry" errors naming files that plainly exist on disk. Retrying picks a different victim
+// each time, which is the tell that it is the filesystem and not the build graph.
+//
+// Redirecting the build outputs to an APFS volume avoids the defect entirely. Sources stay put; only
+// generated artefacts move.
+//
+// USAGE
+// -----
+//     cd frontend/android
+//     STEWRA_BUILD_DIR="$HOME/.stewra-build" \
+//       ./gradlew -I ../gradle/redirect-builddir.gradle assembleRelease
+//
+// This file lives in frontend/gradle/ rather than frontend/android/ on purpose: `expo prebuild`
+// regenerates frontend/android/ wholesale (it is gitignored), so anything kept there is destroyed on
+// the next prebuild. frontend/gradle/ is tracked and survives.
+//
+// STEWRA_BUILD_DIR IS REQUIRED
+// ----------------------------
+// It is not defaulted. The variable names *where build output is written*; guessing it would either
+// scatter artefacts into an unintended directory or silently land them back on exFAT — reintroducing
+// the exact corruption this script exists to prevent, with no signal that it happened. Refusing to
+// configure is the correct outcome.
+
+def base = System.getenv('STEWRA_BUILD_DIR')
+if (!base) {
+    throw new GradleException(
+        'STEWRA_BUILD_DIR is not set. Point it at a directory on an APFS volume, e.g.\n' +
+        '    STEWRA_BUILD_DIR="$HOME/.stewra-build" ./gradlew -I ../gradle/redirect-builddir.gradle <task>\n' +
+        'This checkout is on exFAT (fskit), where Gradle build outputs are silently corrupted.')
+}
+
+gradle.beforeProject { project ->
+    // The ROOT project is deliberately left on exFAT. expo-modules-autolinking writes
+    // autolinking.json under the root project's build directory, and :app reads it back during
+    // configuration through a path derived independently of this override — so redirecting the root
+    // breaks autolinking before a single task runs. Only subprojects move.
+    if (project == project.rootProject) {
+        return
+    }
+    // ":react-native-webrtc" -> "react-native-webrtc"; ":packages:foo" -> "packages_foo".
+    def relative = project.path.replaceFirst('^:', '').replace(':', '_')
+    project.layout.buildDirectory.set(new File(base, relative))
+}

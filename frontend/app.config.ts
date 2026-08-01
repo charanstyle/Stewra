@@ -54,11 +54,21 @@ const config: ExpoConfig = {
       foregroundImage: './assets/adaptive-icon.png',
       backgroundColor: palette.background,
     },
-    // Firebase (FCM) config for background call-push. Absent until the Firebase
-    // project is provisioned; when present, drop it at ./google-services.json
-    // and Android VoIP push begins working. Foreground/socket calls work without
-    // it. Reads from an env var so the file path isn't hardcoded per the
+    // Firebase (FCM) client config — REQUIRED for any Android build, not optional.
+    // Without it the google-services Gradle plugin is never applied, and the app
+    // aborts during the very first require chain with "Default FirebaseApp is not
+    // initialized in this process com.stewra.app" (SIGABRT on the JS thread) — so
+    // the app does not launch at all, let alone place a foreground/socket call.
+    //
+    // The project is `stewra-260701`, Android app `com.stewra.app`. The file is
+    // gitignored (see .easignore for why it is still shipped to EAS), so a fresh
+    // clone must re-fetch it before building:
+    //   firebase apps:sdkconfig ANDROID <app-id> --project stewra-260701 \
+    //     -o frontend/google-services.json
+    //
+    // Read from an env var rather than hardcoded so the path isn't baked in per the
     // no-hardcoding rule and CI/prebuild can point at a secret-managed location.
+    // frontend/.env sets it to ./google-services.json for local builds.
     ...(process.env['GOOGLE_SERVICES_JSON']
       ? { googleServicesFile: process.env['GOOGLE_SERVICES_JSON'] }
       : {}),
