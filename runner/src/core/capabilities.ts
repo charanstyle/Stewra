@@ -6,38 +6,43 @@ import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { RUNNER_HARNESS_IDS } from '@stewra/shared-types';
 import type { RunnerHarnessId, RunnerHarnessInfo, RunnerWorkspace } from '@stewra/shared-types';
+import { harnessCommand } from './harnessCommand.js';
 import { describeGitDir, ensureClone } from './workspace.js';
 
 const execFileAsync = promisify(execFile);
 
-/**
- * The default binary each harness ships as. These are NAMES, not URLs or ports — the canonical command a
- * user types to run the tool — so a default is honest here. Each is still overridable by env for a runner
- * whose binaries live off PATH (e.g. `STEWRA_RUNNER_CLAUDE_CODE_PATH=/opt/claude/bin/claude`), and the
- * probe fails loud-but-locally (marks the harness unavailable) rather than guessing.
- */
-const DEFAULT_BINARY: Record<RunnerHarnessId, string> = {
-  'claude-code': 'claude',
-  codex: 'codex',
-  'gemini-cli': 'gemini',
-};
-
-function binaryFor(id: RunnerHarnessId): string {
-  const override = process.env[`STEWRA_RUNNER_${id.toUpperCase().replace(/-/g, '_')}_PATH`];
-  return override !== undefined && override.length > 0 ? override : DEFAULT_BINARY[id];
+/** True only for "the executable does not exist" — the one failure that means a harness is absent. */
+function isNotInstalled(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null || !('code' in err)) {
+    return false;
+  }
+  const { code } = err;
+  return code === 'ENOENT';
 }
 
-/** Probe one harness: is its binary runnable, and at what version? Never throws — absence is a valid result. */
+/**
+ * Probe one harness: can this machine actually LAUNCH it, and at what version?
+ *
+ * The probe must ask about the command a session really spawns — the ACP adapter from
+ * `harnessCommand()` — not the binary a human types interactively. Those differ for Claude Code and
+ * Codex (`claude-agent-acp` / `codex-acp`), so probing `claude --version` reported
+ * `claude-code: available` on a machine with no adapter installed. The server believed it, offered
+ * the harness, and the session proposed against it died on `spawn claude-agent-acp ENOENT`.
+ *
+ * Never throws — absence is a valid result — but only ENOENT means absence. An adapter that exists
+ * and simply has no `--version` flag exits non-zero, and calling that "unavailable" would hide a
+ * perfectly usable harness.
+ */
 async function detectHarness(id: RunnerHarnessId): Promise<RunnerHarnessInfo> {
-  const binary = binaryFor(id);
+  const { command } = harnessCommand(id);
   try {
-    const { stdout } = await execFileAsync(binary, ['--version'], { timeout: 5_000 });
+    const { stdout } = await execFileAsync(command, ['--version'], { timeout: 5_000 });
     const version = stdout.split('\n')[0]?.trim();
     return version !== undefined && version.length > 0
       ? { id, available: true, version: version.slice(0, 128) }
       : { id, available: true };
-  } catch {
-    return { id, available: false };
+  } catch (err) {
+    return isNotInstalled(err) ? { id, available: false } : { id, available: true };
   }
 }
 

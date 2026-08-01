@@ -15,7 +15,7 @@ import type {
   RunnerPermissionOption,
   RunnerUpdateKind,
 } from '@stewra/shared-types';
-import { harnessCommand, harnessEnv } from './harnessCommand.js';
+import { acpEnvKey, harnessCommand, harnessEnv } from './harnessCommand.js';
 
 /** One streamed increment the harness produced, already mapped from ACP to Stewra's update vocabulary. */
 export interface AcpUpdate {
@@ -94,18 +94,41 @@ export class AcpSession {
     });
     this.child = child;
 
+    // A missing adapter binary does not throw from spawn() — it emits 'error' asynchronously, and an
+    // 'error' event with no listener takes the ENTIRE runner process down. One user asking for a
+    // harness this machine cannot launch would knock every other session offline and mark the device
+    // offline in the web app. Capture it so the failure lands on the session that caused it.
+    const spawnFailed = new Promise<never>((_, reject) => {
+      child.once('error', (err: NodeJS.ErrnoException) => {
+        const hint =
+          err.code === 'ENOENT'
+            ? ` — "${command}" is not installed or not on PATH (override it with ${acpEnvKey(this.harness)})`
+            : '';
+        reject(new Error(`Failed to launch the ${this.harness} ACP adapter: ${err.message}${hint}`));
+      });
+    });
+    // The race below is what surfaces the rejection; this only stops a spawn error arriving AFTER
+    // start() has already resolved from counting as an unhandled rejection.
+    spawnFailed.catch(() => undefined);
+
     const stream = ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout));
     const connection = new ClientSideConnection(() => this.buildClient(), stream);
     this.connection = connection;
 
-    await connection.initialize({
-      protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
-      clientInfo: { name: 'stewra-runner', version: '0.1.0' },
-    });
+    await Promise.race([
+      connection.initialize({
+        protocolVersion: PROTOCOL_VERSION,
+        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
+        clientInfo: { name: 'stewra-runner', version: '0.1.0' },
+      }),
+      spawnFailed,
+    ]);
 
     // cwd must be absolute (ACP requirement); the worktree path always is. mcpServers is required but empty.
-    const session = await connection.newSession({ cwd: this.cwd, mcpServers: [] });
+    const session = await Promise.race([
+      connection.newSession({ cwd: this.cwd, mcpServers: [] }),
+      spawnFailed,
+    ]);
     this.acpSessionId = session.sessionId;
   }
 

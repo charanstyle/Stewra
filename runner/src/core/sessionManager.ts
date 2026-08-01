@@ -92,16 +92,24 @@ export class SessionManager {
    * so the server can turn each failure into an honest, specific UI message.
    */
   async start(payload: RunnerStartSessionPayload): Promise<RunnerStartSessionAck> {
-    if (this.sessions.has(payload.sessionId)) return { accepted: false, error: 'duplicate_session' };
+    // Every refusal below is reported to the server, which turns it into a card message — but the
+    // person who owns this machine sees only "Could not start" in a web app somewhere else. Say it
+    // here too, where the harness, the adapter and the git checkout actually live.
+    const refuse = (error: string): RunnerStartSessionAck => {
+      process.stderr.write(`Stewra Runner: refusing session ${payload.sessionId} — ${error}\n`);
+      return { accepted: false, error };
+    };
+
+    if (this.sessions.has(payload.sessionId)) return refuse('duplicate_session');
 
     const workspace = this.resolveWorkspace(payload.workspaceId);
-    if (workspace === undefined) return { accepted: false, error: 'unknown_workspace' };
+    if (workspace === undefined) return refuse('unknown_workspace');
 
     let worktree: Worktree;
     try {
       worktree = await createSessionWorktree(workspace.path, payload.sessionId, workspace.defaultBranch);
     } catch (error) {
-      return { accepted: false, error: `worktree_failed: ${messageOf(error)}` };
+      return refuse(`worktree_failed: ${messageOf(error)}`);
     }
 
     const live: LiveSession = {
@@ -118,7 +126,13 @@ export class SessionManager {
       await live.acp.start();
     } catch (error) {
       await worktree.cleanup(true).catch(() => undefined);
-      return { accepted: false, error: `harness_failed: ${messageOf(error)}` };
+      // The harness's own stack is the only thing that says WHY the adapter would not start, and it
+      // is gone the moment we flatten it to a message for the wire. Print it before that happens.
+      process.stderr.write(`Stewra Runner: harness ${payload.harness} failed to start\n`);
+      if (error instanceof Error && error.stack !== undefined) {
+        process.stderr.write(`${error.stack}\n`);
+      }
+      return refuse(`harness_failed: ${messageOf(error)}`);
     }
 
     this.sessions.set(payload.sessionId, live);

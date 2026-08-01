@@ -24,12 +24,13 @@ const DEFAULTS: Record<RunnerHarnessId, HarnessCommand> = {
   'gemini-cli': { command: 'gemini', args: ['--experimental-acp'] },
 };
 
-function envKey(id: RunnerHarnessId): string {
+/** The env var that overrides a harness's ACP launch command. Exported so failure messages can name it. */
+export function acpEnvKey(id: RunnerHarnessId): string {
   return `STEWRA_RUNNER_ACP_${id.toUpperCase().replace(/-/g, '_')}`;
 }
 
 export function harnessCommand(id: RunnerHarnessId): HarnessCommand {
-  const override = process.env[envKey(id)];
+  const override = process.env[acpEnvKey(id)];
   if (override !== undefined && override.trim().length > 0) {
     const parts = override.trim().split(/\s+/).filter((p) => p.length > 0);
     const command = parts[0];
