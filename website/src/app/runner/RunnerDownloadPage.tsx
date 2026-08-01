@@ -68,9 +68,12 @@ const OSES: readonly OsBlock[] = [
       { label: 'Runner (Apple Silicon)', href: asset('stewra-runner-macos-arm64') },
       { label: 'Runner (Intel)', href: asset('stewra-runner-macos-x64') },
     ],
-    // Only an Apple Silicon build is published today, so the link says so rather than handing an
-    // Intel visitor a bundle that won't launch. Add the x64/universal asset here when it exists.
-    bridge: [{ label: 'Bridge · .dmg (Apple Silicon)', href: asset('Stewra-Bridge-arm64.dmg') }],
+    // Per-arch dmgs, not a universal binary: pure-JS deps make universal possible, but it doubles
+    // the download for everyone, and the rows are already labeled per-arch.
+    bridge: [
+      { label: 'Bridge · .dmg (Apple Silicon)', href: asset('Stewra-Bridge-arm64.dmg') },
+      { label: 'Bridge · .dmg (Intel)', href: asset('Stewra-Bridge-x64.dmg') },
+    ],
   },
   {
     // No Windows builds are published (or signed) yet. The tab stays so a Windows visitor gets an

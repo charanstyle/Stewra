@@ -33,6 +33,20 @@ cd "$(dirname "$0")/.."
 OUT_DIR="release"
 mkdir -p "$OUT_DIR"
 
+# Which arch this run is building — electron-builder takes it from the flags (`npm run package:mac --
+# --x64`), defaulting to the host. Known here so the staging dir and the collected update-feed yml can
+# be suffixed per arch: back-to-back arm64 + x64 runs must not clobber each other's output.
+case "$(uname -m)" in
+  x86_64) arch="x64" ;;          # electron-builder's name for it; keep the suffixes consistent
+  *) arch="$(uname -m)" ;;
+esac
+for flag in "$@"; do
+  case "$flag" in
+    --x64) arch="x64" ;;
+    --arm64) arch="arm64" ;;
+  esac
+done
+
 # Probe the behaviour rather than matching filesystem names: set an xattr, see whether a sidecar
 # appears. This catches exFAT, FAT32, and any network mount that degrades the same way, without this
 # script needing to know the list.
@@ -46,7 +60,7 @@ if [ "$native_xattr" -eq 1 ]; then
   echo ">> $(pwd) stores xattrs natively — building in place"
   build_dir="$OUT_DIR"
 else
-  build_dir="${STEWRA_MAC_BUILD_DIR:-${TMPDIR:-/tmp}/stewra-bridge-mac}"
+  build_dir="${STEWRA_MAC_BUILD_DIR:-${TMPDIR:-/tmp}/stewra-bridge-mac}-$arch"
   echo ">> $(pwd) cannot store xattrs natively"
   echo ">> AppleDouble sidecars would be sealed into the signature and fail notarization"
   echo ">> staging the build in $build_dir"
@@ -183,8 +197,13 @@ fi
 echo ">> latest-mac.yml verified against $(basename "$staged_zip")"
 
 # --- collect ------------------------------------------------------------------------------------
-# The dmg (for the download page), the zip and latest-mac.yml (for auto-update) all travel together —
-# scripts/package-release.mjs stages all three and hard-fails on a dmg without its update pair.
+# The dmg (for the download page), the zip and the update feed (for auto-update) all travel together —
+# scripts/package-release.mjs stages all of them and hard-fails on a dmg without its update pair.
+#
+# The yml lands as latest-mac-<arch>.yml: both arch runs write "latest-mac.yml" internally, and the
+# second run would silently replace the first's — an updater feed that only ever mentions one arch.
+# scripts/merge-latest-mac.mjs combines the per-arch copies into the single latest-mac.yml a release
+# actually ships.
 if [ "$build_dir" != "$OUT_DIR" ]; then
   shopt -s nullglob
   dmgs=("$build_dir"/*.dmg)
@@ -194,10 +213,16 @@ if [ "$build_dir" != "$OUT_DIR" ]; then
   fi
   # *.blockmap enables differential downloads; electron-updater falls back to a full download when a
   # blockmap is absent, so they ride along when produced but nothing asserts on them.
-  for d in "${dmgs[@]}" "$build_dir"/*.zip "$build_dir"/*.blockmap "$build_dir"/latest-mac.yml; do
+  for d in "${dmgs[@]}" "$build_dir"/*.zip "$build_dir"/*.blockmap; do
     cp -f "$d" "$OUT_DIR/"
     echo ">> $(basename "$d") -> $OUT_DIR/"
   done
+  cp -f "$build_dir/latest-mac.yml" "$OUT_DIR/latest-mac-$arch.yml"
+  echo ">> latest-mac.yml -> $OUT_DIR/latest-mac-$arch.yml"
+else
+  mv -f "$OUT_DIR/latest-mac.yml" "$OUT_DIR/latest-mac-$arch.yml"
+  echo ">> latest-mac.yml -> $OUT_DIR/latest-mac-$arch.yml"
 fi
 
 echo ">> next: bash scripts/notarize-dmg.sh \"$OUT_DIR\"/*.dmg"
+echo ">> then (after building BOTH arches): node scripts/merge-latest-mac.mjs"

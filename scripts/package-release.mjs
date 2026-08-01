@@ -55,14 +55,18 @@ const artifacts = [
   // Stable names the download page links (releases/latest/download/<name> never changes) …
   { name: 'Stewra-Bridge-x86_64.AppImage', dir: bridgeRelease, match: /x86_64\.AppImage$/, group: 'bridge-linux' },
   { name: 'stewra-bridge-amd64.deb', dir: bridgeRelease, match: /amd64\.deb$/, group: 'bridge-linux' },
-  // Arch-qualified: only an Apple Silicon dmg is published, and the download page links it by this
-  // exact name. `Stewra-Bridge.dmg` here would stage under a name nothing links to — a silent 404.
-  { name: 'Stewra-Bridge-arm64.dmg', dir: bridgeRelease, match: /arm64\.dmg$/, group: 'bridge-mac' },
+  // Arch-qualified stable names — the download page links each dmg by exactly these. The patterns
+  // are anchored per arch ("-arm64" / "-x64") so neither can swallow the other's file.
+  { name: 'Stewra-Bridge-arm64.dmg', dir: bridgeRelease, match: /-arm64\.dmg$/, group: 'bridge-mac' },
+  { name: 'Stewra-Bridge-x64.dmg', dir: bridgeRelease, match: /-x64\.dmg$/, group: 'bridge-mac' },
   // … and the auto-update feed: the versioned AppImage (yes, the same file uploaded twice — the yml
   // needs the versioned name, the download page the stable one), the macOS zip, and the ymls.
   { keepName: true, dir: bridgeRelease, match: /^Stewra-Bridge-.*x86_64\.AppImage$/, group: 'bridge-linux' },
   { name: 'latest-linux.yml', file: join(bridgeRelease, 'latest-linux.yml'), group: 'bridge-linux' },
   { keepName: true, dir: bridgeRelease, match: /-arm64\.zip$/, group: 'bridge-mac' },
+  { keepName: true, dir: bridgeRelease, match: /-x64\.zip$/, group: 'bridge-mac' },
+  // The MERGED feed (bridge/scripts/merge-latest-mac.mjs) listing both arches' zips. The per-arch
+  // latest-mac-<arch>.yml collections are inputs to that merge, never release assets themselves.
   { name: 'latest-mac.yml', file: join(bridgeRelease, 'latest-mac.yml'), group: 'bridge-mac' },
   // Blockmaps make updates differential; without them electron-updater just downloads in full. The
   // only optional entry — everything else that exists partially is a broken release (see below).
