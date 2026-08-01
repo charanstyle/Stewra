@@ -22,6 +22,9 @@ const HARNESS_LABELS: Record<string, string> = {
 
 test.describe('runner', () => {
   test('propose a coding session on an online machine → Start → session begins', async ({ pageA }) => {
+    // Two real LLM turns (classify+propose, then the session's own agent) plus a live harness run —
+    // the suite default of 120s is not enough for the full propose → start → permit → done arc.
+    test.setTimeout(420_000);
     // 1. Load the app and confirm the running build carries the testid contract (else prod isn't redeployed).
     await pageA.goto(`${WEB}/chats`, { waitUntil: 'domcontentloaded' });
     test.skip(
@@ -71,8 +74,18 @@ test.describe('runner', () => {
     // 4. Ask, in natural language, to run a tiny throwaway edit — named machine, repo, and agent so the
     //    classifier has an unambiguous proposal to make. The edit lands in an isolated worktree (Phase 2),
     //    never on the base branch.
+    //
+    //    The target filename carries a per-run nonce, and that is load-bearing, not decoration: this
+    //    spec runs once per Playwright project against the SAME long-lived singleton conversation,
+    //    and the classifier is a model reading that conversation. When the second project repeated
+    //    the first's ask verbatim seconds after that exact command had just been proposed and run,
+    //    the model — entirely reasonably — read the repeat as referring to the in-flight session
+    //    ("There's nothing waiting to start right now") or even as answering its pending permission
+    //    prompt, and never proposed a new card. A distinct filename makes each run a genuinely new
+    //    task.
+    const nonce = `stewra-e2e-${Date.now().toString(36)}`;
     const ask =
-      `Run "echo stewra-e2e > .stewra-e2e-check.txt" on ${device.name} ` +
+      `Run "echo ok > .${nonce}.txt" on ${device.name} ` +
       `in ${workspace.name} using ${harnessLabel}.`;
     await input.fill(ask);
     await pageA.getByRole('button', { name: 'Send' }).click();
@@ -103,5 +116,66 @@ test.describe('runner', () => {
     if (finalStatus === 'sent') {
       await expect(card.getByTestId('runner-session-status')).toContainText('Started on');
     }
+
+    // 7. See the session through to completion rather than walking away at "Started on". This is
+    //    not extra thoroughness — it is what keeps the spec re-runnable: the agent's shell command
+    //    triggers a permission prompt relayed into this same conversation, and a run that exits here
+    //    leaves that prompt pending, where it poisons the NEXT run's classification (a later ask got
+    //    consumed as the "yes" it was waiting for). Answer it, then wait for the session's summary.
+    //
+    //    All of these waits go through the MESSAGES API, not DOM text counts. Counting rendered rows
+    //    proved unsound twice over: the virtualized list's counts flicker as it re-renders (a
+    //    baseline of "Done on" rows both passed and failed the same comparison milliseconds apart,
+    //    making this spec answer "yes" before any permission existed), and the DOM can show a
+    //    socket-delivered permission BEFORE the server has registered it — a "yes" sent in that gap
+    //    is misclassified as chit-chat. A permission that the API returns is by construction already
+    //    registered (the relay registers it before persisting the chat message), so answering it
+    //    then cannot misroute. Timestamps compare as ISO strings from the server's own clock.
+    const newerAssistantMessages = async (sinceIso: string) => {
+      const res = await apiCall(`/messages?conversationId=${convId}&limit=30`);
+      expect(res.status, 'GET /messages').toBe(200);
+      const items: { createdAt: string; senderId: string | null; content: string | null }[] =
+        res.json?.data?.messages?.items ?? [];
+      return items.filter((m) => m.senderId === null && m.createdAt > sinceIso);
+    };
+    const askRes = await apiCall(`/messages?conversationId=${convId}&limit=30`);
+    const askMsg = (askRes.json?.data?.messages?.items ?? []).find(
+      (m: { content: string | null }) => m.content?.includes(nonce) === true,
+    );
+    expect(askMsg, 'the ask this run just sent must be in the conversation').toBeTruthy();
+
+    let permission: { createdAt: string } | undefined;
+    let summary: { content: string | null } | undefined;
+    await expect
+      .poll(
+        async () => {
+          const fresh = await newerAssistantMessages(askMsg.createdAt);
+          summary = fresh.find((m) => m.content?.includes('Done on') === true);
+          permission = fresh.find(
+            (m) => m.content?.includes('Permission needed') === true && m.content?.includes(nonce) === true,
+          );
+          return summary !== undefined || permission !== undefined;
+        },
+        { timeout: 180_000, message: 'neither a permission prompt nor a session summary arrived' },
+      )
+      .toBe(true);
+
+    if (summary === undefined && permission !== undefined) {
+      await input.fill('yes');
+      await pageA.getByRole('button', { name: 'Send' }).click();
+      console.log('[runner] permission prompt answered (yes)');
+      const grantedAfter = permission.createdAt;
+      await expect
+        .poll(
+          async () => {
+            const fresh = await newerAssistantMessages(grantedAfter);
+            summary = fresh.find((m) => m.content?.includes('Done on') === true);
+            return summary !== undefined;
+          },
+          { timeout: 180_000, message: 'session never reported completion after the permission was granted' },
+        )
+        .toBe(true);
+    }
+    console.log(`[runner] session completed: ${summary?.content?.slice(0, 100)}`);
   });
 });
