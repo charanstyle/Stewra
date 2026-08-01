@@ -357,9 +357,9 @@ class CallService {
       this.deliverIncoming(info);
     });
 
-    socket.on(SERVER_EVENTS.CALL_ANSWERED, () => {
+    socket.on(SERVER_EVENTS.CALL_ANSWERED, (data) => {
       const active = this.active;
-      if (!active || !active.isCaller) {
+      if (!active || !active.isCaller || active.callId !== data.callId) {
         return;
       }
       active.answered = true;
@@ -367,30 +367,62 @@ class CallService {
       void this.createAndSendOffer();
     });
 
-    socket.on(SERVER_EVENTS.CALL_DECLINED, () => {
+    socket.on(SERVER_EVENTS.CALL_DECLINED, (data) => {
+      if (!this.isForActiveCall(data.callId)) {
+        return;
+      }
       this.teardown('declined');
     });
 
     socket.on(SERVER_EVENTS.CALL_ENDED, (data) => {
+      if (!this.isForActiveCall(data.callId)) {
+        return;
+      }
       this.teardown(data.reason);
     });
 
     socket.on(SERVER_EVENTS.CALL_REMOTE_OFFER, (data) => {
+      if (!this.isForActiveCall(data.callId)) {
+        return;
+      }
       void this.handleRemoteOffer(data.description);
     });
 
     socket.on(SERVER_EVENTS.CALL_REMOTE_ANSWER, (data) => {
+      if (!this.isForActiveCall(data.callId)) {
+        return;
+      }
       void webrtcService.applyRemoteAnswer(data.description);
     });
 
     socket.on(SERVER_EVENTS.CALL_REMOTE_ICE_CANDIDATE, (data) => {
+      if (!this.isForActiveCall(data.callId)) {
+        return;
+      }
       void webrtcService.addRemoteCandidate(data.candidate);
     });
 
     socket.on(SERVER_EVENTS.CALL_ERROR, (data) => {
+      // A null callId is a connection-scoped error that belongs to whatever we
+      // are doing now; a set one must match the call we are actually on.
+      if (data.callId !== null && !this.isForActiveCall(data.callId)) {
+        return;
+      }
       this.emit('error', { message: data.message });
       this.teardown('failed');
     });
+  }
+
+  /**
+   * Every call event carries the id of the call it belongs to, and the server
+   * still delivers late ones — a `call:ended` for the call we just hung up can
+   * land after the next call has already started ringing. Acting on those tore
+   * the new call down within milliseconds of placing it, and applied the old
+   * call's SDP to the new peer connection ("wrong state: stable"). Match the id
+   * before acting, exactly as the web client does.
+   */
+  private isForActiveCall(callId: string): boolean {
+    return this.active !== null && this.active.callId === callId;
   }
 
   private async createAndSendOffer(): Promise<void> {
@@ -402,7 +434,10 @@ class CallService {
     try {
       const offer = await webrtcService.createOffer();
       socket.emit(CLIENT_EVENTS.CALL_OFFER, { callId: active.callId, description: offer });
-    } catch {
+    } catch (error) {
+      // Hanging up is the right recovery, but doing it silently makes a failed
+      // negotiation indistinguishable from the peer declining — say what broke.
+      console.error('[call] Failed to create/send the offer — hanging up', error);
       this.hangup('failed');
     }
   }
@@ -418,7 +453,8 @@ class CallService {
     try {
       const answer = await webrtcService.acceptRemoteOffer(description);
       socket.emit(CLIENT_EVENTS.CALL_ANSWER_SDP, { callId: active.callId, description: answer });
-    } catch {
+    } catch (error) {
+      console.error('[call] Failed to answer the remote offer — hanging up', error);
       this.hangup('failed');
     }
   }

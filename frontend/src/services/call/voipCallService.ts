@@ -263,7 +263,14 @@ class VoipCallService {
       if (!active) {
         return;
       }
-      if (active.answered) {
+      // Only the callee may decline: the server rejects a `call:decline` from the
+      // caller as `invalid_call` and — because that reply carries no event — leaves
+      // the call open for both parties while the caller has already torn down
+      // locally. A caller ending a call it placed is a hangup either way; the
+      // server turns an unanswered one into a cancellation on its own.
+      if (active.isCaller) {
+        callService.hangup(active.answered ? 'hangup' : 'cancelled');
+      } else if (active.answered) {
         callService.hangup('hangup');
       } else {
         callService.declineIncoming('declined');
