@@ -6,6 +6,7 @@ import {
   CALENDAR_LOOKAHEAD_MIN_DAYS,
   CALENDAR_LOOKAHEAD_MAX_DAYS,
 } from '@stewra/shared-types';
+import { meetsMinimumVersion } from '@stewra/shared-types';
 
 /** The scopes Stewra now requests: read calendar + full Gmail read, plus modify (archive/label/
  * mark-read) and send — needed so Stewra can act on the user's behalf AFTER they confirm each action.
@@ -311,6 +312,12 @@ const EnvSchema = z.object({
   // The oldest runner build allowed to connect — the lever to refuse a build with a known-bad execution
   // path. A SAFETY control: a runner executes code on the user's machine.
   RUNNER_MIN_VERSION: z.string().regex(/^\d+\.\d+\.\d+$/).optional(),
+  // The NEWEST published runner build. Advertised to connecting runners (notify-only upgrade notice)
+  // and to the web "Runners" panel. Distinct from MIN on purpose: MIN is the safety floor (oldest build
+  // still allowed), LATEST is the upgrade target — advertising the floor as "latest" would tell every
+  // out-of-date-but-allowed runner the wrong thing. Required when the feature is on; optional would
+  // make the upgrade notice a silent no-op.
+  RUNNER_LATEST_VERSION: z.string().regex(/^\d+\.\d+\.\d+$/).optional(),
   // A runner token is a long-lived DEVICE credential (not a JWT); revocation is by database row. This
   // bounds its raw entropy — 32 bytes of base64url is ample and unguessable.
   RUNNER_DEVICE_TOKEN_BYTES: z.coerce.number().int().min(16).max(64).default(32),
@@ -409,9 +416,20 @@ if (env.WHATSAPP_PERSONAL_ENABLED) {
 // would offer a pairing flow leading nowhere; without a minimum version we could not refuse a build whose
 // execution path we no longer trust. Both are worse than not booting.
 if (env.RUNNER_ENABLED) {
-  const missing = (['RUNNER_DOWNLOAD_URL', 'RUNNER_MIN_VERSION'] as const).filter((k) => !env[k]);
+  const missing = (['RUNNER_DOWNLOAD_URL', 'RUNNER_MIN_VERSION', 'RUNNER_LATEST_VERSION'] as const).filter(
+    (k) => !env[k],
+  );
   if (missing.length > 0) {
     throw new Error(`RUNNER_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+  // LATEST below MIN is always operator error: it would tell every runner to "upgrade" to a build the
+  // same config refuses at pairing. Refuse to boot rather than advertise a self-contradiction.
+  const latest = env.RUNNER_LATEST_VERSION;
+  const min = env.RUNNER_MIN_VERSION;
+  if (latest !== undefined && min !== undefined && !meetsMinimumVersion(latest, min)) {
+    throw new Error(
+      `RUNNER_LATEST_VERSION (${latest}) must be >= RUNNER_MIN_VERSION (${min})`,
+    );
   }
 }
 
@@ -654,6 +672,8 @@ export const config = {
     downloadUrl: env.RUNNER_DOWNLOAD_URL ?? '',
     /** Oldest runner build allowed to connect — our lever to refuse a build we no longer trust to run. */
     minVersion: env.RUNNER_MIN_VERSION ?? '',
+    /** Newest published build — what the notify-only upgrade notice points at. Empty when disabled. */
+    latestVersion: env.RUNNER_LATEST_VERSION ?? '',
     deviceTokenBytes: env.RUNNER_DEVICE_TOKEN_BYTES,
     pairCodeTtlMs: env.RUNNER_PAIR_CODE_TTL_MINUTES * 60 * 1000,
   },

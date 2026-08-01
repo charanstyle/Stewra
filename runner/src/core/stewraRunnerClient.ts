@@ -1,7 +1,7 @@
 import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
 import { RUNNER_CLIENT_EVENTS, RUNNER_HARNESS_IDS, RUNNER_SERVER_EVENTS } from '@stewra/shared-types';
-import type { RunnerHelloPayload, RunnerWorkspace } from '@stewra/shared-types';
+import type { RunnerHelloPayload, RunnerUpdateAvailablePayload, RunnerWorkspace } from '@stewra/shared-types';
 import { z } from 'zod';
 import type { RunnerConfig } from '../config.js';
 import { SessionManager } from './sessionManager.js';
@@ -34,6 +34,10 @@ const permissionDecisionSchema = z.object({
   optionId: z.string().min(1).max(256),
 });
 const cancelSchema = z.object({ sessionId: z.string().min(1).max(128) });
+const updateAvailableSchema = z.object({
+  latestVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
+  downloadUrl: z.string().url(),
+});
 const pushSchema = z.object({ sessionId: z.string().min(1).max(128) });
 const openPrSchema = z.object({
   sessionId: z.string().min(1).max(128),
@@ -46,6 +50,11 @@ export interface RunnerClientEvents {
   onRevoked(): void;
   onConnected(): void;
   onDisconnected(): void;
+  /**
+   * The server says a newer runner build exists. Notify-only: the caller tells the user where to get
+   * it; this process NEVER replaces its own binary.
+   */
+  onUpdateAvailable(payload: RunnerUpdateAvailablePayload): void;
 }
 
 /**
@@ -146,6 +155,13 @@ export class StewraRunnerClient {
     socket.on(RUNNER_SERVER_EVENTS.REVOKED, () => {
       void this.sessions?.disposeAll();
       events.onRevoked();
+    });
+
+    // Sent by the server after our hello when this build is behind the latest published one. Parsed like
+    // everything else off the wire — a malformed frame is dropped, never shown to the user as an upgrade.
+    socket.on(RUNNER_SERVER_EVENTS.UPDATE_AVAILABLE, (raw: unknown) => {
+      const parsed = updateAvailableSchema.safeParse(raw);
+      if (parsed.success) events.onUpdateAvailable(parsed.data);
     });
   }
 

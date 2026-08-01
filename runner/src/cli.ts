@@ -5,6 +5,7 @@ import { loadRunnerConfig } from './config.js';
 import { detectHarnesses, detectWorkspaces } from './core/capabilities.js';
 import { StewraRunnerClient } from './core/stewraRunnerClient.js';
 import { clearToken, loadToken, saveToken } from './core/tokenStore.js';
+import { VERSION } from './version.js';
 
 /**
  * The runner's entry point.
@@ -17,7 +18,6 @@ import { clearToken, loadToken, saveToken } from './core/tokenStore.js';
  * up (online) in the web app, and hosts full ACP coding sessions — streaming updates, permission
  * prompts, per-session git worktrees, and push/PR follow-through.
  */
-const VERSION = '0.1.0';
 
 /** What this machine calls itself, overridable so two machines with the same hostname stay distinct. */
 function deviceName(): string {
@@ -56,6 +56,18 @@ async function runConnect(): Promise<void> {
     onRevoked: () => {
       process.stderr.write('Stewra Runner: this device was revoked. Wiping token and exiting.\n');
       void clearToken().finally(() => process.exit(0));
+    },
+    onUpdateAvailable: ({ latestVersion, downloadUrl }) => {
+      // Notify-only by design: this binary never replaces itself. The user downloads the new build.
+      process.stderr.write(
+        [
+          '',
+          `Stewra Runner: a newer version is available (${VERSION} → ${latestVersion}).`,
+          `  Download it from: ${downloadUrl}`,
+          '  This runner keeps working in the meantime — it will not update itself.',
+          '',
+        ].join('\n'),
+      );
     },
   });
 

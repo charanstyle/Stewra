@@ -123,6 +123,7 @@ async function main(): Promise<void> {
     onConnected: () => { connected = true; },
     onDisconnected: () => {},
     onRevoked: () => {},
+    onUpdateAvailable: () => {},
   });
 
   // 3) Wait for the device to be online with its workspace + harness reported.

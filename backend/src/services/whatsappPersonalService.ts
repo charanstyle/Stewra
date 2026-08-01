@@ -10,6 +10,7 @@ import {
   WHATSAPP_PERSONAL_CONSENT_SENTENCE,
   WHATSAPP_PERSONAL_CONSENT_VERSION,
   isConsentSentenceValid,
+  meetsMinimumVersion,
 } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
@@ -20,21 +21,6 @@ import { AuthenticationError, ForbiddenError, ServiceUnavailableError, Validatio
 import { logger } from '../utils/logger.js';
 
 const CHANNEL = 'whatsapp_personal' as const;
-
-/** Compare `a.b.c` version triples numerically. Returns true when `version` is at least `minimum`. */
-function meetsMinimumVersion(version: string, minimum: string): boolean {
-  const parse = (v: string): number[] => v.split('.').map((p) => Number.parseInt(p, 10));
-  const got = parse(version);
-  const want = parse(minimum);
-  if (got.some(Number.isNaN) || got.length !== 3) return false;
-  for (let i = 0; i < 3; i += 1) {
-    const g = got[i] ?? 0;
-    const w = want[i] ?? 0;
-    if (g > w) return true;
-    if (g < w) return false;
-  }
-  return true;
-}
 
 /**
  * The EXPERIMENTAL companion-device channel: the user's own WhatsApp account, reached through the Stewra

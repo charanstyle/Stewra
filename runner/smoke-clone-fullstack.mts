@@ -129,6 +129,7 @@ async function main(): Promise<void> {
     onConnected: () => { connected = true; },
     onDisconnected: () => {},
     onRevoked: () => {},
+    onUpdateAvailable: () => {},
   });
 
   // Wait for the device online with a CLONED workspace reported (remote + default branch set by clone).

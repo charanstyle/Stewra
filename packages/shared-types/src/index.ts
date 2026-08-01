@@ -1,5 +1,6 @@
 // Common
 export type { UUID, ISODateString, ApiSuccess, ApiError, ApiResponse, Paginated } from './common/base';
+export { meetsMinimumVersion } from './common/version';
 
 // Models
 export type { User, UserRole } from './models/user';
@@ -341,6 +342,7 @@ export type {
   RunnerStartSessionAck,
   RunnerPromptPayload,
   RunnerCancelPayload,
+  RunnerUpdateAvailablePayload,
   RunnerSessionUpdatePayload,
   RunnerSessionDonePayload,
   RunnerPushPayload,

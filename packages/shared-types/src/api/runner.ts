@@ -59,6 +59,11 @@ export interface GetRunnerStatusResponse {
   readonly enabled: boolean;
   readonly devices: readonly RunnerDevice[];
   readonly downloadUrl: string;
+  /**
+   * The newest published runner version — lets the panel flag a device whose `appVersion` is behind.
+   * Empty string when the feature is disabled (matching `downloadUrl`).
+   */
+  readonly latestVersion: string;
 }
 
 // ── Sessions ─────────────────────────────────────────────────────────────────────────────────────────

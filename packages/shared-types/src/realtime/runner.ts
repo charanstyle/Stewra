@@ -90,6 +90,13 @@ export const RUNNER_SERVER_EVENTS = {
   OPEN_PR: 'runner:open-pr',
   /** The user revoked THIS device. The runner must stop all sessions, wipe its token, and shut down. */
   REVOKED: 'runner:revoked',
+  /**
+   * This build is older than the newest published runner. NOTIFY-ONLY: the runner surfaces an upgrade
+   * notice (stderr, and the web panel shows the same fact from REST) — it never downloads or replaces
+   * its own binary. A binary that executes code on the user's machine self-replacing over a socket
+   * instruction would be an update channel with the attack surface of remote code execution.
+   */
+  UPDATE_AVAILABLE: 'runner:update-available',
 } as const;
 export type RunnerServerEvent = (typeof RUNNER_SERVER_EVENTS)[keyof typeof RUNNER_SERVER_EVENTS];
 
@@ -145,6 +152,17 @@ export interface RunnerHelloPayload {
   readonly os: string;
   readonly harnesses: readonly RunnerHarnessInfo[];
   readonly workspaces: readonly RunnerWorkspace[];
+}
+
+/**
+ * `runner:update-available` — sent right after a `hello` whose `appVersion` is older than the newest
+ * published build. Notify-only (see the event's docblock): the user re-downloads from `downloadUrl`.
+ */
+export interface RunnerUpdateAvailablePayload {
+  /** The newest published runner version (`a.b.c`). */
+  readonly latestVersion: string;
+  /** Where to get it — config-driven, never a hardcoded URL. */
+  readonly downloadUrl: string;
 }
 
 // ── Session lifecycle (server → runner) ─────────────────────────────────────────────────────────────

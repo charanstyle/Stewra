@@ -15,12 +15,14 @@ export type RunnerSocket = Socket<DefaultEventsMap, DefaultEventsMap, DefaultEve
 /**
  * The slices of Socket.IO the runner code actually touches — the handler is typed against THIS, not
  * `Socket`, so the rules are provable with a fake client and no transport: a runner socket is something we
- * listen to, put in a room, and hang up on, and nothing else. A real `Socket` satisfies this structurally.
+ * listen to, put in a room, answer directly (the update-available nudge), and hang up on, and nothing
+ * else. A real `Socket` satisfies this structurally.
  */
 export interface RunnerSocketLike {
   readonly id: string;
   readonly data: SocketData;
   on(event: string, listener: (payload: unknown, ack?: (response: unknown) => void) => void): unknown;
+  emit(event: string, payload: unknown): unknown;
   join(room: string): unknown;
   disconnect(close?: boolean): unknown;
 }

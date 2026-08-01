@@ -4,7 +4,9 @@ import {
   RUNNER_CLIENT_EVENTS,
   RUNNER_HARNESS_IDS,
   RUNNER_PERMISSION_KINDS,
+  RUNNER_SERVER_EVENTS,
   RUNNER_UPDATE_KINDS,
+  meetsMinimumVersion,
 } from '@stewra/shared-types';
 import type {
   RunnerHarnessInfo,
@@ -12,8 +14,10 @@ import type {
   RunnerPermissionPromptPayload,
   RunnerSessionDonePayload,
   RunnerSessionUpdatePayload,
+  RunnerUpdateAvailablePayload,
   RunnerWorkspace,
 } from '@stewra/shared-types';
+import { config } from '../config/unifiedConfig.js';
 import { runnerService } from '../services/runnerService.js';
 import { runnerSessionService } from '../services/runnerSessionService.js';
 import { logger } from '../utils/logger.js';
@@ -177,6 +181,23 @@ export function registerRunnerHandler(socket: RunnerSocketLike): void {
         workspaces: parsed.data.workspaces.map(normalizeWorkspace),
       }),
     );
+
+    // Notify-only upgrade nudge: a runner behind the latest published build gets told, once per hello,
+    // where to get the new one. Nothing more — the runner never self-replaces its binary. Runners older
+    // than this event simply ignore it (unknown Socket.IO events are dropped client-side).
+    if (!meetsMinimumVersion(parsed.data.appVersion, config.runner.latestVersion)) {
+      const payload: RunnerUpdateAvailablePayload = {
+        latestVersion: config.runner.latestVersion,
+        downloadUrl: config.runner.downloadUrl,
+      };
+      socket.emit(RUNNER_SERVER_EVENTS.UPDATE_AVAILABLE, payload);
+      logger.info('runner: told device an update is available', {
+        userId,
+        deviceId,
+        appVersion: parsed.data.appVersion,
+        latestVersion: config.runner.latestVersion,
+      });
+    }
   });
 
   // ── Session lifecycle: a runner's reports about the agent runs it is hosting ─────────────────────────

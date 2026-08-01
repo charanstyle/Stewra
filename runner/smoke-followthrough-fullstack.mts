@@ -129,6 +129,7 @@ async function main(): Promise<void> {
     onConnected: () => { connected = true; },
     onDisconnected: () => {},
     onRevoked: () => {},
+    onUpdateAvailable: () => {},
   });
 
   let deviceId: string | undefined;

@@ -13,21 +13,7 @@ import { runnerDeviceRepository } from '../repositories/runnerDeviceRepository.j
 import { listOnlineDeviceIds, notifyRunnerRevoked } from '../websocket/runnerEmitter.js';
 import { AuthenticationError, ForbiddenError, ServiceUnavailableError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
-
-/** Compare `a.b.c` version triples numerically. True when `version` is at least `minimum`. */
-function meetsMinimumVersion(version: string, minimum: string): boolean {
-  const parse = (v: string): number[] => v.split('.').map((p) => Number.parseInt(p, 10));
-  const got = parse(version);
-  const want = parse(minimum);
-  if (got.some(Number.isNaN) || got.length !== 3) return false;
-  for (let i = 0; i < 3; i += 1) {
-    const g = got[i] ?? 0;
-    const w = want[i] ?? 0;
-    if (g > w) return true;
-    if (g < w) return false;
-  }
-  return true;
-}
+import { meetsMinimumVersion } from '@stewra/shared-types';
 
 /**
  * The Stewra Runner surface: a process on the user's OWN machine that hosts coding agents and runs them
@@ -133,11 +119,21 @@ class RunnerService {
     // NOT gated on `assertEnabled`: the panel must be able to ask "is this available?" and get an answer.
     const enabled = config.runner.enabled;
     if (!enabled) {
-      return { enabled, devices: [], downloadUrl: config.runner.downloadUrl };
+      return {
+        enabled,
+        devices: [],
+        downloadUrl: config.runner.downloadUrl,
+        latestVersion: config.runner.latestVersion,
+      };
     }
     const onlineIds = await listOnlineDeviceIds(userId);
     const devices = await runnerDeviceRepository.listByUser(userId, onlineIds);
-    return { enabled, devices, downloadUrl: config.runner.downloadUrl };
+    return {
+      enabled,
+      devices,
+      downloadUrl: config.runner.downloadUrl,
+      latestVersion: config.runner.latestVersion,
+    };
   }
 
   /** Revoke a runner. Instant — the reason runner tokens are database rows, not JWTs. */

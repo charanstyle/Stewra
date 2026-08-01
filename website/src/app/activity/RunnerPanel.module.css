@@ -24,6 +24,23 @@
   padding: 2px 6px;
 }
 
+/* The per-device "Update available" link-badge. A link, not a label: it goes to the download page. */
+.updateBadge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--warning);
+  border: 1px solid currentcolor;
+  border-radius: 6px;
+  padding: 2px 6px;
+  text-decoration: none;
+}
+
+.updateBadge:hover {
+  text-decoration: underline;
+}
+
 .muted {
   color: var(--muted);
   font-size: 14px;

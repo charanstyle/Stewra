@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { meetsMinimumVersion } from '@stewra/shared-types';
 import type {
   GetRunnerStatusResponse,
   RunnerDevice,
@@ -177,6 +178,18 @@ export default function RunnerPanel({
                 <span className={styles.deviceMeta}>
                   {device.os} · v{device.appVersion}
                 </span>
+                {data.latestVersion !== '' &&
+                  !meetsMinimumVersion(device.appVersion, data.latestVersion) && (
+                    <a
+                      className={styles.updateBadge}
+                      href={data.downloadUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={`Version ${data.latestVersion} is available`}
+                    >
+                      Update available
+                    </a>
+                  )}
                 <span className={styles.deviceState}>
                   <span className={device.online ? styles.dotOk : styles.dotIdle} />
                   {device.online ? 'Online' : 'Offline'}

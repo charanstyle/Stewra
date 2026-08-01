@@ -16,6 +16,7 @@ import type {
   RunnerUpdateKind,
 } from '@stewra/shared-types';
 import { acpEnvKey, harnessCommand, harnessEnv } from './harnessCommand.js';
+import { VERSION } from '../version.js';
 
 /** One streamed increment the harness produced, already mapped from ACP to Stewra's update vocabulary. */
 export interface AcpUpdate {
@@ -119,7 +120,7 @@ export class AcpSession {
       connection.initialize({
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
-        clientInfo: { name: 'stewra-runner', version: '0.1.0' },
+        clientInfo: { name: 'stewra-runner', version: VERSION },
       }),
       spawnFailed,
     ]);
