@@ -1,0 +1,24 @@
+# Assert a message sent from the OTHER user's device arrives in this device's thread.
+#
+# The counterpart to send-message.yaml: that flow only proves the sender's own bubble echoes back,
+# which a purely local optimistic render would also satisfy. Delivery is only proven on a second
+# device, so this flow is driven by run-two-party-message.sh with the same MESSAGE_TEXT the sender
+# used.
+#
+# Assumes the app is already signed in. MESSAGE_TEXT and CONTACT_NAME are injected at run time
+# (--env), so neither is given a flow-level default — in Maestro 2.6.x a flow-level default wins
+# over --env, which would silently assert the wrong text.
+appId: com.stewra.app
+---
+# Get to the Chats list and open the sender's thread (CONTACT_NAME, or the top thread when blank —
+# the row the sender just wrote to sorts to the top). Shared with send-message.yaml/call-smoke.yaml.
+- runFlow: ../lib/open-thread.yaml
+# The message must arrive over the live socket without a manual refresh. Generous timeout: this
+# crosses the real backend and a push/socket round-trip between two physical sessions.
+#
+# `.*` wrapping is required — on iOS the bubble's accessibility label appends the timestamp, so a
+# bare ${MESSAGE_TEXT} never matches. See TESTIDS.md.
+- extendedWaitUntil:
+    visible:
+      text: ".*${MESSAGE_TEXT}.*"
+    timeout: 30000

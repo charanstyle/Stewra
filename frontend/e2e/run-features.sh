@@ -40,10 +40,9 @@ if [[ ! -f "$ENV_FILE" ]]; then
   echo "       cp $(cd "${SCRIPT_DIR}/../.." && pwd)/.env.e2e.example ${ENV_FILE} and fill it in." >&2
   exit 1
 fi
-set -a
-# shellcheck disable=SC1090
-source "$ENV_FILE"
-set +a
+# shellcheck source=lib/load-env.sh
+source "${SCRIPT_DIR}/lib/load-env.sh"
+load_env_file "$ENV_FILE"
 
 for var in E2E_USER_A_EMAIL E2E_USER_A_PASSWORD; do
   if [[ -z "${!var:-}" ]]; then
@@ -106,10 +105,16 @@ else
   exit 1
 fi
 
+# Nonce the message payload. flows/send-message.yaml asserts the sent bubble echoes this text back,
+# and a fixed string would still be on screen from an earlier run — the assertion would pass without
+# anything having been sent. The nonce makes a pass mean "this run posted this message".
+MESSAGE_TEXT="E2E hello from Maestro $$-$(date +%s)"
+
 echo "==> Running $(basename "$FLOW_PATH") on ${PLATFORM} device ${DEVICE_ID}"
 maestro --device "$DEVICE_ID" test \
   --env EMAIL="$E2E_USER_A_EMAIL" \
   --env PASSWORD="$E2E_USER_A_PASSWORD" \
+  --env MESSAGE_TEXT="$MESSAGE_TEXT" \
   --env CONTACT_NAME="${E2E_CONTACT_NAME:-}" \
   --env RUNNER_MACHINE="${E2E_RUNNER_MACHINE:-}" \
   --env RUNNER_WORKSPACE="${E2E_RUNNER_WORKSPACE:-}" \

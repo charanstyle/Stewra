@@ -69,10 +69,18 @@ export default function ChatListScreen({ navigation }: Props): React.JSX.Element
     }
   };
 
-  const renderItem = ({ item }: { item: ConversationSummary }): React.JSX.Element => {
+  const renderItem = ({ item, index }: { item: ConversationSummary; index: number }): React.JSX.Element => {
     const title = titleFor(item);
     return (
       <Pressable
+        // Position-based, because row content is user data the E2E suite can't know up front, and a
+        // conversation id isn't knowable either. `accessibilityRole="button"` makes this row a single
+        // accessibility element on iOS, which collapses the children into one composed label
+        // ("QW, QA Web B, unread-probe 5165x3, 1"), so a Maestro text selector naming only the
+        // contact cannot match there. This gives the suite a handle on "the top conversation" that
+        // behaves identically on both platforms. Not used as the list key (keyExtractor still uses
+        // conversation.id) — only as a stable selector. See e2e/TESTIDS.md.
+        testID={`chat-row-${index}`}
         accessibilityRole="button"
         onPress={() => navigation.navigate('Conversation', { conversationId: item.conversation.id, title })}
         style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}

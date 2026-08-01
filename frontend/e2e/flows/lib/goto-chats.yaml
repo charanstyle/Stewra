@@ -1,0 +1,24 @@
+# Shared: get back to the Chats list from wherever the previous flow ended up.
+#
+# Every flow that expects the Chats list has to tolerate being chained after one that ended inside a
+# conversation or on the call screen. This used to be `pressKey: Back`, which works on Android
+# (hardware back) but is a no-op on iOS — the flow stayed on the conversation screen and the next
+# `assertVisible: "Chats"` failed on a perfectly healthy app.
+#
+# Relaunching is the platform-independent way to get to the navigator root. Note the absence of
+# `clearState`: this must keep the signed-in session, unlike login.yaml which deliberately clears it.
+appId: com.stewra.app
+---
+- runFlow:
+    when:
+      notVisible: "Chats"
+    commands:
+      - launchApp
+      # A relaunch re-evaluates the JS bundle and re-fetches the conversation list, so give it the
+      # same cold-start budget login.yaml gives the sign-in screen.
+      - extendedWaitUntil:
+          visible: "Chats"
+          timeout: 30000
+- assertVisible: "Chats"
+- tapOn:
+    id: "tab-chats"

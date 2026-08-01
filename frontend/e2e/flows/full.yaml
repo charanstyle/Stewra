@@ -2,12 +2,14 @@
 # place a voice call (caller-side smoke) → logout.
 #
 # Run with credentials supplied via env (see ../README.md):
-#   maestro test --env EMAIL=... --env PASSWORD=... --env CONTACT_NAME=... flows/full.yaml
+#   maestro test --env EMAIL=... --env PASSWORD=... --env CONTACT_NAME=... --env MESSAGE_TEXT=... flows/full.yaml
 #
 # Each step is its own reusable flow so you can run them individually too.
+#
+# No flow-level `env:` defaults here, for the same reason as send-message.yaml: in Maestro 2.6.x+ a
+# flow-level default WINS over --env, so a default silently discards what run-features.sh injects
+# (including the nonce that makes the sent-bubble assertion mean anything).
 appId: com.stewra.app
-env:
-  MESSAGE_TEXT: "E2E hello from Maestro"
 ---
 - runFlow: login.yaml
 - runFlow: send-message.yaml

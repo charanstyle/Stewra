@@ -1,0 +1,42 @@
+# Shared: return to the Chats list and open one conversation.
+#
+# Used by send-message.yaml, call-smoke.yaml and two-party/receive-message.yaml — all three need the
+# same "get to a thread" preamble, and all three were broken on iOS in the same way before this was
+# single-sourced. Lives under flows/lib/ so run-all-features.sh (a depth-1 sweep of flows/) does not
+# try to run it as a test: it asserts nothing on its own.
+#
+# CONTACT_NAME is inherited from the calling flow's environment (run-features.sh injects it with
+# --env). It is deliberately NOT given a flow-level default here: in Maestro 2.6.x+ a flow-level
+# `env:` default wins over --env, which would silently override the caller's selection.
+appId: com.stewra.app
+---
+# A preceding flow may have left us inside a conversation. Return to the Chats list first so the
+# calling flow is safe both standalone and chained after another.
+- runFlow: goto-chats.yaml
+# Named thread. The `.*` wrapping is required, not cosmetic: Maestro text selectors are
+# whole-string regexes, and on iOS a chat row is one accessibility element whose label concatenates
+# every child ("QW, QA Web B, unread-probe 5165x3, 1"), so a bare `QA Web B` matched nothing and the
+# flow died with "Element not found" against a row plainly visible on screen. `index: 0` pins the
+# topmost match — the account has several threads with the same contact, and the most recently
+# active one sorts to the top, which is where a message just sent or received lands.
+- runFlow:
+    when:
+      true: ${CONTACT_NAME != ""}
+    commands:
+      - tapOn:
+          text: ".*${CONTACT_NAME}.*"
+          index: 0
+# Unnamed: open the top thread. This uses the row testID rather than `text: ".*"` with `index: 0`,
+# which on iOS matched the full-screen root element (accessibilityText "Stewra") and tapped the
+# middle of the screen instead of a row.
+- runFlow:
+    when:
+      true: ${CONTACT_NAME == ""}
+    commands:
+      - tapOn:
+          id: "chat-row-0"
+# Prove we actually landed in a conversation rather than still sitting on the list.
+- extendedWaitUntil:
+    visible:
+      id: "conversation-input"
+    timeout: 15000

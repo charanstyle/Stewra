@@ -1,39 +1,21 @@
 # Open a conversation and send a text message.
 #
 # Assumes the app is already signed in (run login.yaml first, or use full.yaml).
-# CONTACT_NAME picks which thread to open; it is injected at run time by run-features.sh
-# (--env CONTACT_NAME=...), so it is NOT given a default here — a flow-level default overrides
-# the injected value in Maestro 2.6.x. MESSAGE_TEXT is a fixed payload (not injected), so it keeps
-# a default. Neither bakes in a real person.
+# CONTACT_NAME picks which thread to open and MESSAGE_TEXT is the payload to send. BOTH are injected
+# at run time (run-features.sh and run-two-party-message.sh pass --env), and NEITHER is given a
+# flow-level default: in Maestro 2.6.x+ a flow-level `env:` default WINS over --env, so a default
+# here silently discards the caller's value.
+#
+# That is not hypothetical — MESSAGE_TEXT used to default to a fixed "E2E hello from Maestro" here.
+# run-two-party-message.sh injects a nonced payload precisely so a pass can only be this run's
+# message, and the default overrode it: device A sent the fixed string while device B waited for the
+# nonce, so the cross-device delivery assertion could never pass and reported "delivery is broken".
 appId: com.stewra.app
-env:
-  MESSAGE_TEXT: "E2E hello from Maestro"
 ---
-# A preceding flow may leave us inside a conversation. Return to the Chats list first so this
-# flow is safe both standalone and chained after another.
-- runFlow:
-    when:
-      notVisible: "Chats"
-    commands:
-      - pressKey: Back
-- assertVisible: "Chats"
-- tapOn:
-    id: "tab-chats"
-# Open the target thread by contact name (falls back to the first row if unset).
-# Chat list rows are dynamic/user-generated content, so they stay text-selected —
-# a fixed testID wouldn't be unique or meaningful per row.
-- runFlow:
-    when:
-      true: ${CONTACT_NAME != ""}
-    commands:
-      - tapOn: ${CONTACT_NAME}
-- runFlow:
-    when:
-      true: ${CONTACT_NAME == ""}
-    commands:
-      - tapOn:
-          index: 0
-          text: ".*"
+# Get to the Chats list and open the target thread (CONTACT_NAME, or the top thread when blank).
+# Shared with call-smoke.yaml and two-party/receive-message.yaml — see that file for why the
+# selectors look the way they do on iOS.
+- runFlow: lib/open-thread.yaml
 - tapOn:
     id: "conversation-input"
 - inputText: ${MESSAGE_TEXT}
@@ -41,11 +23,24 @@ env:
 # while the soft keyboard is up, the Send button is below the fold (off the visible bounds), so
 # Maestro can't see it. Hiding the keyboard brings the composer (with its now-populated Send
 # button) back into view.
-- hideKeyboard
+#
+# ANDROID ONLY — same reason as flows/login.yaml: Maestro's iOS `hideKeyboard` is a tap outside the
+# keyboard, which on a conversation screen lands on a message bubble or the header and can navigate
+# away. On iOS the composer is keyboard-avoiding, so `conversation-send` stays on screen with the
+# keyboard up and needs no dismissal.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
 - tapOn:
     id: "conversation-send"
 # The sent bubble echoing our text confirms the message posted to the thread.
+#
+# `.*` wrapping is required: Maestro text selectors are whole-string regexes, and on iOS a message
+# bubble is one accessibility element whose label appends the timestamp ("E2E hello from Maestro,
+# 8:17 AM"), so a bare ${MESSAGE_TEXT} failed against a bubble plainly on screen. See TESTIDS.md.
 - extendedWaitUntil:
     visible:
-      text: ${MESSAGE_TEXT}
+      text: ".*${MESSAGE_TEXT}.*"
     timeout: 15000

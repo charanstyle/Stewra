@@ -13,6 +13,7 @@ Convention: kebab-case `<screen-or-area>-<element>`.
 | `password-visibility-toggle` | `src/components/PasswordInput.tsx` | The eye icon show/hide toggle. Fixed id on the shared component itself — only one `PasswordInput` is ever visible on screen at a time, so it's safe to reuse across Login/Register/ResetPassword |
 | `login-submit` | `src/screens/auth/LoginScreen.tsx` | "Sign in" submit button |
 | `tab-chats` | `src/navigation/MainTabs.tsx` | Bottom-tab button for the Chats tab (via `tabBarButtonTestID`, the React Navigation v7 bottom-tabs option — v6's `tabBarTestID` was renamed) |
+| `chat-row-<n>` | `src/screens/chat/ChatListScreen.tsx` | Conversation row at position `n` (0-based) in the Chats list. Position, not identity: the suite can't know a conversation id or a contact's display name up front. `chat-row-0` is the most recently active thread, which is where a message just sent or received lands |
 | `conversation-input` | `src/screens/chat/ConversationScreen.tsx` | Text message composer `TextInput` |
 | `conversation-send` | `src/screens/chat/ConversationScreen.tsx` | "Send" button (only rendered while the composer has text) |
 | `composer-record` | `src/screens/chat/ConversationScreen.tsx` | Hold-to-record voice message button (only rendered while the composer is empty) |
@@ -35,6 +36,15 @@ Convention: kebab-case `<screen-or-area>-<element>`.
 - `assertVisible` keeps targeting human-readable screen text (e.g. `"Chats"`, `"Sign in"`,
   the echoed message body) for transition assertions — those prove real navigation and
   real data round-tripping, not just that a node with the right id is mounted.
-- Screens/elements not in this table (e.g. individual chat list rows, contact names)
-  are still targeted by visible text since they're user-generated/dynamic content, not
-  fixed UI chrome — a testID wouldn't be unique or meaningful there.
+- Screens/elements not in this table (e.g. contact names, message bodies) are targeted by
+  visible text since they're user-generated/dynamic content, not fixed UI chrome.
+- **Text selectors are whole-string regexes, and iOS composes labels.** Any RN view that is an
+  accessibility element (`accessibilityRole`, `accessible`, or an `accessibilityLabel`) collapses
+  its children into ONE element on iOS whose label is every child's text joined with ", " — a chat
+  row reads `QW, QA Web B, unread-probe 5165x3, 1`. Android exposes the children separately, so
+  `text: "QA Web B"` passes there and fails on iOS with a misleading "Element not found" against a
+  row plainly visible on screen. Wrap any selector that names part of a composed row in `.*`:
+  `text: ".*${CONTACT_NAME}.*"`, and add `index: 0` when several rows can match.
+- Avoid `text: ".*"` with `index: 0` as a "first thing on screen" selector. On iOS the root
+  application element carries an `accessibilityText` of its own ("Stewra"), so it matches first and
+  the tap lands in the middle of the screen. Use a positional testID (`chat-row-0`) instead.

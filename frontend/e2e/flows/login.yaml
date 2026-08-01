@@ -10,6 +10,29 @@ appId: com.stewra.app
 ---
 - launchApp:
     clearState: true          # start from a signed-out state every run
+# Wait, don't sample: a Release build has to load and evaluate the embedded JS bundle after launch,
+# which takes a second or two on a cold start. A bare `assertVisible` runs the instant launchApp
+# returns and fails against a splash screen that is about to render fine.
+#
+# `optional: true` because on iOS this wait legitimately does NOT succeed: `clearState` wipes the app
+# container but NOT the Keychain, and expo-secure-store keeps the session token there — so the app
+# relaunches already signed in, on Chats. (Android's `pm clear` does drop everything, so there the
+# app really is signed out and this wait is the one that resolves.) The sign-out branch below absorbs
+# the difference, and the hard `assertVisible` after it is what actually fails the flow if neither
+# screen arrived.
+- extendedWaitUntil:
+    visible: "Sign in"
+    timeout: 30000
+    optional: true
+- runFlow:
+    when:
+      visible: "Chats"
+    commands:
+      - tapOn:
+          id: "logout-btn"
+      - extendedWaitUntil:
+          visible: "Sign in"
+          timeout: 20000
 - assertVisible: "Sign in"
 - tapOn:
     id: "login-email-input"
@@ -19,9 +42,42 @@ appId: com.stewra.app
 - inputText: ${PASSWORD}
 # Dismiss the keyboard before submitting: on shorter screens / taller keyboards the "Sign in"
 # button sits behind the soft keyboard, so a tap on it would land on a key instead of the button.
-- hideKeyboard
+#
+# ANDROID ONLY. Maestro implements `hideKeyboard` on iOS as a tap outside the keyboard, and on this
+# screen that tap lands on the "Forgot password?" link — the flow navigated to Reset password, so
+# `login-submit` was genuinely gone. iOS doesn't need the dismissal anyway: `login-submit` is above
+# the keyboard and tappable with it up.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
 - tapOn:
     id: "login-submit"
+# iOS raises a "Save Password?" system alert after a successful credential submit. It belongs to
+# another process, but Maestro's iOS hierarchy DOES expose it (`accessibilityText: "Not Now"` with
+# bounds), so it is dismissable — verified live on Stewra-iPhone17 / iOS 26.3. Left up, it covers the
+# app and the "Chats" wait below times out even though the sign-in itself succeeded, which is exactly
+# how the two-party call runner failed with a misleading "caller login failed".
+#
+# Suppressing it at the source does not work: `simctl spawn <udid> defaults write com.apple.Preferences
+# AutoFillPasswords -bool false` leaves the alert appearing anyway. So dismiss it here instead.
+#
+# The wait is `optional` because the alert is not guaranteed — iOS suppresses it once the credential
+# is already stored — and the tap is `optional` for the same reason. Neither is load-bearing: the hard
+# "Chats" assertion below is what decides whether the sign-in worked.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: "Not Now"
+          timeout: 8000
+          optional: true
+      - tapOn:
+          text: "Not Now"
+          optional: true
 # Landing on the Chats tab proves the token was issued and the user is verified.
 - extendedWaitUntil:
     visible:

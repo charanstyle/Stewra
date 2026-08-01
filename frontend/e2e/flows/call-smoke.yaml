@@ -9,29 +9,9 @@
 # overrides the injected value in Maestro 2.6.x. Empty CONTACT_NAME falls back to the first thread.
 appId: com.stewra.app
 ---
-# A preceding flow (e.g. send-message) may leave us inside a conversation. Return to the Chats
-# list first so this flow is safe both standalone and chained after another.
-- runFlow:
-    when:
-      notVisible: "Chats"
-    commands:
-      - pressKey: Back
-- assertVisible: "Chats"
-- tapOn:
-    id: "tab-chats"
-# Chat list rows are dynamic/user-generated content, so they stay text-selected.
-- runFlow:
-    when:
-      true: ${CONTACT_NAME != ""}
-    commands:
-      - tapOn: ${CONTACT_NAME}
-- runFlow:
-    when:
-      true: ${CONTACT_NAME == ""}
-    commands:
-      - tapOn:
-          index: 0
-          text: ".*"
+# Get to the Chats list and open the target thread (CONTACT_NAME, or the top thread when blank).
+# Shared with send-message.yaml and two-party/receive-message.yaml.
+- runFlow: lib/open-thread.yaml
 - tapOn:
     id: "call-start-voice"
 # The call screen should come up with a Hang up / End control; end it right away

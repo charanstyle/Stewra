@@ -6,14 +6,7 @@ appId: com.stewra.app
 ---
 # A preceding flow (e.g. call-smoke) may leave us inside a conversation. Return to the Chats
 # list first so this flow is safe both standalone and chained after another.
-- runFlow:
-    when:
-      notVisible: "Chats"
-    commands:
-      - pressKey: Back
-- assertVisible: "Chats"
-- tapOn:
-    id: "tab-chats"
+- runFlow: lib/goto-chats.yaml
 - tapOn:
     id: "logout-btn"
 - extendedWaitUntil:
