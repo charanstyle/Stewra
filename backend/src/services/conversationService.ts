@@ -38,7 +38,8 @@ class ConversationService {
 
   /**
    * Create a `direct` or `group` conversation. `direct` requires exactly one other participant who must
-   * be an active contact. Participant ids are de-duplicated and the creator is always included.
+   * be an active contact, and is a singleton per pair: creating it again returns the existing thread
+   * (like `getOrCreateStewra`). Participant ids are de-duplicated and the creator is always included.
    */
   async create(
     userId: string,
@@ -58,6 +59,16 @@ class ConversationService {
       const other = others[0];
       if (other === undefined || !(await contactService.canContact(userId, other))) {
         throw new ForbiddenError('You can only start a conversation with a contact');
+      }
+      // A direct thread is the pair's single shared history — "start a chat" with the same contact
+      // must land in it, not mint a parallel empty one. Re-adding the memberships clears any prior
+      // soft-leave (same idempotent upsert `addParticipants` uses for groups). Note there is no DB
+      // uniqueness arbiter for a pair (unlike the Stewra singleton's partial index), so two truly
+      // concurrent first-ever creates can still each insert; every later create converges on one.
+      const existing = await conversationRepository.findDirect(userId, other);
+      if (existing !== undefined) {
+        await conversationRepository.addParticipants(existing.id, [userId, other]);
+        return existing;
       }
     }
 

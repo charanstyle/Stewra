@@ -175,6 +175,35 @@ export class ConversationRepository {
     return rows.map(toConversation);
   }
 
+  /**
+   * Find the existing `direct` conversation between two users, if any. Membership is matched
+   * REGARDLESS of soft-leave — a direct thread is the pair's shared history, so "start a chat"
+   * after leaving must resurface it (the caller re-activates the memberships), not mint a parallel
+   * empty one. When accidental duplicates already exist (created before direct threads were
+   * deduplicated), the most-recently-active one wins: that is the thread the pair actually uses.
+   */
+  async findDirect(userA: string, userB: string): Promise<Conversation | undefined> {
+    const row = await db
+      .selectFrom('conversations')
+      .innerJoin(
+        'conversation_participants as pa',
+        'pa.conversation_id',
+        'conversations.id',
+      )
+      .innerJoin(
+        'conversation_participants as pb',
+        'pb.conversation_id',
+        'conversations.id',
+      )
+      .select(QUALIFIED_CONVERSATION_COLUMNS)
+      .where('conversations.type', '=', 'direct')
+      .where('pa.user_id', '=', userA)
+      .where('pb.user_id', '=', userB)
+      .orderBy('conversations.last_message_at', 'desc')
+      .executeTakeFirst();
+    return row ? toConversation(row) : undefined;
+  }
+
   /** Find the user's singleton Stewra-AI conversation, if it has been provisioned. */
   async findStewra(userId: string): Promise<Conversation | undefined> {
     const row = await db
