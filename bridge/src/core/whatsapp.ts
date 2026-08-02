@@ -43,6 +43,12 @@ export interface WhatsappOptions {
   readonly secretStore: SecretStore;
   /** The bridge's own version, reported truthfully as the device version in WhatsApp → Linked Devices. */
   readonly appVersion: string;
+  /**
+   * The device name WhatsApp shows in Linked Devices. Defaults to the product name; the smoke driver
+   * overrides it so a test pairing is tellable from the real one on the phone — the list shows only
+   * this name, never the version. Whatever it says, it must say who we are (see the class comment).
+   */
+  readonly deviceName?: string;
   readonly events: WhatsappEvents;
 }
 
@@ -135,10 +141,15 @@ export class WhatsappClient {
       markOnlineOnConnect: false,
       syncFullHistory: false,
       shouldSyncHistoryMessage: () => false,
+      // Skip the three post-connect "init queries" (props, blocklist, privacy settings): the Bridge
+      // consumes none of their results, and WhatsApp's servers no longer answer the props form this
+      // Baileys version sends (xmlns 'w'/protocol '2' — reworked upstream only in 7.0.0-rc), so it
+      // times out with a logged 408 sixty seconds after every connect. Remove when Baileys 7 lands.
+      fireInitQueries: false,
       // The first field is the device name WhatsApp shows in Linked Devices — it must say who we are.
       // 'Desktop' is the platform type (an icon hint); the third is our version, shown as the device
       // version. See the class comment: this label being honest is what lets the user revoke us.
-      browser: ['Stewra Bridge', 'Desktop', this.options.appVersion],
+      browser: [this.options.deviceName ?? 'Stewra Bridge', 'Desktop', this.options.appVersion],
       // We keep no message store, so we cannot re-send an old message on WhatsApp's request. Returning
       // undefined is honest; inventing something here would be worse than a failed retry.
       getMessage: async () => undefined,

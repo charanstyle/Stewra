@@ -16,8 +16,13 @@
     // same resolution rules the runtime will. The visible cost: relative imports must carry a `.js`
     // extension, even from `.ts` source.
     "module": "nodenext",
-    "moduleResolution": "nodenext"
+    "moduleResolution": "nodenext",
+
+    // "." rather than "src" so the hand-run smoke driver at the package root is typechecked too —
+    // it broke silently once (its assertions went stale against waMapping's append filter) precisely
+    // because nothing compiled it. The build config narrows rootDir back to "src" for emit.
+    "rootDir": "."
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "smoke-selfchat.mts"],
   "exclude": ["dist", "node_modules"]
 }

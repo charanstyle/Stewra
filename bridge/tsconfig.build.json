@@ -1,6 +1,11 @@
 {
-  // What actually ships. The tests are typechecked (see tsconfig.json, which `npm run typecheck` uses)
-  // but never emitted — a packaged desktop app has no business carrying its own test suite around.
+  // What actually ships. The tests and the smoke driver are typechecked (see tsconfig.json, which
+  // `npm run typecheck` uses) but never emitted — a packaged desktop app has no business carrying
+  // its own test suite around.
   "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src"
+  },
+  "include": ["src/**/*"],
   "exclude": ["dist", "node_modules", "src/tests"]
 }
