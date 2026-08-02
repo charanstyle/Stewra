@@ -28,6 +28,13 @@ export interface BridgeEvents {
    * directory behind it, is sent anywhere.
    */
   onChatsChanged(): void;
+  /**
+   * The Stewra socket came up or went down. Deliberately separate from `onState` (which is WhatsApp's):
+   * WhatsApp open with Stewra unreachable is the one shape where the bridge looks alive while every
+   * forwarded message is being dropped (see `StewraClient.inbound`), and the UI must not call that
+   * "connected".
+   */
+  onStewraConnection(connected: boolean): void;
 }
 
 export interface BridgeOptions {
@@ -84,14 +91,12 @@ export class Bridge {
         this.stewra.disconnect();
         options.events.onRevoked();
       },
-      onConnected: () => this.stewra.hello(this.waState),
-      onDisconnected: () => undefined,
+      onConnected: () => {
+        this.stewra.hello(this.waState);
+        options.events.onStewraConnection(true);
+      },
+      onDisconnected: () => options.events.onStewraConnection(false),
     });
-  }
-
-  /** Exchange the pairing code from the web app for a device token. Throws with a message to show. */
-  async pairWithStewra(code: string, deviceName: string): Promise<string> {
-    return this.stewra.claimToken(code, deviceName);
   }
 
   /** Start: connect to Stewra with the saved token, then bring up WhatsApp. */

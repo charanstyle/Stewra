@@ -64,11 +64,6 @@ export class ChatDirectory {
     for (const contact of contacts) this.upsert(contact.id, contact.name, null);
   }
 
-  /** A live message on a chat: the strongest signal a chat exists. `pushName` names the sender. */
-  noteMessage(remoteJid: string, pushName: string | null | undefined, sentAt: Date): void {
-    this.upsert(remoteJid, pushName, Math.floor(sentAt.getTime() / 1000));
-  }
-
   /** Every known chat, most recently active first; unnamed chats fall back to their number. */
   list(): ChatSummary[] {
     return [...this.chats.entries()]

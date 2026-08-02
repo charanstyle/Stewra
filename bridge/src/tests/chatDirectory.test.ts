@@ -75,16 +75,18 @@ describe('ChatDirectory', () => {
     ]);
   });
 
-  it('noteMessage records a live message as activity, named by pushName', () => {
+  it('a live message, arriving as chat activity, names the chat and advances its clock', () => {
+    // This is the production shape for a live message: mapUpsert reduces it to a ChatMeta (pushName
+    // as the name, messageTimestamp in seconds) and it lands here through applyChats.
     const directory = new ChatDirectory();
-    directory.noteMessage('2@s.whatsapp.net', 'Bea', new Date(1_700_000_000_000));
+    directory.applyChats([{ id: '2@s.whatsapp.net', name: 'Bea', timestampSeconds: 1_700_000_000 }]);
 
     expect(directory.list()).toEqual([
       { jid: '2@s.whatsapp.net', displayName: 'Bea', lastActivity: 1_700_000_000_000 },
     ]);
 
     // A later message without a pushName keeps the name and advances the clock.
-    directory.noteMessage('2@s.whatsapp.net', null, new Date(1_700_000_050_000));
+    directory.applyChats([{ id: '2@s.whatsapp.net', name: null, timestampSeconds: 1_700_000_050 }]);
     expect(directory.list()[0]).toEqual({
       jid: '2@s.whatsapp.net',
       displayName: 'Bea',

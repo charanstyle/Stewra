@@ -51,6 +51,11 @@ export interface BridgeUiState {
   /** Whether this device holds a Stewra token. Independent of whether WhatsApp is up. */
   readonly paired: boolean;
   readonly waState: BridgeWaState;
+  /**
+   * Whether the live socket to Stewra is up. Tracked separately from `waState` because WhatsApp open
+   * with Stewra unreachable means forwarded messages are being dropped, and the UI must say so.
+   */
+  readonly stewraConnected: boolean;
   /** The human reason behind a terminal state — a ban, a logout. Shown verbatim, never softened. */
   readonly detail: string | null;
   /** A QR code (PNG `data:` URL) to scan from WhatsApp → Linked Devices. Null unless we are pairing. */

@@ -6,14 +6,14 @@ import { Server } from 'socket.io';
 import type { Namespace, Socket } from 'socket.io';
 import { BRIDGE_CLIENT_EVENTS, BRIDGE_SERVER_EVENTS } from '@stewra/shared-types';
 import type { BridgeSendAck, BridgeSendPayload } from '@stewra/shared-types';
-import { StewraClient } from '../core/stewraClient.js';
+import { StewraClient, claimBridgeToken } from '../core/stewraClient.js';
 import type { StewraClientEvents } from '../core/stewraClient.js';
 
 /**
  * A REAL Socket.IO server on loopback — same namespace (`/bridge`), same engine path
  * (`/api/socket.io`), same auth handshake the backend uses — so what's proven here is the actual
- * wire behaviour of the client, not a re-implementation of it. claimToken is likewise tested against
- * a real local HTTP server. Nothing leaves 127.0.0.1.
+ * wire behaviour of the client, not a re-implementation of it. claimBridgeToken is likewise tested
+ * against a real local HTTP server. Nothing leaves 127.0.0.1.
  */
 const TOKEN = 'device-token-for-tests';
 
@@ -202,7 +202,7 @@ describe('StewraClient against a real /bridge namespace', () => {
   });
 });
 
-describe('StewraClient.claimToken against a real local HTTP server', () => {
+describe('claimBridgeToken against a real local HTTP server', () => {
   let http: HttpServer;
   let baseUrl: string;
   /** What the next request should be answered with. */
@@ -232,8 +232,7 @@ describe('StewraClient.claimToken against a real local HTTP server', () => {
     await new Promise<void>((resolve) => http.close(() => resolve()));
   });
 
-  const makeClient = (): StewraClient =>
-    new StewraClient({ apiBaseUrl: baseUrl, appVersion: '1.1.0' }, recordingEvents().events);
+  const config = (): { apiBaseUrl: string; appVersion: string } => ({ apiBaseUrl: baseUrl, appVersion: '1.1.0' });
 
   it('posts the code and device identity, and returns the minted token', async () => {
     respondWith = {
@@ -241,7 +240,7 @@ describe('StewraClient.claimToken against a real local HTTP server', () => {
       body: JSON.stringify({ data: { token: 'minted-token', device: { id: 'd1', name: 'Mac' } } }),
     };
 
-    const token = await makeClient().claimToken('ABCD-1234', 'Mac');
+    const token = await claimBridgeToken(config(), 'ABCD-1234', 'Mac');
 
     expect(token).toBe('minted-token');
     expect(lastRequest?.url).toBe('/api/channels/whatsapp-personal/bridge-token');
@@ -254,12 +253,12 @@ describe('StewraClient.claimToken against a real local HTTP server', () => {
 
   it('surfaces the server’s own words on a rejection', async () => {
     respondWith = { status: 401, body: JSON.stringify({ message: 'That pairing code is expired' }) };
-    await expect(makeClient().claimToken('OLD-CODE', 'Mac')).rejects.toThrow('That pairing code is expired');
+    await expect(claimBridgeToken(config(), 'OLD-CODE', 'Mac')).rejects.toThrow('That pairing code is expired');
   });
 
   it('refuses a 200 whose body it does not understand — a token guessed from garbage is worse than none', async () => {
     respondWith = { status: 200, body: JSON.stringify({ data: { nope: true } }) };
-    await expect(makeClient().claimToken('ABCD-1234', 'Mac')).rejects.toThrow(
+    await expect(claimBridgeToken(config(), 'ABCD-1234', 'Mac')).rejects.toThrow(
       'Stewra returned a response this bridge did not understand.',
     );
   });

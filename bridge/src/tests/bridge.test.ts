@@ -51,10 +51,11 @@ interface Recorded {
   sessionDestroyed: number;
   revoked: number;
   chatsChanged: number;
+  stewraConnection: boolean[];
 }
 
 function recordingEvents(): { events: BridgeEvents; seen: Recorded } {
-  const seen: Recorded = { states: [], qr: [], sessionDestroyed: 0, revoked: 0, chatsChanged: 0 };
+  const seen: Recorded = { states: [], qr: [], sessionDestroyed: 0, revoked: 0, chatsChanged: 0, stewraConnection: [] };
   return {
     events: {
       onState: (state, message) => {
@@ -71,6 +72,9 @@ function recordingEvents(): { events: BridgeEvents; seen: Recorded } {
       },
       onChatsChanged: () => {
         seen.chatsChanged += 1;
+      },
+      onStewraConnection: (connected) => {
+        seen.stewraConnection.push(connected);
       },
     },
     seen,
@@ -253,6 +257,20 @@ describe('Bridge against a real /bridge loopback server', () => {
     await until(() => seen.sessionDestroyed === 1);
     await expect(readdir(authDir)).rejects.toThrow();
     await until(() => disconnects.length === 1);
+  });
+
+  it('reports the Stewra link coming up, and going down when the server drops it', async () => {
+    const { events, seen } = recordingEvents();
+    await connectedBridge(events);
+
+    await until(() => seen.stewraConnection.length === 1);
+    expect(seen.stewraConnection).toEqual([true]);
+
+    // The server severs the connection — an outage, not a revoke. The UI must learn the link is down,
+    // because a message forwarded now is dropped, not queued.
+    serverSockets[0]?.disconnect(true);
+    await until(() => seen.stewraConnection.length >= 2);
+    expect(seen.stewraConnection[1]).toBe(false);
   });
 
   it('debounces a burst of chat metadata into one repaint, and excludes the self-chat from getChats', async () => {

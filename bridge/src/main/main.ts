@@ -3,6 +3,7 @@ import { BrowserWindow, Menu, Tray, app, dialog, ipcMain, nativeImage, shell } f
 import type { BridgeAllowedChat, BridgeWaState } from '@stewra/shared-types';
 import { normalizeJid } from '../core/allowlist.js';
 import { Bridge } from '../core/bridge.js';
+import { claimBridgeToken } from '../core/stewraClient.js';
 import { loadBridgeConfig } from '../core/config.js';
 import type { BridgeConfig } from '../core/config.js';
 import { AllowedChatsStore, ChatDirectoryCache } from './allowedChatsStore.js';
@@ -26,8 +27,9 @@ import type { BridgeUiState, ChatPickerState, PairRequest, PairResult } from './
  * does. The preload is CommonJS (`.cjs`) because Electron's sandboxed preloads must be.
  */
 
-/** WhatsApp states in which the bridge is genuinely relaying. Everything else is a degraded tray icon. */
-const isLive = (state: BridgeWaState): boolean => state === 'open';
+/** Genuinely relaying means BOTH sides are up — WhatsApp open AND the Stewra socket connected. A
+ * forwarded message with Stewra down is dropped, so a live icon then would be a lie. */
+const isLive = (state: BridgeWaState, stewraConnected: boolean): boolean => state === 'open' && stewraConnected;
 
 let tray: Tray | null = null;
 let window: BrowserWindow | null = null;
@@ -50,6 +52,7 @@ let updateNotice:
 let uiState: BridgeUiState = {
   paired: false,
   waState: 'disconnected',
+  stewraConnected: false,
   detail: null,
   qrDataUrl: null,
   autostart: false,
@@ -84,12 +87,12 @@ function trayTooltip(): string {
     logged_out: 'Stewra Bridge — logged out of WhatsApp',
     banned: 'Stewra Bridge — this WhatsApp account was banned',
   };
-  return labels[uiState.waState];
+  return uiState.stewraConnected ? labels[uiState.waState] : `${labels[uiState.waState]} · Stewra unreachable`;
 }
 
 function refreshTray(): void {
   if (tray === null) return;
-  tray.setImage(trayIcon(isLive(uiState.waState)));
+  tray.setImage(trayIcon(isLive(uiState.waState, uiState.stewraConnected)));
   tray.setToolTip(trayTooltip());
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -229,12 +232,16 @@ function createBridge(activeConfig: BridgeConfig, secrets: SecretStore): Bridge 
         tickedChats = [];
         void allowedChatsStore?.clear();
         void directoryCache?.clear();
-        publish({ paired: false, waState: 'disconnected', qrDataUrl: null, detail: null });
+        publish({ paired: false, waState: 'disconnected', stewraConnected: false, qrDataUrl: null, detail: null });
         pushChatPickerState();
       },
+      onStewraConnection: (connected) => {
+        if (instance !== bridge) return;
+        publish({ stewraConnected: connected });
+      },
       onChatsChanged: () => {
-        // `createBridge` also builds short-lived instances during pairing; only the live bridge's
-        // directory drives the picker and the cache.
+        // A re-link replaces the Bridge; a replaced instance's late events must not keep driving the
+        // picker or the cache.
         if (instance !== bridge) return;
         pushChatPickerState();
         void directoryCache?.write(instance.serializeChatDirectory());
@@ -270,8 +277,7 @@ function registerIpc(activeConfig: BridgeConfig, secrets: SecretStore, store: To
 
       // A fresh pairing: trade the web app's one-time code for this device's own long-lived token.
       if (request.stewraCode !== null) {
-        const pending = createBridge(activeConfig, secrets);
-        token = await pending.pairWithStewra(request.stewraCode, deviceName());
+        token = await claimBridgeToken(activeConfig, request.stewraCode, deviceName());
         await store.write(token);
         publish({ paired: true });
       }
@@ -299,7 +305,7 @@ function registerIpc(activeConfig: BridgeConfig, secrets: SecretStore, store: To
     tickedChats = [];
     await allowedChatsStore?.clear();
     await directoryCache?.clear();
-    publish({ paired: false, waState: 'disconnected', qrDataUrl: null, detail: null });
+    publish({ paired: false, waState: 'disconnected', stewraConnected: false, qrDataUrl: null, detail: null });
     pushChatPickerState();
   });
 

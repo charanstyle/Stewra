@@ -28,6 +28,39 @@ const claimResponseSchema = z.object({
   }),
 });
 
+/**
+ * Trade the one-time pairing code from the web app for this device's long-lived token.
+ *
+ * Unauthenticated by design: the bridge has no user session and must never be given one. Handing a
+ * desktop app the user's access token would hand it their whole Stewra account, when all it needs is
+ * permission to relay messages — and permission the user can take back with one click.
+ *
+ * A free function, not a method: pairing happens before any Bridge exists, and needing to construct
+ * a whole Bridge (WhatsApp client and all) just to make one REST call invited exactly that.
+ */
+export async function claimBridgeToken(config: BridgeConfig, code: string, deviceName: string): Promise<string> {
+  const response = await fetch(`${config.apiBaseUrl}/api/channels/whatsapp-personal/bridge-token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, deviceName, appVersion: config.appVersion }),
+    // Without this, a hung connection leaves the pairing UI on "Linking…" forever with no error.
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    const message =
+      typeof body === 'object' && body !== null && typeof Reflect.get(body, 'message') === 'string'
+        ? String(Reflect.get(body, 'message'))
+        : 'Stewra rejected that pairing code.';
+    throw new Error(message);
+  }
+
+  const parsed = claimResponseSchema.safeParse(await response.json());
+  if (!parsed.success) throw new Error('Stewra returned a response this bridge did not understand.');
+  return parsed.data.data.token;
+}
+
 export interface StewraClientEvents {
   /** The server asked us to send a message on WhatsApp. Returns what actually happened. */
   onSend(payload: BridgeSendPayload): Promise<BridgeSendAck>;
@@ -52,36 +85,6 @@ export class StewraClient {
     private readonly config: BridgeConfig,
     private readonly events: StewraClientEvents,
   ) {}
-
-  /**
-   * Trade the one-time pairing code from the web app for this device's long-lived token.
-   *
-   * Unauthenticated by design: the bridge has no user session and must never be given one. Handing a
-   * desktop app the user's access token would hand it their whole Stewra account, when all it needs is
-   * permission to relay messages — and permission the user can take back with one click.
-   */
-  async claimToken(code: string, deviceName: string): Promise<string> {
-    const response = await fetch(`${this.config.apiBaseUrl}/api/channels/whatsapp-personal/bridge-token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, deviceName, appVersion: this.config.appVersion }),
-      // Without this, a hung connection leaves the pairing UI on "Linking…" forever with no error.
-      signal: AbortSignal.timeout(15_000),
-    });
-
-    if (!response.ok) {
-      const body: unknown = await response.json().catch(() => null);
-      const message =
-        typeof body === 'object' && body !== null && typeof Reflect.get(body, 'message') === 'string'
-          ? String(Reflect.get(body, 'message'))
-          : 'Stewra rejected that pairing code.';
-      throw new Error(message);
-    }
-
-    const parsed = claimResponseSchema.safeParse(await response.json());
-    if (!parsed.success) throw new Error('Stewra returned a response this bridge did not understand.');
-    return parsed.data.data.token;
-  }
 
   /** Open the `/bridge` namespace with this device's token. Reconnection is Socket.IO's problem. */
   connect(token: string): void {

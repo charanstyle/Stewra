@@ -99,9 +99,15 @@ const DOT_CLASS: Record<BridgeUiState['waState'], string> = {
 };
 
 function render(state: BridgeUiState): void {
-  dot.className = `dot ${DOT_CLASS[state.waState]}`.trim();
+  // WhatsApp open with Stewra unreachable is the one shape where everything LOOKS fine while every
+  // forwarded message is dropped. The dot downgrades and the detail line says so — a green dot then
+  // would be the dishonest kind of reassurance.
+  const stewraDown = state.paired && !state.stewraConnected;
+  const dotClass = stewraDown && state.waState === 'open' ? 'busy' : DOT_CLASS[state.waState];
+  dot.className = `dot ${dotClass}`.trim();
   statusLabel.textContent = state.paired ? LABELS[state.waState] : 'Not paired with Stewra';
-  statusDetail.textContent = state.detail ?? '';
+  statusDetail.textContent =
+    state.detail ?? (stewraDown ? 'Stewra is unreachable — messages are not relayed until it reconnects.' : '');
 
   const linked = state.paired && state.waState === 'open';
   const showingQr = state.qrDataUrl !== null;

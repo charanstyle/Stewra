@@ -67,7 +67,9 @@ feature violates one of these, it doesn't ship — that restraint *is* the produ
 
 ### Explicitly NOT in scope for v1
 - Any outbound action (no sending email, no moving money, no accepting invites). That's the *point*.
-- WhatsApp / iMessage / any messaging surface without a sanctioned API.
+- iMessage / any messaging surface without a sanctioned API. (Amended alongside principle 7:
+  WhatsApp is in — Meta's official Cloud API as the default channel, plus the experimental
+  user-hosted bridge permitted only under principle 7's conditions.)
 - Multi-user / team / enterprise anything.
 - A configuration UI for permissions.
 
