@@ -1,22 +1,22 @@
-import makeWASocket, { DisconnectReason, fetchLatestBaileysVersion, jidNormalizedUser } from '@whiskeysockets/baileys';
-import type { WASocket, proto } from '@whiskeysockets/baileys';
-import QRCode from 'qrcode';
+import makeWASocket, { fetchLatestBaileysVersion, jidNormalizedUser } from '@whiskeysockets/baileys';
+import type { WASocket } from '@whiskeysockets/baileys';
 import type { BridgeWaState } from '@stewra/shared-types';
-import { decideReconnect } from './reconnect.js';
+import { decideCloseAction } from './closePolicy.js';
 import { useEncryptedAuthState } from './authState.js';
 import type { SecretStore } from './authState.js';
 import type { ChatMeta } from './chatDirectory.js';
+import { extractLid, extractStatusCode, mapUpsert, metas, renderQr } from './waMapping.js';
+import type { WhatsappMessage } from './waMapping.js';
 
-/** One WhatsApp message, reduced to what the bridge is willing to look at. */
-export interface WhatsappMessage {
-  readonly providerMessageId: string;
-  readonly remoteJid: string;
-  readonly fromMe: boolean;
-  readonly text: string;
-  readonly sentAt: Date;
-}
+export type { WhatsappMessage } from './waMapping.js';
 
 export interface WhatsappEvents {
+  /**
+   * WhatsApp opened AND told us who we are. Fired before `onState('open')`, so the allowlist gate
+   * exists by the time anyone reacts to the state change. Identity arrives as data on purpose: the
+   * consumer never has to reach into a live socket to learn it.
+   */
+  onOpen(identity: { readonly ownJid: string; readonly ownLid: string | null }): void;
   /** State changed. `message` carries the human reason on a terminal state (logged out, banned). */
   onState(state: BridgeWaState, message?: string): void;
   /** A message arrived. NOT yet filtered — the caller runs it through the allowlist gate. */
@@ -47,22 +47,6 @@ export interface WhatsappOptions {
 }
 
 /**
- * How many fresh QR sessions to open before giving up. WhatsApp rotates the QR a handful of times within
- * one socket (~2 minutes) and then closes it with a 408; each round below re-opens for another ~2 minutes
- * of scanning. Past a few rounds the honest move is to stop and tell the user, not to keep re-registering
- * against WhatsApp forever.
- */
-const MAX_QR_ROUNDS = 3;
-
-/** The text of a message, or null for anything we do not handle (media, reactions, protocol messages). */
-function extractText(message: proto.IWebMessageInfo): string | null {
-  const content = message.message;
-  if (!content) return null;
-  const text = content.conversation ?? content.extendedTextMessage?.text ?? null;
-  return text !== null && text.trim().length > 0 ? text : null;
-}
-
-/**
  * The WhatsApp connection — the thing that only ever exists on the user's own computer.
  *
  * Every option in `connect()` below is load-bearing, and two of them are the difference between a bridge
@@ -79,6 +63,9 @@ function extractText(message: proto.IWebMessageInfo): string | null {
  *
  * We do NOT attempt to look like real WhatsApp Web. No evasion, ever — we would be helping a user break a
  * rule while telling them they were safe.
+ *
+ * All the decisions live in pure modules (`waMapping.ts`, `closePolicy.ts`, `reconnect.ts`) with their
+ * own tests; this class is the shell that feeds them from `sock.ev` and applies what they return.
  */
 export class WhatsappClient {
   private sock: WASocket | null = null;
@@ -99,16 +86,14 @@ export class WhatsappClient {
   }
 
   /**
-   * The user's own LID (`…@lid`), once connected — WhatsApp's newer per-account address. Null before that,
-   * and null on accounts WhatsApp has not assigned one. The self-chat can arrive addressed by the LID
-   * rather than the phone JID, so the allowlist gate needs this to recognise it. Read defensively: the LID
-   * is not part of Baileys' published `user` shape in every version, so we do not depend on the type.
+   * The user's own LID (`…@lid`), once connected — WhatsApp's newer per-account address. Null before
+   * that, and null on accounts WhatsApp has not assigned one. The self-chat can arrive addressed by the
+   * LID rather than the phone JID, so the allowlist gate needs this to recognise it.
    */
   get ownLid(): string | null {
     const user = this.sock?.user;
     if (user === null || user === undefined) return null;
-    const lid = Reflect.get(user, 'lid');
-    return typeof lid === 'string' && lid.length > 0 ? lid : null;
+    return extractLid(user);
   }
 
   /**
@@ -168,9 +153,9 @@ export class WhatsappClient {
       // A brand-new session gets a QR here, re-emitted every ~20s as WhatsApp rotates it. Rendering it is
       // async (PNG encoding); a QR we cannot render is not fatal — the next rotation will arrive shortly.
       if (update.qr !== undefined && update.qr !== null) {
-        void QRCode.toDataURL(update.qr, { margin: 2, width: 320 })
-          .then((dataUrl) => this.options.events.onQr(dataUrl))
-          .catch(() => undefined);
+        void renderQr(update.qr).then((dataUrl) => {
+          if (dataUrl !== null) this.options.events.onQr(dataUrl);
+        });
       }
 
       if (update.connection === 'open') {
@@ -178,6 +163,10 @@ export class WhatsappClient {
         this.replacedAttempt = 0;
         this.pairingActive = false;
         this.pairingAttempt = 0;
+        const user = sock.user;
+        if (user !== null && user !== undefined && user.id.length > 0) {
+          this.options.events.onOpen({ ownJid: jidNormalizedUser(user.id), ownLid: extractLid(user) });
+        }
         this.options.events.onState('open');
         return;
       }
@@ -188,28 +177,8 @@ export class WhatsappClient {
 
     // ── the local chat directory's feeds ─────────────────────────────────────────────────────────────
     // Everything below only ever powers the picker UI on this machine (see onChatsMeta). Baileys hands
-    // metadata over in several shapes; they are all reduced to ChatMeta here so core/chatDirectory.ts
+    // metadata over in several shapes; waMapping.ts reduces them all to ChatMeta so core/chatDirectory.ts
     // stays free of Baileys types.
-    const toMeta = (item: {
-      id?: string | null | undefined;
-      name?: string | null | undefined;
-      notify?: string | null | undefined;
-      verifiedName?: string | null | undefined;
-      conversationTimestamp?: unknown;
-    }): ChatMeta | null => {
-      if (item.id === null || item.id === undefined || item.id.length === 0) return null;
-      const seconds = Number(item.conversationTimestamp ?? 0);
-      return {
-        id: item.id,
-        // Best label available: the address-book/chat name, else a business's verified name, else the
-        // push name the person broadcasts.
-        name: item.name ?? item.verifiedName ?? item.notify ?? null,
-        timestampSeconds: Number.isFinite(seconds) && seconds > 0 ? seconds : null,
-      };
-    };
-    const metas = (items: readonly Parameters<typeof toMeta>[0][]): ChatMeta[] =>
-      items.map(toMeta).filter((m): m is ChatMeta => m !== null);
-
     sock.ev.on('messaging-history.set', ({ chats, contacts }) => {
       this.options.events.onChatsMeta({ chats: metas(chats), contacts: metas(contacts) });
     });
@@ -218,55 +187,31 @@ export class WhatsappClient {
     sock.ev.on('contacts.upsert', (contacts) => this.options.events.onChatsMeta({ contacts: metas(contacts) }));
     sock.ev.on('contacts.update', (updates) => this.options.events.onChatsMeta({ contacts: metas(updates) }));
 
-    sock.ev.on('messages.upsert', ({ messages, type }) => {
-      // Directory first, for EVERY batch: 'append' history is never acted on (below), but a chat having
-      // history is exactly what makes it pickable. A fromMe pushName is the USER'S OWN name — never let
-      // it become the label of someone else's chat.
-      const chatActivity = metas(
-        messages.map((message) => ({
-          id: message.key.remoteJid,
-          name: message.key.fromMe === true ? null : (message.pushName ?? null),
-          conversationTimestamp: message.messageTimestamp,
-        })),
-      );
-      if (chatActivity.length > 0) this.options.events.onChatsMeta({ chats: chatActivity });
+    sock.ev.on('messages.upsert', (event) => {
+      const outcome = mapUpsert(event);
 
-      // `append` is history//sync filling in; only `notify` is a message arriving now. Acting on `append`
-      // would make Stewra answer messages from days ago the moment a bridge comes online.
-      if (type !== 'notify') {
+      if (outcome.chatActivity.length > 0) this.options.events.onChatsMeta({ chats: outcome.chatActivity });
+
+      // `append` is history sync filling in; only `notify` is a message arriving now.
+      if (!outcome.actedOn) {
         console.error(
-          `Stewra Bridge: ignoring ${messages.length} '${type}' message(s) — only live 'notify' ` +
-            'messages are acted on.',
+          `Stewra Bridge: ignoring ${event.messages.length} '${event.type}' message(s) — only live ` +
+            "'notify' messages are acted on.",
         );
         return;
       }
 
-      for (const message of messages) {
-        const remoteJid = message.key.remoteJid;
-        const providerMessageId = message.key.id;
-        if (remoteJid === null || remoteJid === undefined) continue;
-        if (providerMessageId === null || providerMessageId === undefined) continue;
-
-        const text = extractText(message);
-        if (text === null) {
-          console.error(
-            `Stewra Bridge: a non-text message on ${remoteJid} (fromMe=${message.key.fromMe === true}) — ` +
-              'out of scope for v1, dropped.',
-          );
-          continue; // Media, reactions, receipts — out of scope for v1, and dropped here.
-        }
-
+      for (const drop of outcome.dropped) {
         console.error(
-          `Stewra Bridge: message on ${remoteJid} (fromMe=${message.key.fromMe === true}) → allowlist gate.`,
+          `Stewra Bridge: a non-text message on ${drop.remoteJid} (fromMe=${drop.fromMe}) — ` +
+            'out of scope for v1, dropped.',
         );
-        const seconds = Number(message.messageTimestamp ?? 0);
-        this.options.events.onMessage({
-          providerMessageId,
-          remoteJid,
-          fromMe: message.key.fromMe === true,
-          text,
-          sentAt: seconds > 0 ? new Date(seconds * 1000) : new Date(),
-        });
+      }
+      for (const message of outcome.live) {
+        console.error(
+          `Stewra Bridge: message on ${message.remoteJid} (fromMe=${message.fromMe}) → allowlist gate.`,
+        );
+        this.options.events.onMessage(message);
       }
     });
   }
@@ -290,6 +235,7 @@ export class WhatsappClient {
    * ⚠️ `sock.end()`, NEVER `sock.logout()`. `logout()` PERMANENTLY UNLINKS the device from the user's
    * WhatsApp account — quitting the app would silently destroy their session and force a re-pair every
    * single launch. One method name apart, unrecoverable, and the user would blame the ban warning.
+   * (Enforced statically: eslint bans the `logout` property throughout bridge/src/core.)
    */
   stop(): void {
     this.stopping = true;
@@ -310,7 +256,7 @@ export class WhatsappClient {
     this.options.events.onSessionDestroyed();
   }
 
-  /** Apply the disconnect table. Everything hard about this lives in `decideReconnect`, which is pure. */
+  /** Apply the close table. Everything hard about it lives in `decideCloseAction`, which is pure. */
   private async handleClose(
     lastDisconnect: { error?: Error | undefined } | undefined,
     clearCredentials: () => Promise<void>,
@@ -326,70 +272,49 @@ export class WhatsappClient {
       lastDisconnect?.error?.message ?? 'no error reported',
     );
 
-    // A close in the middle of pairing means the QR on screen expired with the socket (WhatsApp cycles a
-    // few QR refs, ~2 minutes, then closes with a 408 "QR refs attempts ended"). The disconnect table
-    // below must NOT see this: an unscanned QR half-populates the credentials, so a plain reconnect would
-    // try to LOG IN with them and draw a terminal 401. Wipe the partial registration and register again
-    // from scratch, which puts a fresh QR on screen.
-    //
-    // ⚠️ EXCEPT a 515 (restartRequired). WhatsApp sends exactly that the instant a scan SUCCEEDS —
-    // "pairing configured successfully, expect to restart the connection". At that moment the creds are
-    // freshly registered but `registered` may not have flushed to our in-memory view yet, so this branch
-    // would otherwise wipe a link that just worked and loop forever on a new QR. A 515 is the pairing
-    // completing; hand it to `decideReconnect`, which reconnects immediately and logs in.
-    if (statusCode !== DisconnectReason.restartRequired && !isRegistered() && this.pairingActive) {
-      await clearCredentials();
-      this.pairingAttempt += 1;
-      if (this.pairingAttempt >= MAX_QR_ROUNDS) {
-        this.pairingActive = false;
-        this.pairingAttempt = 0;
-        this.options.events.onState(
-          'disconnected',
-          'The QR code expired before it was scanned, several times over. Click "Link WhatsApp" to show a fresh one, and scan it from WhatsApp → Linked Devices right away — each code only lives a couple of minutes.',
-        );
-        return;
-      }
-      this.options.events.onState('pairing');
-      this.reconnectTimer = setTimeout(() => {
-        void this.connect().catch(() => {
-          this.options.events.onState('disconnected', 'Stewra Bridge could not reach WhatsApp.');
-        });
-      }, 1_000);
-      return;
-    }
-
-    const decision = decideReconnect({
+    const action = decideCloseAction({
       statusCode,
+      isRegistered: isRegistered(),
+      pairingActive: this.pairingActive,
+      pairingAttempt: this.pairingAttempt,
       attempt: this.attempt,
       replacedAttempt: this.replacedAttempt,
     });
 
-    if (decision.kind === 'stop') {
-      if (decision.wipeCredentials) {
+    switch (action.kind) {
+      case 'wipe-and-retry':
         await clearCredentials();
-        this.options.events.onSessionDestroyed();
-      }
-      this.options.events.onState(decision.waState, decision.message);
-      return;
+        this.pairingAttempt = action.nextPairingAttempt;
+        this.options.events.onState('pairing');
+        this.scheduleReconnect(action.delayMs);
+        return;
+      case 'pairing-give-up':
+        await clearCredentials();
+        this.pairingActive = false;
+        this.pairingAttempt = 0;
+        this.options.events.onState('disconnected', action.message);
+        return;
+      case 'stop':
+        if (action.wipeCredentials) {
+          await clearCredentials();
+          this.options.events.onSessionDestroyed();
+        }
+        this.options.events.onState(action.waState, action.message);
+        return;
+      case 'reconnect':
+        if (action.countsAsAttempt) this.attempt += 1;
+        if (action.bumpReplaced) this.replacedAttempt += 1;
+        this.options.events.onState('connecting');
+        this.scheduleReconnect(action.delayMs);
+        return;
     }
+  }
 
-    if (decision.countsAsAttempt) this.attempt += 1;
-    if (statusCode === 440) this.replacedAttempt += 1;
-
-    this.options.events.onState('connecting');
+  private scheduleReconnect(delayMs: number): void {
     this.reconnectTimer = setTimeout(() => {
       void this.connect().catch(() => {
         this.options.events.onState('disconnected', 'Stewra Bridge could not reach WhatsApp.');
       });
-    }, decision.delayMs);
+    }, delayMs);
   }
-}
-
-/** Baileys reports the reason as a Boom error; the code is the only part of it we act on. */
-function extractStatusCode(error: Error | undefined): number | undefined {
-  if (error === undefined) return undefined;
-  const output = Reflect.get(error, 'output');
-  if (typeof output !== 'object' || output === null) return undefined;
-  const statusCode = Reflect.get(output, 'statusCode');
-  return typeof statusCode === 'number' ? statusCode : undefined;
 }

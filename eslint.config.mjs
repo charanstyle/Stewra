@@ -65,6 +65,23 @@ export default tseslint.config(
     rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
   {
+    // The one catastrophic method: sock.logout() PERMANENTLY UNLINKS the device from the user's
+    // WhatsApp account — quitting the app would silently destroy their session on every launch. A test
+    // can only prove today's code doesn't call it; this proves no future line in bridge core can.
+    // Use sock.end(undefined) — see WhatsappClient.stop().
+    files: ['bridge/src/core/**/*.ts'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          property: 'logout',
+          message:
+            "logout() PERMANENTLY UNLINKS the device from the user's WhatsApp account. Use sock.end(undefined) — see WhatsappClient.stop().",
+        },
+      ],
+    },
+  },
+  {
     // Plane boundary: the agent runtime has no direct DB / control-plane / egress access.
     files: ['packages/agent-runtime/src/**/*.ts'],
     rules: {

@@ -1,7 +1,7 @@
 import type { BridgeAllowedChat, BridgeSendAck, BridgeSendPayload, BridgeWaState } from '@stewra/shared-types';
 import { AllowlistGate } from './allowlist.js';
 import { ChatDirectory } from './chatDirectory.js';
-import type { ChatSummary } from './chatDirectory.js';
+import type { ChatMeta, ChatSummary } from './chatDirectory.js';
 import type { BridgeConfig } from './config.js';
 import { StewraClient } from './stewraClient.js';
 import { WhatsappClient } from './whatsapp.js';
@@ -35,6 +35,11 @@ export interface BridgeOptions {
   readonly authDir: string;
   readonly secretStore: SecretStore;
   readonly events: BridgeEvents;
+  /**
+   * How long to coalesce chat-directory bursts before one `onChatsChanged` repaint. A behaviour knob
+   * (default 1s); tests pass a short real value and await it — never a faked clock.
+   */
+  readonly chatsChangedDebounceMs?: number;
 }
 
 /**
@@ -61,15 +66,12 @@ export class Bridge {
       secretStore: options.secretStore,
       appVersion: options.config.appVersion,
       events: {
+        onOpen: (identity) => this.handleWaOpen(identity),
         onState: (state, message) => this.handleWaState(state, message),
-        onMessage: (message) => this.handleMessage(message),
+        onMessage: (message) => this.handleWaMessage(message),
         onQr: (qrDataUrl) => options.events.onQr(qrDataUrl),
         onSessionDestroyed: () => options.events.onSessionDestroyed(),
-        onChatsMeta: (update) => {
-          if (update.chats !== undefined) this.directory.applyChats(update.chats);
-          if (update.contacts !== undefined) this.directory.applyContacts(update.contacts);
-          this.scheduleChatsChanged();
-        },
+        onChatsMeta: (update) => this.handleWaChatsMeta(update),
       },
     });
 
@@ -94,7 +96,17 @@ export class Bridge {
 
   /** Start: connect to Stewra with the saved token, then bring up WhatsApp. */
   async start(token: string): Promise<void> {
+    this.connectStewra(token);
+    await this.connectWhatsapp();
+  }
+
+  /** Bring up the Stewra side alone. Split from `start` so tests can run it against a loopback server. */
+  connectStewra(token: string): void {
     this.stewra.connect(token);
+  }
+
+  /** Bring up the WhatsApp side alone. Always hits the real WhatsApp servers — the smoke layer's territory. */
+  async connectWhatsapp(): Promise<void> {
     await this.whatsapp.connect();
   }
 
@@ -132,36 +144,45 @@ export class Bridge {
     this.directory.hydrate(json);
   }
 
-  /** Debounce ~1s: history sync delivers hundreds of events in bursts, and one repaint is enough. */
+  /** Debounce: history sync delivers hundreds of events in bursts, and one repaint is enough. */
   private scheduleChatsChanged(): void {
     if (this.chatsChangedTimer !== null) return;
     this.chatsChangedTimer = setTimeout(() => {
       this.chatsChangedTimer = null;
       this.options.events.onChatsChanged();
-    }, 1_000);
+    }, this.options.chatsChangedDebounceMs ?? 1_000);
   }
 
-  private handleWaState(state: BridgeWaState, message?: string): void {
+  /**
+   * WhatsApp opened and reported who we are — the WhatsApp-event entry point for identity. Public so
+   * tests can drive the real pipeline with real event data; in production only the constructor wiring
+   * calls it. The gate is (re)built here, before anyone reacts to the 'open' state.
+   */
+  handleWaOpen(identity: { readonly ownJid: string; readonly ownLid: string | null }): void {
+    // The LID matters because WhatsApp addresses the self-chat by it on some clients; logging both here
+    // is what let us diagnose a self-message being dropped as "not_allowed" when it arrived as a LID.
+    console.error(
+      `Stewra Bridge: WhatsApp open as ${identity.ownJid}` +
+        `${identity.ownLid !== null ? ` (lid ${identity.ownLid})` : ''}.`,
+    );
+    this.gate = new AllowlistGate(identity.ownJid, identity.ownLid ?? undefined);
+    this.gate.setAllowed(this.tickedChats);
+    this.syncAllowedChats();
+  }
+
+  /** WhatsApp state changed — a WhatsApp-event entry point (public for the same reason as above). */
+  handleWaState(state: BridgeWaState, message?: string): void {
     this.waState = state;
-
-    if (state === 'open') {
-      const ownJid = this.whatsapp.ownJid;
-      if (ownJid !== null) {
-        const ownLid = this.whatsapp.ownLid;
-        // The LID matters because WhatsApp addresses the self-chat by it on some clients; logging both here
-        // is what let us diagnose a self-message being dropped as "not_allowed" when it arrived as a LID.
-        console.error(
-          `Stewra Bridge: WhatsApp open as ${ownJid}${ownLid !== null ? ` (lid ${ownLid})` : ''}.`,
-        );
-        this.gate = new AllowlistGate(ownJid, ownLid ?? undefined);
-        this.gate.setAllowed(this.tickedChats);
-        this.syncAllowedChats();
-      }
-    }
-
     // Tell the server, so the web app's status dot is the truth rather than a guess.
     this.stewra.state(state);
     this.options.events.onState(state, message);
+  }
+
+  /** Chat/contact metadata arrived — a WhatsApp-event entry point (public for the same reason as above). */
+  handleWaChatsMeta(update: { readonly chats?: readonly ChatMeta[]; readonly contacts?: readonly ChatMeta[] }): void {
+    if (update.chats !== undefined) this.directory.applyChats(update.chats);
+    if (update.contacts !== undefined) this.directory.applyContacts(update.contacts);
+    this.scheduleChatsChanged();
   }
 
   private syncAllowedChats(): void {
@@ -177,8 +198,10 @@ export class Bridge {
    * If the user has not ticked this chat, the function returns. Stewra's servers never learn that the
    * message existed, never learn who sent it, never learn that the chat exists at all. There is no
    * `fetch` on this path to accidentally leave in — that is what makes the promise checkable.
+   *
+   * A WhatsApp-event entry point, public so tests can prove exactly that promise on a real wire.
    */
-  private handleMessage(message: WhatsappMessage): void {
+  handleWaMessage(message: WhatsappMessage): void {
     if (this.gate === null) {
       console.error('Stewra Bridge: a message arrived before WhatsApp finished connecting; dropped.');
       return;

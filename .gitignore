@@ -48,3 +48,7 @@ coverage/
 /runner/build/
 /bridge/release/
 /dist-release/
+
+# The live smoke driver's WhatsApp session (bridge/smoke-selfchat.mts) — REAL linked-device
+# credentials for the QA account. Committing this would publish a working WhatsApp session.
+/bridge/.smoke-session/
