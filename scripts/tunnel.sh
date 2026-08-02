@@ -12,6 +12,11 @@
 #
 # Both forwards ride the ControlMaster connection defined for `home` in ~/.ssh/config, so this is
 # cheap to re-run and safe to run twice: an already-established forward is reported, not duplicated.
+#
+# A launchd agent (scripts/com.stewra.tunnel.plist) re-runs this every 5 minutes so the master never
+# hits its ControlPersist idle timeout. It runs a COPY at ~/Library/Application Support/Stewra/
+# (TCC blocks launchd from this exFAT volume) — after editing this file, refresh the copy:
+#   cp scripts/tunnel.sh ~/Library/Application\ Support/Stewra/tunnel.sh
 
 set -euo pipefail
 
