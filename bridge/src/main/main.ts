@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { BrowserWindow, Menu, Tray, app, dialog, ipcMain, nativeImage, shell } from 'electron';
 import type { BridgeAllowedChat, BridgeWaState } from '@stewra/shared-types';
@@ -7,7 +8,9 @@ import { claimBridgeToken } from '../core/stewraClient.js';
 import { loadBridgeConfig } from '../core/config.js';
 import type { BridgeConfig } from '../core/config.js';
 import { AllowedChatsStore, ChatDirectoryCache } from './allowedChatsStore.js';
+import { Autostart, AutostartDecision, linuxExecPath, startedAtLogin } from './autostart.js';
 import { BAKED_API_URL } from './bakedConfig.js';
+import { linuxKeyStorageBackend } from './keyStorageBackend.js';
 import { createSafeStorageSecretStore } from './secretStore.js';
 import { TokenStore } from './tokenStore.js';
 import { quitAndInstall, startUpdater } from './updater.js';
@@ -37,6 +40,8 @@ let bridge: Bridge | null = null;
 let tokenStore: TokenStore | null = null;
 let allowedChatsStore: AllowedChatsStore | null = null;
 let directoryCache: ChatDirectoryCache | null = null;
+let autostart: Autostart | null = null;
+let autostartDecision: AutostartDecision | null = null;
 /** The chats the user ticked, as synced to the gate and the server. Loaded from disk at boot. */
 let tickedChats: readonly BridgeAllowedChat[] = [];
 /** Set only by the tray's Quit item. Closing the window HIDES it — a bridge that quit is a bridge that
@@ -56,6 +61,8 @@ let uiState: BridgeUiState = {
   detail: null,
   qrDataUrl: null,
   autostart: false,
+  autostartAvailable: false,
+  autostartJustEnabled: false,
   appVersion: '0.0.0',
   apiBaseUrl: '',
 };
@@ -125,10 +132,12 @@ function refreshTray(): void {
         : []),
       { label: 'Open Stewra Bridge', click: () => showWindow() },
       {
-        label: 'Start at login',
+        // A tray-only user never sees the window's explanation, so the label carries it: without this the
+        // checkbox would simply refuse to stay ticked, with nothing on screen saying why.
+        label: uiState.autostartAvailable ? 'Start at login' : 'Start at login (packaged app only)',
         type: 'checkbox',
         checked: uiState.autostart,
-        click: (item) => setAutostart(item.checked),
+        click: (item) => void setAutostart(item.checked),
       },
       { type: 'separator' },
       { label: 'Quit', click: () => { quitting = true; app.quit(); } },
@@ -182,9 +191,72 @@ function showWindow(): void {
 
 // ─── lifecycle ───────────────────────────────────────────────────────────────────────────────────────
 
-function setAutostart(enabled: boolean): void {
-  app.setLoginItemSettings({ openAtLogin: enabled });
-  publish({ autostart: enabled });
+/**
+ * Register — or clear — "start at login", and reflect what the OS says is true afterwards.
+ *
+ * Every refusal and platform quirk lives in `autostart.ts`; this is only the wiring plus how a failure
+ * reaches the user. A failure is never silent: the bridge not coming back after a reboot is precisely the
+ * complaint this feature exists to answer, so the reason is put on screen and on stderr.
+ */
+async function setAutostart(enabled: boolean): Promise<void> {
+  if (autostart === null) {
+    console.error('Stewra Bridge: start-at-login was toggled before the app finished starting; ignored.');
+    return;
+  }
+  try {
+    const registered = await autostart.write(enabled);
+    publish({ autostart: registered, autostartJustEnabled: false });
+    if (enabled && !registered) {
+      publish({
+        detail:
+          'macOS has not approved Stewra Bridge as a login item. Allow it in System Settings → General → ' +
+          'Login Items, or the bridge will not come back after a restart.',
+      });
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`Stewra Bridge: could not change start-at-login: ${reason}`);
+    // The attempt failed, so the setting is whatever it was BEFORE it: off if we were enabling, still on
+    // if we were disabling. Echoing the attempted value would tell the user the exact opposite of the truth.
+    publish({ autostart: !enabled, autostartJustEnabled: false, detail: reason });
+  }
+}
+
+/**
+ * Turn autostart on by itself, once, when a computer first pairs.
+ *
+ * A bridge that is not running is a Stewra that has silently stopped relaying WhatsApp — the user finds
+ * out from a reply that never came. Leaving that behind an unticked box in a footer put the burden on
+ * people who had no way to know it mattered, so pairing now opts them in and SAYS SO, with one click to
+ * undo it.
+ *
+ * Exactly once, though. The decision is remembered before the write, so somebody who deliberately turns
+ * it off is never quietly re-enrolled by a later re-pair.
+ */
+async function enableAutostartOnFirstPair(): Promise<void> {
+  if (autostart === null || autostartDecision === null || !autostart.available) return;
+  if (await autostartDecision.decided()) return;
+  await autostartDecision.remember(new Date().toISOString());
+  if (await autostart.read()) return;
+
+  try {
+    const registered = await autostart.write(true);
+    publish({ autostart: registered, autostartJustEnabled: registered });
+  } catch (error) {
+    // Pairing SUCCEEDED. Failing it over a convenience setting would throw away the thing the user
+    // actually came to do — but the failure is still reported, never swallowed.
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`Stewra Bridge: could not turn on start-at-login after pairing: ${reason}`);
+    publish({ detail: `Stewra Bridge could not turn on "start at login": ${reason}` });
+  }
+}
+
+/** `~/.config/autostart`, honouring `XDG_CONFIG_HOME` where the session sets it. */
+function xdgAutostartDir(): string {
+  const configHome = process.env['XDG_CONFIG_HOME'];
+  return configHome !== undefined && configHome.trim().length > 0
+    ? join(configHome.trim(), 'autostart')
+    : join(homedir(), '.config', 'autostart');
 }
 
 /** The picker's view: every known chat, most recent first, with its tick. Composed fresh per ask. */
@@ -269,7 +341,10 @@ async function startBridge(
 function registerIpc(activeConfig: BridgeConfig, secrets: SecretStore, store: TokenStore): void {
   ipcMain.handle(IPC.GET_STATE, (): BridgeUiState => uiState);
 
-  ipcMain.handle(IPC.SET_AUTOSTART, (_event, enabled: boolean): void => setAutostart(enabled));
+  ipcMain.handle(IPC.SET_AUTOSTART, (_event, enabled: boolean): Promise<void> => setAutostart(enabled));
+
+  // Dismiss only — the setting itself is untouched. The banner has served its purpose once it has been read.
+  ipcMain.handle(IPC.DISMISS_AUTOSTART_NOTICE, (): void => publish({ autostartJustEnabled: false }));
 
   ipcMain.handle(IPC.PAIR, async (_event, request: PairRequest): Promise<PairResult> => {
     try {
@@ -287,6 +362,9 @@ function registerIpc(activeConfig: BridgeConfig, secrets: SecretStore, store: To
       }
 
       await startBridge(activeConfig, secrets, token);
+      // After the bridge is up, not before: opting someone into "start at login" is only meaningful once
+      // the thing that will start actually works.
+      await enableAutostartOnFirstPair();
       return { ok: true, error: null };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Stewra Bridge could not pair.';
@@ -336,6 +414,13 @@ function deviceName(): string {
   return `Stewra Bridge on ${process.env['HOSTNAME'] ?? process.env['COMPUTERNAME'] ?? 'this computer'}`;
 }
 
+// Ask for a real keyring on Linux desktops Chromium does not recognise, BEFORE `app.whenReady()` —
+// command-line switches are read during Chromium startup. See keyStorageBackend.ts for why.
+const keyStorageBackend = linuxKeyStorageBackend(process.platform, process.argv, process.env);
+if (keyStorageBackend !== null) {
+  app.commandLine.appendSwitch('password-store', keyStorageBackend);
+}
+
 // A second copy would fight the first for the same WhatsApp session — `connectionReplaced`, on loop. That
 // is precisely the reconnect storm that gets accounts flagged.
 if (!app.requestSingleInstanceLock()) {
@@ -369,6 +454,18 @@ if (!app.requestSingleInstanceLock()) {
       return;
     }
 
+    autostart = new Autostart({
+      platform: process.platform,
+      packaged: app.isPackaged,
+      autostartDir: xdgAutostartDir(),
+      execPath: linuxExecPath(process.env, process.execPath),
+      loginItem: {
+        read: (): boolean => app.getLoginItemSettings().openAtLogin,
+        write: (enabled: boolean): void => app.setLoginItemSettings({ openAtLogin: enabled }),
+      },
+    });
+    autostartDecision = new AutostartDecision(app.getPath('userData'));
+
     tokenStore = new TokenStore(app.getPath('userData'), secrets);
     allowedChatsStore = new AllowedChatsStore(app.getPath('userData'), secrets);
     directoryCache = new ChatDirectoryCache(app.getPath('userData'), secrets);
@@ -378,7 +475,10 @@ if (!app.requestSingleInstanceLock()) {
     uiState = {
       ...uiState,
       paired: token !== null,
-      autostart: app.getLoginItemSettings().openAtLogin,
+      // The real registration, not what we last set: a stale entry left by an earlier run must be VISIBLE
+      // in the checkbox, because unticking it is how the user clears it.
+      autostart: await autostart.read(),
+      autostartAvailable: autostart.available,
       appVersion: activeConfig.appVersion,
       apiBaseUrl: activeConfig.apiBaseUrl,
     };
@@ -405,8 +505,8 @@ if (!app.requestSingleInstanceLock()) {
 
     // Launched at login: come up in the tray and start relaying, without stealing focus. Showing a window
     // every time someone logs in is how a helper app gets uninstalled.
-    const startedAtLogin = app.getLoginItemSettings().wasOpenedAtLogin;
-    if (!startedAtLogin) showWindow();
+    // `wasOpenedAtLogin` is macOS-only; the Linux entry passes `--hidden` so this holds on both.
+    if (!startedAtLogin(process.argv, app.getLoginItemSettings().wasOpenedAtLogin)) showWindow();
 
     // An existing session resumes with no phone number and no pairing code — WhatsApp is not asked for
     // anything it does not need.

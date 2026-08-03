@@ -71,6 +71,10 @@ const stewraCodeInput = inputEl('stewra-code');
 const pairButton = buttonEl('pair');
 const unpairButton = buttonEl('unpair');
 const autostartInput = inputEl('autostart');
+const autostartNote = el('autostart-note');
+const autostartBanner = el('autostart-banner');
+const autostartOffButton = buttonEl('autostart-off');
+const autostartOkButton = buttonEl('autostart-ok');
 const versionText = el('version');
 const apiText = el('api');
 const chatList = el('chat-list');
@@ -123,6 +127,10 @@ function render(state: BridgeUiState): void {
   // Only touch the src when there is a QR; assigning '' would fire a broken-image request under the CSP.
   if (state.qrDataUrl !== null) pairingQr.src = state.qrDataUrl;
   autostartInput.checked = state.autostart;
+  // The box stays operable even when unavailable: unticking is how a registration left by a dev run gets
+  // cleared, and disabling the control would strand the user with the very thing the note warns about.
+  autostartNote.hidden = state.autostartAvailable;
+  autostartBanner.hidden = !state.autostartJustEnabled;
   versionText.textContent = `v${state.appVersion}`;
   apiText.textContent = state.apiBaseUrl;
 }
@@ -200,6 +208,16 @@ function submitTicks(): void {
 
 autostartInput.addEventListener('change', () => {
   void stewra.setAutostart(autostartInput.checked);
+});
+
+// Both buttons dismiss the banner; only one of them changes the setting. Neither re-renders by hand —
+// the main process publishes the new state and `render` follows, so what is shown is what is registered.
+autostartOffButton.addEventListener('click', () => {
+  void stewra.setAutostart(false);
+});
+
+autostartOkButton.addEventListener('click', () => {
+  void stewra.dismissAutostartNotice();
 });
 
 stewra.onStateChanged(render);

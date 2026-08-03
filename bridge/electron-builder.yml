@@ -12,9 +12,15 @@ appId: com.stewra.bridge
 productName: Stewra Bridge
 copyright: Stewra
 
-# The Electron version comes from the installed `electron` devDependency (electron-builder reads the
-# resolved package). Never pin `electronVersion` here — a pin silently drifts from the lockfile and
-# ships a different runtime than the one developed and tested against.
+# The Electron version comes from the `electron` devDependency in bridge/package.json, which is pinned
+# EXACT (no `^`) for a reason: electron-builder cannot accept a range, and its fallback — reading the
+# version out of the installed package — looks only under bridge/, while npm workspaces hoist electron to
+# the repo root. With a range declared, every `npm run package*` script aborts with "Electron version
+# ... is a range, not a fixed version" before building anything.
+#
+# Never pin `electronVersion` HERE instead: a pin in this file has no relationship to what npm installs,
+# so it drifts from the lockfile and ships a different runtime than the one developed and tested against.
+# The devDependency is the single source of truth; bumping Electron means bumping it there.
 
 directories:
   # NOT `dist` — that is the TypeScript compiler's output; installers go somewhere separate.
@@ -77,6 +83,27 @@ linux:
   category: Network
   maintainer: Stewra <noreply@stewra.com>
   icon: build/icon.png
+
+deb:
+  # electron-builder's default Depends list omits ALSA entirely, but Electron links libasound.so.2 at
+  # runtime. On a desktop that already pulled it in via something else the install works by luck; on a
+  # minimal install it does not, and the failure is a bare loader error with no mention of audio:
+  #   stewra-bridge: error while loading shared libraries: libasound.so.2: cannot open shared object file
+  # Verified on a clean Debian 13 VM. Setting `depends` REPLACES the default list rather than adding to
+  # it, so every default below is repeated verbatim — dropping one silently reintroduces this class of bug.
+  # `libasound2t64 | libasound2` spans the 64-bit-time_t rename: trixie/noble ship libasound2t64, older
+  # releases ship libasound2, and an alternative satisfies whichever one the target has.
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - libasound2t64 | libasound2
 
 mac:
   # dmg is what users download; zip is what electron-updater applies (Squirrel.Mac cannot update from

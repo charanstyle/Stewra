@@ -122,6 +122,17 @@
           </p>
         </div>
 
+        <div id="autostart-banner" class="notice" hidden>
+          <p>
+            Stewra Bridge will now start when you log in, so your messages keep flowing without you
+            opening it each time.
+          </p>
+          <div class="notice-actions">
+            <button id="autostart-off" type="button" class="link">Turn this off</button>
+            <button id="autostart-ok" type="button" class="link">Got it</button>
+          </div>
+        </div>
+
         <button id="unpair" type="button" class="danger">Unlink this computer</button>
       </section>
 
@@ -130,6 +141,10 @@
           <input id="autostart" type="checkbox" />
           <span>Start Stewra Bridge when I log in</span>
         </label>
+        <p id="autostart-note" class="meta" hidden>
+          Only available in the packaged app. This is a development run, so logging in would start
+          Electron rather than Stewra Bridge.
+        </p>
         <p class="meta">
           <span id="version"></span> · <span id="api"></span>
         </p>

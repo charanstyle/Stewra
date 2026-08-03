@@ -25,11 +25,17 @@ export function createSafeStorageSecretStore(): SecretStore {
   // steps, and trusting it would mean writing a live WhatsApp session to disk in effectively-plaintext
   // while this app told the user it was safe. Refuse, and say exactly why.
   if (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text') {
+    // Don't state that no keyring is RUNNING — that claim was wrong in the one case we reproduced. On a
+    // Debian 13 XFCE box with gnome-keyring installed, running and unlocked, Chromium still landed on
+    // `basic_text` purely because it did not recognise the desktop. `selectLinuxKeyStorageBackend()` in
+    // main.ts now names the backend, so reaching here means the keyring is genuinely absent or
+    // unreachable — but the message should describe both, since the user cannot tell them apart.
     throw new Error(
-      'Stewra Bridge cannot start: no system keyring is running, so your WhatsApp session cannot be ' +
-        'encrypted at rest. (Linux would otherwise fall back to a hardcoded key, which is not real ' +
+      'Stewra Bridge cannot start: no usable system keyring was found, so your WhatsApp session cannot ' +
+        'be encrypted at rest. (Linux would otherwise fall back to a hardcoded key, which is not real ' +
         'encryption — anyone who could read the file could sign in as you on WhatsApp.) Install and ' +
-        'start gnome-keyring or kwallet, then open Stewra Bridge again.',
+        'start gnome-keyring or kwallet — and if one is already running, make sure its login keyring is ' +
+        'unlocked — then open Stewra Bridge again.',
     );
   }
 

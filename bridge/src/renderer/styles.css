@@ -146,6 +146,45 @@ h1 {
   margin-top: 1px;
 }
 
+/* Shown once, just after pairing switched "start at login" on by itself. Deliberately NOT styled as a
+   warning: nothing has gone wrong. It reports a change made to the user's machine on their behalf and
+   puts the undo right next to it. */
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 13px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+
+.notice p {
+  margin: 0;
+}
+
+.notice-actions {
+  display: flex;
+  gap: 14px;
+}
+
+/* A text button. The undo has to be easy to reach without visually competing with "Unlink this
+   computer" sitting directly beneath it. */
+.link {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
 .panel {
   display: flex;
   flex-direction: column;

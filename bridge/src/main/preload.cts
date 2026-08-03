@@ -14,6 +14,7 @@ const IPC: typeof IPC_CONTRACT = {
   PAIR: 'stewra:pair',
   UNPAIR: 'stewra:unpair',
   SET_AUTOSTART: 'stewra:set-autostart',
+  DISMISS_AUTOSTART_NOTICE: 'stewra:dismiss-autostart-notice',
   STATE_CHANGED: 'stewra:state-changed',
   GET_CHATS: 'stewra:get-chats',
   SET_TICKED_CHATS: 'stewra:set-ticked-chats',
@@ -24,7 +25,7 @@ const IPC: typeof IPC_CONTRACT = {
  * The only bridge between the renderer and Node — and it is a keyhole, not a door.
  *
  * The renderer is sandboxed, context-isolated and has no Node integration. It cannot read the WhatsApp
- * session, cannot reach the filesystem, cannot open a socket. It can call the five functions below and
+ * session, cannot reach the filesystem, cannot open a socket. It can call the functions below and
  * nothing else. That matters because the renderer is the one part of this app that renders remote-ish
  * content (names and text that came from WhatsApp), and it is therefore the part most worth containing.
  *
@@ -36,6 +37,7 @@ const api: StewraBridgeApi = {
   pair: (request: PairRequest): Promise<PairResult> => ipcRenderer.invoke(IPC.PAIR, request),
   unpair: (): Promise<void> => ipcRenderer.invoke(IPC.UNPAIR),
   setAutostart: (enabled: boolean): Promise<void> => ipcRenderer.invoke(IPC.SET_AUTOSTART, enabled),
+  dismissAutostartNotice: (): Promise<void> => ipcRenderer.invoke(IPC.DISMISS_AUTOSTART_NOTICE),
   onStateChanged: (listener: (state: BridgeUiState) => void): void => {
     // The event object is dropped deliberately: it carries a `sender` handle that has no business
     // crossing into page context.

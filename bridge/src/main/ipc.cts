@@ -19,6 +19,8 @@ export const IPC = {
   /** renderer → main, invoke. Wipe the WhatsApp session and this device's Stewra token. */
   UNPAIR: 'stewra:unpair',
   SET_AUTOSTART: 'stewra:set-autostart',
+  /** renderer → main, invoke. Hide the "we turned this on for you" banner. Does not change the setting. */
+  DISMISS_AUTOSTART_NOTICE: 'stewra:dismiss-autostart-notice',
   /** main → renderer, send. Pushed on every state change; the UI never polls. */
   STATE_CHANGED: 'stewra:state-changed',
   /** renderer → main, invoke. The pickable chats + current ticks, for the picker. */
@@ -61,6 +63,23 @@ export interface BridgeUiState {
   /** A QR code (PNG `data:` URL) to scan from WhatsApp → Linked Devices. Null unless we are pairing. */
   readonly qrDataUrl: string | null;
   readonly autostart: boolean;
+  /**
+   * Whether "start at login" can actually be turned ON. False in a development run.
+   *
+   * macOS's login-item API registers whichever app bundle is CURRENTLY RUNNING and gives no way to point
+   * somewhere else — `path`/`args` are Windows-only. In `npm start` the running bundle is Electron's own
+   * (`electron/dist/Electron.app`), so ticking the box would schedule macOS to launch bare Electron at
+   * every login: it comes up on Electron's default welcome window, with no bridge behind it.
+   *
+   * Turning it OFF stays allowed even when this is false — clearing a bad registration is the repair.
+   */
+  readonly autostartAvailable: boolean;
+  /**
+   * True only in the moment after pairing turned autostart on by itself, so the window can say so. The
+   * user is told what changed on their machine and given one click to undo it — enrolling someone
+   * silently would be the kind of thing people uninstall an app over.
+   */
+  readonly autostartJustEnabled: boolean;
   readonly appVersion: string;
   /** Shown in the UI so the user can see which server this bridge talks to. It is never guessed. */
   readonly apiBaseUrl: string;
@@ -87,6 +106,7 @@ export interface StewraBridgeApi {
   pair(request: PairRequest): Promise<PairResult>;
   unpair(): Promise<void>;
   setAutostart(enabled: boolean): Promise<void>;
+  dismissAutostartNotice(): Promise<void>;
   onStateChanged(listener: (state: BridgeUiState) => void): void;
   getChats(): Promise<ChatPickerState>;
   /**
