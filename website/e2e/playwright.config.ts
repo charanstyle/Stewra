@@ -23,6 +23,9 @@ export default defineConfig({
     ['list'],
     ['html', { outputFolder: '.artifacts/report', open: 'never' }],
     ['json', { outputFile: '.artifacts/results.json' }],
+    // Prints why each skipped test skipped, and fails the run when E2E_MAX_SKIPS is exceeded.
+    // Without it a skip is a dash in a 100-line list and the summary counts it next to "passed".
+    ['./skip-reporter.mjs'],
   ],
   outputDir: '.artifacts/test-results',
   use: {

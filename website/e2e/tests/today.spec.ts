@@ -8,6 +8,12 @@
 // checks below use `test.skip(...)` rather than failing — mirroring the original's
 // `return 'skip: ...'` early-outs.
 //
+// That leniency is scoped to "nothing provisioned this run". Once E2E_DATABASE_URL is set, the
+// nudge preconditions are the suite's own responsibility (beforeAll provisions them), so the same
+// emptiness becomes a failure — see `requireNudges`. Before that split, eight of these tests skipped
+// on a run that HAD a database configured, and the suite reported green having checked almost
+// nothing about the page.
+//
 // Deviation from the original: today.mjs ran everything as one continuous script against a
 // single page, so steps 6-10 (expand → draft → snooze → dismiss → chat-about-this) shared one
 // already-expanded card across steps. Playwright tests are isolated (fresh page per test), so
@@ -19,12 +25,23 @@ import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures';
 import { WEB, apiCall } from '../lib.mjs';
 import { config } from '../config.mjs';
-import { dbEnabled, openNeedsReplyNudges, restoreNudges } from '../seed.mjs';
+import {
+  dbEnabled,
+  openNeedsReplyNudges,
+  restoreNudges,
+  seedNeedsReplyNudges,
+  cleanupSeededNudges,
+  NoSeedableThreadError,
+} from '../seed.mjs';
 
 interface SuggestionLike {
   readonly id: string;
   readonly title: string;
 }
+
+// How many nudges the action tests need: snooze and dismiss each consume one, expand/draft/chat
+// share the rest.
+const NUDGES_NEEDED = 4;
 
 // When E2E_DATABASE_URL is set, surface a handful of A's already-triaged needs_reply nudges as
 // `open` so the action tests (expand/draft/snooze/dismiss/chat) actually run, then restore their
@@ -36,6 +53,37 @@ async function openSuggestions(): Promise<SuggestionLike[]> {
   return (res.json?.data?.suggestions ?? []) as SuggestionLike[];
 }
 
+/**
+ * Why provisioning could not happen, or null when it did. Set once in beforeAll, and it is the
+ * ONLY reason these tests are allowed to step aside — see `requireNudges`.
+ */
+let noProvisioningReason: string | null = null;
+
+/**
+ * The precondition for every nudge-action test below, stated once.
+ *
+ * The suite previously skipped identically whether the environment could not provide a nudge or
+ * the product failed to produce one, so a run that asserted nothing about Today reported exactly
+ * like one that asserted everything. Now there are two distinct outcomes:
+ *
+ *   • `noProvisioningReason` set → skip, with the specific unmet precondition as the reason, which
+ *     the skip reporter prints and counts at the end of the run. Nothing was provisioned, so there
+ *     is genuinely nothing to assert against.
+ *   • provisioning succeeded but `/home/suggestions` came back empty → FAIL. The nudges exist in
+ *     the database; the endpoint or the page is what is broken.
+ */
+function requireNudges(suggestions: readonly SuggestionLike[], what: string): void {
+  if (suggestions.length > 0) {
+    return;
+  }
+  test.skip(noProvisioningReason !== null, `${what} — ${noProvisioningReason}`);
+  expect(
+    suggestions.length,
+    `beforeAll provisioned ${NUDGES_NEEDED} nudge(s) successfully, but GET /home/suggestions ` +
+      `returned none (${what})`,
+  ).toBeGreaterThan(0);
+}
+
 /** Expand the nudge card whose collapsed header contains `title`, returning its header locator. */
 function nudgeHeader(page: Page, title: string) {
   return page.getByRole('button', { expanded: false }).filter({ hasText: title }).first();
@@ -43,13 +91,36 @@ function nudgeHeader(page: Page, title: string) {
 
 test.describe('today', () => {
   test.beforeAll(async () => {
-    if (dbEnabled) {
-      // 4 covers the two consuming actions (snooze, dismiss) plus expand/draft/chat headroom.
-      nudgeSnapshot = await openNeedsReplyNudges(config.users.a.email, 4);
+    if (!dbEnabled) {
+      noProvisioningReason =
+        'E2E_DATABASE_URL is not set, so no nudge could be provisioned (see seed.mjs)';
+      return;
+    }
+    // Prefer re-opening the user's own already-triaged nudges — those are real rows with real
+    // threads, and afterAll puts their exact prior status back. Top up with seeded ones only when
+    // there are not enough, which is what A's fully-triaged inbox actually hits.
+    nudgeSnapshot = await openNeedsReplyNudges(config.users.a.email, NUDGES_NEEDED);
+    const shortfall = NUDGES_NEEDED - nudgeSnapshot.length;
+    if (shortfall > 0) {
+      try {
+        await seedNeedsReplyNudges(config.users.a.email, shortfall);
+      } catch (err) {
+        // Only this one condition is a precondition rather than a defect: the account has no email
+        // data at all, so there is nothing for a nudge to point at. Anything else — a bad
+        // connection string, a schema change, a constraint violation — is a broken seed and must
+        // propagate and red the suite rather than masquerade as an empty inbox.
+        if (!(err instanceof NoSeedableThreadError)) {
+          throw err;
+        }
+        noProvisioningReason = err.message;
+      }
     }
   });
 
   test.afterAll(async () => {
+    // Sweep first, restore second: the sweep is by prefix and cannot touch the snapshotted rows, and
+    // running it unconditionally means a failure mid-suite still leaves the account clean.
+    await cleanupSeededNudges(config.users.a.email);
     await restoreNudges(nudgeSnapshot);
     nudgeSnapshot = [];
   });
@@ -110,7 +181,7 @@ test.describe('today', () => {
 
   test('Expand nudge reveals decision prompt', async ({ pageA }) => {
     const suggestions = await openSuggestions();
-    test.skip(suggestions.length === 0, 'no nudges to expand');
+    requireNudges(suggestions, 'no nudges to expand');
     const title = suggestions[0].title;
 
     await pageA.goto(`${WEB}/today`, { waitUntil: 'networkidle' });
@@ -126,13 +197,17 @@ test.describe('today', () => {
 
   test('Draft a reply returns draft text', async ({ pageA }) => {
     const suggestions = await openSuggestions();
-    test.skip(suggestions.length === 0, 'no nudges');
+    requireNudges(suggestions, 'no nudges to draft a reply for');
     const title = suggestions[0].title;
 
     await pageA.goto(`${WEB}/today`, { waitUntil: 'networkidle' });
     await nudgeHeader(pageA, title).click();
     const draftOption = pageA.getByRole('button', { name: 'Draft a reply' }).first();
-    test.skip(!(await draftOption.isVisible().catch(() => false)), 'first nudge has no reply option');
+    // Every provisioned nudge carries a reply_email option by construction — re-opened ones are
+    // selected on `jsonb_array_length(options) > 0`, seeded ones are built with one. Once
+    // provisioning has succeeded this is a real failure, not an inapplicable case.
+    const hasReplyOption = await draftOption.isVisible().catch(() => false);
+    expect(hasReplyOption, 'provisioned nudge is missing its "Draft a reply" option').toBe(true);
 
     await draftOption.click();
     await pageA.getByText('Draft ready — review it in Chat.').waitFor({ state: 'visible', timeout: 45000 });
@@ -142,7 +217,7 @@ test.describe('today', () => {
 
   test('Snooze removes nudge from the list', async ({ pageA }) => {
     const suggestions = await openSuggestions();
-    test.skip(suggestions.length === 0, 'no nudges');
+    requireNudges(suggestions, 'no nudges to snooze');
     const title = suggestions[0].title;
 
     await pageA.goto(`${WEB}/today`, { waitUntil: 'networkidle' });
@@ -156,7 +231,7 @@ test.describe('today', () => {
 
   test('Dismiss removes nudge and persists across reload', async ({ pageA }) => {
     const open = await openSuggestions();
-    test.skip(open.length === 0, 'nothing left to dismiss');
+    requireNudges(open, 'nothing left to dismiss');
     const target = open[0].title;
 
     await pageA.goto(`${WEB}/today`, { waitUntil: 'networkidle' });
@@ -171,7 +246,7 @@ test.describe('today', () => {
 
   test('Chat-about-this deep-links into /stewra', async ({ pageA }) => {
     const open = await openSuggestions();
-    test.skip(open.length === 0, 'no nudges to chat about');
+    requireNudges(open, 'no nudges to chat about');
     const target = open[0].title;
 
     await pageA.goto(`${WEB}/today`, { waitUntil: 'networkidle' });

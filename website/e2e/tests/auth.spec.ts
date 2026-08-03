@@ -52,6 +52,11 @@ test.describe('auth', () => {
   // afterwards (`audit_log` references `users` with ON DELETE SET NULL, and the append-only
   // trigger rejects that UPDATE), so each run leaves one permanent account behind.
   test('complete sign-up / email verification via UI', async ({ browser }) => {
+    // The suite default is 120s, and `waitForVerificationCode` alone budgets DEFAULT_TIMEOUT_MS =
+    // 120_000 (mailbox.mjs) — so on a perfectly healthy site the mail poll can consume the entire
+    // test before the form is even submitted, and the failure looks like a product bug rather than
+    // a budget one. Give the whole arc (register → deliver → poll IMAP → verify → land) room.
+    test.setTimeout(240_000);
     test.skip(
       !config.signup.enabled,
       'set E2E_SIGNUP_MAILBOX (+ E2E_SIGNUP_SSH_HOST, E2E_SIGNUP_IMAP_CONTAINER) to run — ' +

@@ -9,8 +9,24 @@
 // It therefore needs a runner actually ONLINE with an available harness + a workspace (pair one with
 // `npx @stewra/runner pair <code>` and leave it running). With no runner online the test `test.skip(...)`s
 // — same graceful-precondition discipline as the DB-gated lifecycle specs — rather than red the suite.
+// Set E2E_REQUIRE_RUNNER=1 to withdraw that leniency when the run is specifically about the runner.
 import { test, expect } from '../fixtures';
 import { WEB, apiCall, uiHasTestids } from '../lib.mjs';
+import { env } from '../env.mjs';
+
+// A run that is MEANT to cover the runner must not be able to quietly not. Set E2E_REQUIRE_RUNNER=1
+// when a machine is paired and this spec is the reason you are running the suite: the graceful
+// skips below become failures, so "I paired a runner and the suite went green" can only mean the
+// card actually worked — not that the device went offline and the spec stepped aside.
+const requireRunner = env.E2E_REQUIRE_RUNNER === '1';
+
+/** Skip on an unmet precondition, unless the run declared it must be met. */
+function skipUnlessRequired(unmet: boolean, reason: string): void {
+  if (unmet && requireRunner) {
+    throw new Error(`E2E_REQUIRE_RUNNER=1 but ${reason}`);
+  }
+  test.skip(unmet, reason);
+}
 
 // The card's harness labels, mirrored from `ProposedRunnerSessionCard.tsx` so the NL ask names the agent
 // the way a human would.
@@ -27,7 +43,7 @@ test.describe('runner', () => {
     test.setTimeout(420_000);
     // 1. Load the app and confirm the running build carries the testid contract (else prod isn't redeployed).
     await pageA.goto(`${WEB}/chats`, { waitUntil: 'domcontentloaded' });
-    test.skip(
+    skipUnlessRequired(
       !(await uiHasTestids(pageA)),
       'requires the website data-testid contract (app-nav sentinel absent) — deploy website first',
     );
@@ -47,7 +63,7 @@ test.describe('runner', () => {
         d.workspaces.length > 0 &&
         d.harnesses.some((h) => h.available && HARNESS_LABELS[h.id] !== undefined),
     );
-    test.skip(
+    skipUnlessRequired(
       device === undefined,
       'no online runner with a harness + workspace — pair one (`npx @stewra/runner pair`) and keep it running',
     );
