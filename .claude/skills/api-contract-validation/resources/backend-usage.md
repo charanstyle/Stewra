@@ -1,8 +1,12 @@
 # Backend API Contract Usage
 
+> **Read the corrections after each block.** The examples below illustrate *shared-type usage* and
+> are otherwise **not** this repo's conventions — `userController.ts` and `userService.ts` do not
+> exist. For the real controller shape, read `backend/src/controllers/activityController.ts`.
+
 ## Controller Usage
 
-**File**: `backend/src/controllers/userController.ts`
+**Illustrative** — no such file.
 
 ```typescript
 import { Request, Response } from 'express';
@@ -74,9 +78,28 @@ export class UserController extends BaseController {
 }
 ```
 
+### Four things above that are wrong for this repo
+
+1. **`req.body as CreateUserRequest` is a cast, not validation.** A cast asserts a shape over
+   untrusted input without checking it — the exact failure the shared types are meant to prevent.
+   Parse it: `const data = parse(createUserSchema, req.body)`. Same for
+   `req.query as unknown as ListUsersRequest`, where the double cast is the tell.
+2. **`sendSuccess` does not exist.** `BaseController` exposes `handleSuccess(res, data, statusCode)`
+   and `handleError(error, res, context)`. There is no message argument — the response shape is
+   `ApiResponse<T>`, which has no `message` field.
+3. **There is no `@/` path alias.** `backend` is ESM with relative imports and mandatory `.js`
+   extensions: `import { BaseController } from './baseController.js'`.
+4. **Every method is missing its `try`/`catch`.** Express 4 does not catch rejected promises and
+   routes call controllers as `void controller.method(req, res)`, so an un-caught rejection here
+   becomes an `unhandledRejection` rather than a 500.
+
+What the block *does* get right, and the reason it exists: request and response types both come
+from `@stewra/shared-types`, and the response is annotated (`const response: CreateUserResponse =`)
+so a drift between backend and client is a compile error rather than a runtime surprise.
+
 ## Service Usage
 
-**File**: `backend/src/services/userService.ts`
+**Illustrative** — no such file.
 
 ```typescript
 import {
@@ -88,22 +111,24 @@ import {
   ListUsersResponse,
   User
 } from '@stewra/shared-types';
-import { prisma } from '@/config/database';
+import { db } from '../database/index.js';
 import { hashPassword, generateTokens } from '@/utils/auth';
 
 export class UserService {
   async createUser(data: CreateUserRequest): Promise<CreateUserResponse> {
     const hashedPassword = await hashPassword(data.password);
 
-    const user = await prisma.user.create({
-      data: {
+    const user = await db
+      .insertInto('users')
+      .values({
         username: data.username,
         email: data.email,
-        password: hashedPassword,
-        firstName: data.firstName,
-        lastName: data.lastName
-      }
-    });
+        password_hash: hashedPassword,
+        first_name: data.firstName,
+        last_name: data.lastName
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
 
     const tokens = generateTokens(user.userId);
 
@@ -119,28 +144,32 @@ export class UserService {
       throw new Error('User ID is required');
     }
 
-    const user = await prisma.user.update({
-      where: { userId: data.userId },
-      data: {
-        firstName: data.firstName,
-        lastName: data.lastName,
+    const user = await db
+      .updateTable('users')
+      .set({
+        first_name: data.firstName,
+        last_name: data.lastName,
         bio: data.bio,
-        profilePicture: data.profilePicture
-      }
-    });
+        profile_picture: data.profilePicture
+      })
+      .where('id', '=', data.userId)
+      .returningAll()
+      .executeTakeFirstOrThrow();
 
     return this.mapToUser(user);
   }
 
   async getUser(data: GetUserRequest): Promise<User> {
-    const user = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { userId: data.userId },
-          { username: data.username }
-        ]
-      }
-    });
+    const user = await db
+      .selectFrom('users')
+      .selectAll()
+      .where((eb) =>
+        eb.or([
+          eb('id', '=', data.userId),
+          eb('username', '=', data.username)
+        ])
+      )
+      .executeTakeFirst();
 
     if (!user) {
       throw new Error('User not found');
@@ -154,33 +183,36 @@ export class UserService {
     const pageSize = data.pageSize || 20;
     const skip = (page - 1) * pageSize;
 
-    const [users, total] = await Promise.all([
-      prisma.user.findMany({
-        where: data.search ? {
-          OR: [
-            { username: { contains: data.search, mode: 'insensitive' } },
-            { firstName: { contains: data.search, mode: 'insensitive' } },
-            { lastName: { contains: data.search, mode: 'insensitive' } }
-          ]
-        } : undefined,
-        skip,
-        take: pageSize,
-        orderBy: data.sortBy ? { [data.sortBy]: data.sortOrder || 'asc' } : undefined
-      }),
-      prisma.user.count({
-        where: data.search ? {
-          OR: [
-            { username: { contains: data.search } },
-            { firstName: { contains: data.search } },
-            { lastName: { contains: data.search } }
-          ]
-        } : undefined
-      })
+    // One predicate, shared by the page query and the count, so the two can never disagree
+    // about what is being counted.
+    const matchesSearch = (eb: ExpressionBuilder<Database, 'users'>) =>
+      eb.or([
+        eb('username', 'ilike', `%${data.search}%`),
+        eb('first_name', 'ilike', `%${data.search}%`),
+        eb('last_name', 'ilike', `%${data.search}%`)
+      ]);
+    const hasSearch = data.search !== undefined && data.search.length > 0;
+
+    const [users, counted] = await Promise.all([
+      db
+        .selectFrom('users')
+        .selectAll()
+        .$if(hasSearch, (q) => q.where(matchesSearch))
+        .$if(data.sortBy !== undefined, (q) => q.orderBy(data.sortBy, data.sortOrder ?? 'asc'))
+        .offset(skip)
+        .limit(pageSize)
+        .execute(),
+      db
+        .selectFrom('users')
+        .select((eb) => eb.fn.countAll<string>().as('total'))
+        .$if(hasSearch, (q) => q.where(matchesSearch))
+        .executeTakeFirstOrThrow()
     ]);
 
     return {
       users: users.map(u => this.mapToUser(u)),
-      total,
+      // Postgres COUNT(*) is bigint, which `pg` hands back as a string — parse it, never cast it.
+      total: Number(counted.total),
       page,
       pageSize
     };

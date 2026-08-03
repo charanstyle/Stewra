@@ -45,7 +45,7 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 **Covers:**
 - Layered architecture (Routes → Controllers → Services → Repositories)
 - BaseController pattern
-- Prisma database access
+- Kysely database access
 - Sentry error tracking
 - Zod validation
 - UnifiedConfig pattern
@@ -55,7 +55,7 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 **Use when:**
 - Creating/modifying API routes
 - Building controllers or services
-- Database operations with Prisma
+- Database operations with Kysely
 - Setting up error tracking
 
 **Customization:** ⚠️ Update `pathPatterns` in skill-rules.json to match your backend directories
@@ -157,33 +157,6 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 
 ---
 
-### route-tester
-**Purpose:** Testing authenticated API routes with JWT cookie auth
-
-**Files:** 1 main file (389 lines)
-
-**Covers:**
-- JWT cookie-based authentication testing
-- test-auth-route.js script patterns
-- cURL with cookie authentication
-- Debugging auth issues
-- Testing POST/PUT/DELETE operations
-
-**Use when:**
-- Testing API endpoints
-- Debugging authentication
-- Validating route functionality
-
-**Customization:** ⚠️ Requires JWT cookie auth setup
-
-**Ask first:** "Do you use JWT cookie-based authentication?"
-- If YES: Copy and customize service URLs
-- If NO: Skip or adapt for your auth method
-
-**[View Skill →](route-tester/)**
-
----
-
 ### error-tracking
 **Purpose:** Sentry error tracking and monitoring patterns
 
@@ -223,7 +196,7 @@ Claude should:
 4. Verify integration
 ```
 
-See [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md) for complete instructions.
+See the [skill-developer](skill-developer/) skill for complete instructions.
 
 ### Manual Integration
 
@@ -270,7 +243,7 @@ Defines when skills should activate based on:
 - **Keywords** in user prompts ("backend", "API", "route")
 - **Intent patterns** (regex matching user intent)
 - **File path patterns** (editing backend files)
-- **Content patterns** (code contains Prisma queries)
+- **Content patterns** (code contains Kysely queries)
 
 ### Configuration Format
 
@@ -286,7 +259,7 @@ Defines when skills should activate based on:
     },
     "fileTriggers": {
       "pathPatterns": ["path/to/files/**/*.ts"],
-      "contentPatterns": ["import.*Prisma"]
+      "contentPatterns": ["from '../database"]
     }
   }
 }
@@ -388,7 +361,7 @@ Update skill-rules.json:
 
 **When integrating a skill for a user:**
 
-1. **Read [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md)** first
+1. **Read the [skill-developer](skill-developer/) skill** first
 2. Ask about their project structure
 3. Customize `pathPatterns` in skill-rules.json
 4. Verify the skill file has no hardcoded paths
@@ -408,4 +381,4 @@ Update skill-rules.json:
 3. **Add more:** Once first skill works, add others
 4. **Customize:** Adjust triggers based on your workflow
 
-**Questions?** See [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md) for comprehensive integration instructions.
+**Questions?** See the [skill-developer](skill-developer/) skill for comprehensive integration instructions.

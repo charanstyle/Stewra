@@ -69,13 +69,7 @@
             },
             "fileTriggers": {
                 "pathPatterns": [
-                    "blog-api/src/**/*.ts",
-                    "auth-service/src/**/*.ts",
-                    "notifications-service/src/**/*.ts",
-                    "backend/**/*.ts",
-                    "api/**/*.ts",
-                    "server/**/*.ts",
-                    "services/**/*.ts"
+                    "backend/**/*.ts"
                 ],
                 "pathExclusions": [
                     "**/*.test.ts",
@@ -211,41 +205,6 @@
                 "envOverride": "SKIP_REACT_NATIVE_GUIDELINES"
             }
         },
-        "route-tester": {
-            "type": "domain",
-            "enforcement": "suggest",
-            "priority": "high",
-            "description": "Testing authenticated API routes with JWT cookie-based auth",
-            "promptTriggers": {
-                "keywords": [
-                    "test route",
-                    "test endpoint",
-                    "test API",
-                    "route testing",
-                    "API testing",
-                    "authenticated route",
-                    "JWT testing",
-                    "cookie auth",
-                    "test with auth"
-                ],
-                "intentPatterns": [
-                    "(test|debug|verify).*?(route|endpoint|API)",
-                    "(how to|how do I).*?test.*?(route|endpoint|API)",
-                    "test.*?(authenticated|auth|JWT|cookie)"
-                ]
-            },
-            "fileTriggers": {
-                "pathPatterns": [
-                    "**/routes/**/*.ts",
-                    "**/test-*.js",
-                    "**/test-*.ts"
-                ],
-                "contentPatterns": [
-                    "router\\.(get|post|put|delete|patch)",
-                    "app\\.(get|post|put|delete|patch)"
-                ]
-            }
-        },
         "error-tracking": {
             "type": "domain",
             "enforcement": "suggest",
@@ -353,8 +312,8 @@
             "low": "Optional - Trigger only for explicit matches"
         },
         "customization": {
-            "pathPatterns": "Adjust to match your project structure (blog-api, auth-service, etc.)",
-            "keywords": "Add domain-specific terms relevant to your project",
+            "pathPatterns": "Workspace-relative globs from the repo root (backend/, website/, frontend/, bridge/, runner/, provisioner/, packages/)",
+            "keywords": "Add domain-specific terms relevant to this repo",
             "intentPatterns": "Use regex for flexible user intent matching"
         }
     }

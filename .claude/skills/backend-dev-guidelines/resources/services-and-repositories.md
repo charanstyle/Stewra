@@ -36,7 +36,7 @@ Repository executes: "Here's the data you requested"
 
 **Services should NOT:**
 - ❌ Know about HTTP (Request/Response)
-- ❌ Direct Prisma access (use repositories)
+- ❌ Direct `db` access (use repositories)
 - ❌ Handle route-specific logic
 - ❌ Format HTTP responses
 
@@ -47,26 +47,29 @@ Repository executes: "Here's the data you requested"
 ### Why Dependency Injection?
 
 **Benefits:**
-- Easy to test (inject mocks)
-- Clear dependencies
+- Clear, enumerated dependencies
 - Flexible configuration
 - Promotes loose coupling
+- Lets a test substitute a **real** alternative — a scripted HTTP server, a fake subprocess — at the
+  seam. Note this is *not* "easy to inject mocks": mock collaborators are not used in this repo
+  (see [testing-guide.md](testing-guide.md)). The seam exists so the substitute can be real.
 
-### Excellent Example: NotificationService
+Most services here simply import their repository singleton directly. Reach for constructor
+injection when a collaborator genuinely varies — a transport, an external API client, a clock.
 
-**File:** `/blog-api/src/services/NotificationService.ts`
+### Example: NotificationService
 
 ```typescript
 // Define dependencies interface for clarity
 export interface NotificationServiceDependencies {
-    prisma: PrismaClient;
+    notificationRepository: NotificationRepository;
     batchingService: BatchingService;
     emailComposer: EmailComposer;
 }
 
 // Service with dependency injection
 export class NotificationService {
-    private prisma: PrismaClient;
+    private notificationRepository: NotificationRepository;
     private batchingService: BatchingService;
     private emailComposer: EmailComposer;
     private preferencesCache: Map<string, { preferences: UserPreference; timestamp: number }> = new Map();
@@ -74,7 +77,7 @@ export class NotificationService {
 
     // Dependencies injected via constructor
     constructor(dependencies: NotificationServiceDependencies) {
-        this.prisma = dependencies.prisma;
+        this.notificationRepository = dependencies.notificationRepository;
         this.batchingService = dependencies.batchingService;
         this.emailComposer = dependencies.emailComposer;
     }
@@ -182,9 +185,7 @@ export class NotificationService {
             return cached.preferences;
         }
 
-        const preference = await this.prisma.userPreference.findUnique({
-            where: { userID: userId },
-        });
+        const preference = await this.notificationRepository.findPreferences(userId);
 
         const finalPreferences = preference || DEFAULT_PREFERENCES;
 
@@ -204,8 +205,8 @@ export class NotificationService {
 ```typescript
 // Instantiate with dependencies
 const notificationService = new NotificationService({
-    prisma: PrismaService.main,
-    batchingService: new BatchingService(PrismaService.main),
+    notificationRepository,
+    batchingService: new BatchingService(notificationRepository),
     emailComposer: new EmailComposer(),
 });
 
@@ -239,21 +240,16 @@ const notification = await notificationService.createNotification({
 
 ### Example: PermissionService (Singleton)
 
-**File:** `/blog-api/src/services/permissionService.ts`
-
 ```typescript
-import { PrismaClient } from '@prisma/client';
+import { postRepository } from '../repositories/postRepository.js';
 
 class PermissionService {
     private static instance: PermissionService;
-    private prisma: PrismaClient;
     private permissionCache: Map<string, { canAccess: boolean; timestamp: number }> = new Map();
     private CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
     // Private constructor prevents direct instantiation
-    private constructor() {
-        this.prisma = PrismaService.main;
-    }
+    private constructor() {}
 
     // Get singleton instance
     public static getInstance(): PermissionService {
@@ -276,17 +272,7 @@ class PermissionService {
         }
 
         try {
-            const post = await this.prisma.post.findUnique({
-                where: { id: postId },
-                include: {
-                    author: true,
-                    comments: {
-                        include: {
-                            user: true,
-                        },
-                    },
-                },
-            });
+            const post = await postRepository.findWithAuthorAndComments(postId);
 
             if (!post) {
                 return false;
@@ -355,15 +341,15 @@ if (!canComplete) {
 
 ```
 Service: "Get me all active users sorted by name"
-Repository: "Here's the Prisma query that does that"
+Repository: "Here's the Kysely query that does that"
 ```
 
 **Repositories are responsible for:**
-- ✅ All Prisma operations
+- ✅ All database access (the only layer that imports `db`)
 - ✅ Query construction
-- ✅ Query optimization (select, include)
-- ✅ Database error handling
-- ✅ Caching database results
+- ✅ Row → domain model mapping (`toModel`)
+- ✅ Tenancy scoping, in the `WHERE` clause
+- ✅ Translating constraint violations into domain errors
 
 **Repositories should NOT:**
 - ❌ Contain business logic
@@ -372,125 +358,119 @@ Repository: "Here's the Prisma query that does that"
 
 ### Repository Template
 
+Note what is **absent** below: there is no `try/catch` around a query that logs and rethrows a new
+generic `Error`. That pattern looks defensive and is actively harmful — it discards the original
+error, its stack, and the Postgres SQLSTATE, so the caller sees "Failed to find user" and no way to
+learn that the real cause was a dropped column or a dead connection. Let the error propagate. Catch
+only where you have a genuine domain answer (a specific constraint violation), and rethrow everything
+else untouched.
+
 ```typescript
-// repositories/UserRepository.ts
-import { PrismaService } from '@project-lifecycle-portal/database';
-import type { User, Prisma } from '@project-lifecycle-portal/database';
+// repositories/userRepository.ts
+import { DatabaseError } from 'pg';
+import type { Selectable } from 'kysely';
+import { db } from '../database/index.js';
+import type { UsersTable } from '../database/types.js';
+import { ConflictError } from '../utils/errors.js';
+import type { User } from '@stewra/shared-types';
+
+/** snake_case row → camelCase domain model. Raw rows never leave this file. */
+function toModel(row: Selectable<UsersTable>): User {
+    return {
+        id: row.id,
+        email: row.email,
+        name: row.display_name,
+        isActive: row.is_active,
+        role: row.role,
+        createdAt: row.created_at.toISOString(),
+    };
+}
+
+const MODEL_COLUMNS = ['id', 'email', 'display_name', 'is_active', 'role', 'created_at'] as const;
 
 export class UserRepository {
-    /**
-     * Find user by ID with optimized query
-     */
+    /** Zero-or-one. `null` is an honest answer here; `{}` or a placeholder user would not be. */
     async findById(userId: string): Promise<User | null> {
-        try {
-            return await PrismaService.main.user.findUnique({
-                where: { userID: userId },
-                select: {
-                    userID: true,
-                    email: true,
-                    name: true,
-                    isActive: true,
-                    roles: true,
-                    createdAt: true,
-                    updatedAt: true,
-                },
-            });
-        } catch (error) {
-            console.error('[UserRepository] Error finding user by ID:', error);
-            throw new Error(`Failed to find user: ${userId}`);
-        }
+        const row = await db
+            .selectFrom('users')
+            .select(MODEL_COLUMNS)
+            .where('id', '=', userId)
+            .executeTakeFirst();
+        return row ? toModel(row) : null;
     }
 
-    /**
-     * Find all active users
-     */
-    async findActive(options?: { orderBy?: Prisma.UserOrderByWithRelationInput }): Promise<User[]> {
-        try {
-            return await PrismaService.main.user.findMany({
-                where: { isActive: true },
-                orderBy: options?.orderBy || { name: 'asc' },
-                select: {
-                    userID: true,
-                    email: true,
-                    name: true,
-                    roles: true,
-                },
-            });
-        } catch (error) {
-            console.error('[UserRepository] Error finding active users:', error);
-            throw new Error('Failed to find active users');
-        }
+    async findActive(orderBy: 'display_name' | 'created_at' = 'display_name'): Promise<User[]> {
+        const rows = await db
+            .selectFrom('users')
+            .select(MODEL_COLUMNS)
+            .where('is_active', '=', true)
+            .orderBy(orderBy, 'asc')
+            .execute();
+        return rows.map(toModel);
     }
 
-    /**
-     * Find user by email
-     */
     async findByEmail(email: string): Promise<User | null> {
-        try {
-            return await PrismaService.main.user.findUnique({
-                where: { email },
-            });
-        } catch (error) {
-            console.error('[UserRepository] Error finding user by email:', error);
-            throw new Error(`Failed to find user with email: ${email}`);
-        }
+        const row = await db
+            .selectFrom('users')
+            .select(MODEL_COLUMNS)
+            .where('email', '=', email)
+            .executeTakeFirst();
+        return row ? toModel(row) : null;
     }
 
     /**
-     * Create new user
+     * The one place a catch is justified: `23505` on the email unique index is a fact the caller can
+     * act on, so it becomes a domain error. Everything else propagates with its cause intact.
      */
-    async create(data: Prisma.UserCreateInput): Promise<User> {
+    async create(input: CreateUserInput): Promise<User> {
         try {
-            return await PrismaService.main.user.create({ data });
+            const row = await db
+                .insertInto('users')
+                .values({
+                    email: input.email,
+                    display_name: input.name,
+                    password_hash: input.passwordHash,
+                    role: 'user',
+                })
+                .returning(MODEL_COLUMNS)
+                .executeTakeFirstOrThrow();
+            return toModel(row);
         } catch (error) {
-            console.error('[UserRepository] Error creating user:', error);
-            throw new Error('Failed to create user');
+            if (error instanceof DatabaseError && error.code === '23505') {
+                throw new ConflictError('Email already registered');
+            }
+            throw error;
         }
     }
 
-    /**
-     * Update user
-     */
-    async update(userId: string, data: Prisma.UserUpdateInput): Promise<User> {
-        try {
-            return await PrismaService.main.user.update({
-                where: { userID: userId },
-                data,
-            });
-        } catch (error) {
-            console.error('[UserRepository] Error updating user:', error);
-            throw new Error(`Failed to update user: ${userId}`);
-        }
+    async update(userId: string, changes: UpdateUserInput): Promise<User> {
+        const row = await db
+            .updateTable('users')
+            .set({ display_name: changes.name, updated_at: sql`now()` })
+            .where('id', '=', userId)
+            .returning(MODEL_COLUMNS)
+            .executeTakeFirstOrThrow();   // no row updated = the id was wrong; that must be loud
+        return toModel(row);
     }
 
-    /**
-     * Delete user (soft delete by setting isActive = false)
-     */
-    async delete(userId: string): Promise<User> {
-        try {
-            return await PrismaService.main.user.update({
-                where: { userID: userId },
-                data: { isActive: false },
-            });
-        } catch (error) {
-            console.error('[UserRepository] Error deleting user:', error);
-            throw new Error(`Failed to delete user: ${userId}`);
-        }
+    /** Soft delete. Returns whether it changed anything, rather than pretending it always did. */
+    async deactivate(userId: string): Promise<boolean> {
+        const result = await db
+            .updateTable('users')
+            .set({ is_active: false })
+            .where('id', '=', userId)
+            .executeTakeFirst();
+        return Number(result.numUpdatedRows) > 0;
     }
 
-    /**
-     * Check if email exists
-     */
+    /** A predicate answering its own question — a boolean is a complete answer, so no null needed. */
     async emailExists(email: string): Promise<boolean> {
-        try {
-            const count = await PrismaService.main.user.count({
-                where: { email },
-            });
-            return count > 0;
-        } catch (error) {
-            console.error('[UserRepository] Error checking email exists:', error);
-            throw new Error('Failed to check if email exists');
-        }
+        const row = await db
+            .selectFrom('users')
+            .select('id')
+            .where('email', '=', email)
+            .executeTakeFirst();
+        return row !== undefined;
     }
 }
 
@@ -718,72 +698,19 @@ class UserService {
 
 ## Testing Services
 
-### Unit Tests
+See **[testing-guide.md](testing-guide.md)**, and `TESTING.md` at the repo root behind it.
 
-```typescript
-// tests/userService.test.ts
-import { UserService } from '../services/userService';
-import { userRepository } from '../repositories/UserRepository';
-import { ConflictError } from '../utils/errors';
-
-// Mock repository
-jest.mock('../repositories/UserRepository');
-
-describe('UserService', () => {
-    let userService: UserService;
-
-    beforeEach(() => {
-        userService = new UserService();
-        jest.clearAllMocks();
-    });
-
-    describe('createUser', () => {
-        it('should create user when email does not exist', async () => {
-            // Arrange
-            const userData = {
-                email: 'test@example.com',
-                name: 'Test User',
-                roles: ['user'],
-            };
-
-            (userRepository.emailExists as jest.Mock).mockResolvedValue(false);
-            (userRepository.create as jest.Mock).mockResolvedValue({
-                userID: '123',
-                ...userData,
-            });
-
-            // Act
-            const user = await userService.createUser(userData);
-
-            // Assert
-            expect(user).toBeDefined();
-            expect(user.email).toBe(userData.email);
-            expect(userRepository.emailExists).toHaveBeenCalledWith(userData.email);
-            expect(userRepository.create).toHaveBeenCalled();
-        });
-
-        it('should throw ConflictError when email exists', async () => {
-            // Arrange
-            const userData = {
-                email: 'existing@example.com',
-                name: 'Test User',
-                roles: ['user'],
-            };
-
-            (userRepository.emailExists as jest.Mock).mockResolvedValue(true);
-
-            // Act & Assert
-            await expect(userService.createUser(userData)).rejects.toThrow(ConflictError);
-            expect(userRepository.create).not.toHaveBeenCalled();
-        });
-    });
-});
-```
+The short version, because it inverts what most guides say: **do not mock the repository.** A service
+test built on a stubbed repository asserts that a call was made and says nothing about whether the
+SQL is valid, the column exists, or the transaction rolls back. Backend suites here run against the
+real `stewra_test` Postgres and real Redis db 15 over `npm run tunnel`, insert their own fixtures,
+and delete them in `afterAll`. The runner is Vitest — Jest is not a dependency in any workspace.
 
 ---
 
 **Related Files:**
-- [SKILL.md](SKILL.md) - Main guide
+- [SKILL.md](../SKILL.md) - Main guide
 - [routing-and-controllers.md](routing-and-controllers.md) - Controllers that use services
-- [database-patterns.md](database-patterns.md) - Prisma and repository patterns
+- [testing-guide.md](testing-guide.md) - How tests are written here (Vitest, real collaborators)
+- [database-patterns.md](database-patterns.md) - Repository and query patterns
 - [complete-examples.md](complete-examples.md) - Full service/repository examples

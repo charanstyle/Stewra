@@ -261,57 +261,74 @@ export default router;
 ### UserRepository
 
 ```typescript
-// repositories/UserRepository.ts
-import { PrismaService } from '@project-lifecycle-portal/database';
-import type { User, Prisma } from '@prisma/client';
+// repositories/userRepository.ts
+import { sql } from 'kysely';
+import { db } from '../database/index.js';
+import type { User } from '@stewra/shared-types';
+
+/**
+ * There is no `include`. A user plus their profile is a join, selected explicitly — which is a
+ * feature: you can see in the query exactly which columns cross the wire.
+ */
+const withProfile = () =>
+    db
+        .selectFrom('users')
+        .leftJoin('user_profiles as p', 'p.user_id', 'users.id')
+        .select([
+            'users.id',
+            'users.email',
+            'users.is_active',
+            'users.created_at',
+            'p.first_name',
+            'p.last_name',
+        ]);
 
 export class UserRepository {
     async findById(id: string): Promise<User | null> {
-        return PrismaService.main.user.findUnique({
-            where: { id },
-            include: { profile: true },
-        });
+        const row = await withProfile().where('users.id', '=', id).executeTakeFirst();
+        return row ? toModel(row) : null;
     }
 
     async findByEmail(email: string): Promise<User | null> {
-        return PrismaService.main.user.findUnique({
-            where: { email },
-            include: { profile: true },
-        });
+        const row = await withProfile().where('users.email', '=', email).executeTakeFirst();
+        return row ? toModel(row) : null;
     }
 
     async findActive(): Promise<User[]> {
-        return PrismaService.main.user.findMany({
-            where: { isActive: true },
-            include: { profile: true },
-            orderBy: { createdAt: 'desc' },
-        });
+        const rows = await withProfile()
+            .where('users.is_active', '=', true)
+            .orderBy('users.created_at', 'desc')
+            .execute();
+        return rows.map(toModel);
     }
 
-    async create(data: Prisma.UserCreateInput): Promise<User> {
-        return PrismaService.main.user.create({
-            data,
-            include: { profile: true },
-        });
+    async create(input: CreateUserInput): Promise<User> {
+        const row = await db
+            .insertInto('users')
+            .values({ email: input.email, password_hash: input.passwordHash })
+            .returningAll()
+            .executeTakeFirstOrThrow();
+        return toModel(row);
     }
 
-    async update(id: string, data: Prisma.UserUpdateInput): Promise<User> {
-        return PrismaService.main.user.update({
-            where: { id },
-            data,
-            include: { profile: true },
-        });
+    async update(id: string, changes: UpdateUserInput): Promise<User> {
+        const row = await db
+            .updateTable('users')
+            .set({ ...changes, updated_at: sql`now()` })
+            .where('id', '=', id)
+            .returningAll()
+            .executeTakeFirstOrThrow();
+        return toModel(row);
     }
 
-    async delete(id: string): Promise<User> {
-        // Soft delete
-        return PrismaService.main.user.update({
-            where: { id },
-            data: {
-                isActive: false,
-                deletedAt: new Date(),
-            },
-        });
+    /** Soft delete. `false` means no such row — the caller decides whether that is an error. */
+    async deactivate(id: string): Promise<boolean> {
+        const result = await db
+            .updateTable('users')
+            .set({ is_active: false, deleted_at: new Date() })
+            .where('id', '=', id)
+            .executeTakeFirst();
+        return Number(result.numUpdatedRows) > 0;
     }
 }
 ```
@@ -509,20 +526,24 @@ export const updateUserSchema = z.object({
 
 **3. Repository:**
 ```typescript
-// repositories/UserRepository.ts
+// repositories/userRepository.ts
 export class UserRepository {
     async findById(id: string): Promise<User | null> {
-        return PrismaService.main.user.findUnique({
-            where: { id },
-            include: { profile: true },
-        });
+        const row = await db
+            .selectFrom('users')
+            .selectAll()
+            .where('id', '=', id)
+            .executeTakeFirst();
+        return row ? toModel(row) : null;
     }
 
-    async create(data: Prisma.UserCreateInput): Promise<User> {
-        return PrismaService.main.user.create({
-            data,
-            include: { profile: true },
-        });
+    async create(input: CreateUserInput): Promise<User> {
+        const row = await db
+            .insertInto('users')
+            .values({ email: input.email, password_hash: input.passwordHash })
+            .returningAll()
+            .executeTakeFirstOrThrow();
+        return toModel(row);
     }
 }
 ```
@@ -620,7 +641,7 @@ Checks business rules
   ↓
 userRepository.create called
   ↓
-Prisma creates user
+Kysely INSERT ... RETURNING
   ↓
 Returns up the chain
   ↓
@@ -632,7 +653,7 @@ Controller formats response
 ---
 
 **Related Files:**
-- [SKILL.md](SKILL.md)
+- [SKILL.md](../SKILL.md)
 - [routing-and-controllers.md](routing-and-controllers.md)
 - [services-and-repositories.md](services-and-repositories.md)
 - [validation-patterns.md](validation-patterns.md)

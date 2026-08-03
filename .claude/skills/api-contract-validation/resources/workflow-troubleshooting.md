@@ -58,7 +58,7 @@ import { CreatePostRequest, CreatePostResponse } from '@stewra/shared-types';
 
 export class PostService {
   async createPost(data: CreatePostRequest): Promise<CreatePostResponse> {
-    const post = await prisma.post.create({ data });
+    const post = await postRepository.create(data);
     return { post: this.mapToPost(post), message: 'Success' };
   }
 }

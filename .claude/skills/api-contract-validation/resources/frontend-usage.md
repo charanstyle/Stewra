@@ -1,8 +1,14 @@
 # Frontend & Website API Contract Usage
 
+> The `userService.ts` files below are **illustrative** — neither exists. Both clients centralise
+> HTTP in a single `api.ts` (`frontend/src/services/api.ts`, `website/src/services/api.ts`) and
+> build feature services on top of it; `website/src/services/runnerService.ts` and
+> `githubAppService.ts` are real examples to read. What the blocks demonstrate — importing request
+> and response types from `@stewra/shared-types` on both sides of the wire — is the actual rule.
+
 ## Frontend Usage (React Native / Expo)
 
-**File**: `frontend/src/services/user/userService.ts`
+**Illustrative** — no such file.
 
 ```typescript
 import {
@@ -117,9 +123,12 @@ export const UserListScreen: React.FC = () => {
 };
 ```
 
-## Website Usage (Next.js)
+## Website Usage (Vite + React)
 
-**File**: `website/src/services/userService.ts`
+The website is a Vite SPA, **not** Next.js — there is no `app/` router, no server components, and
+no `getServerSideProps`.
+
+**Illustrative** — no such file.
 
 ```typescript
 import {

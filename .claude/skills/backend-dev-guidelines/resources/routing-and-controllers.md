@@ -341,43 +341,48 @@ export default router;
 - Consistent pattern
 - Easy to understand
 
-### Example 2: Proxy Routes with Validation (Good ✅)
+### Example 2: Validation in the controller (Good ✅)
 
-**File:** `/form/src/routes/proxyRoutes.ts`
+**File:** `backend/src/controllers/activityController.ts` — the canonical shape, in full:
 
 ```typescript
-import { z } from 'zod';
-
-const createProxySchema = z.object({
-    originalUserID: z.string().min(1),
-    proxyUserID: z.string().min(1),
-    startsAt: z.string().datetime(),
-    expiresAt: z.string().datetime(),
+const querySchema = z.object({
+  cursor: z.string().min(1).nullable().default(null),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
-router.post('/',
-    SSOMiddlewareClient.verifyLoginStatus,
-    async (req, res) => {
-        try {
-            const validated = createProxySchema.parse(req.body);
-            const proxy = await proxyService.createProxyRelationship(validated);
-            res.status(201).json({ success: true, data: proxy });
-        } catch (error) {
-            handler.handleException(res, error);
-        }
+class ActivityController extends BaseController {
+  async list(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId;
+      if (userId === undefined) {
+        throw new Error('list() requires requireAuth middleware');
+      }
+      const { cursor, limit } = parse(querySchema, req.query);
+      const result = await auditReader.listForUser(userId, cursor, limit);
+      this.handleSuccess(res, result, 200);
+    } catch (error) {
+      this.handleError(error, res, 'ActivityController.list');
     }
-);
+  }
+}
+
+export const activityController = new ActivityController();
 ```
 
-**What Makes This Good:**
-- Zod validation
-- Delegates to service
-- Proper HTTP status codes
-- Error handling
+**What makes this the pattern:**
 
-**Could Be Better:**
-- Move validation to controller
-- Use BaseController
+- **The schema is module-level,** built once — not re-created per request.
+- **`parse(querySchema, req.query)`** from `backend/src/utils/validate.js`, not `schema.parse`
+  directly. It converts a `ZodError` into a `ValidationError`, which `handleError` renders as a 400
+  with per-field details.
+- **`z.coerce.number()` for query params,** because everything in `req.query` is a string.
+- **The missing-`userId` case throws rather than defaulting.** It is a programming error — the route
+  forgot `requireAuth` — and a substituted anonymous id would silently serve the wrong user's data.
+- **Exported as a singleton instance,** which is what the route's `void activityController.list(...)`
+  calls.
+- **The `try`/`catch` is mandatory here,** not stylistic: Express 4 does not catch rejected promises
+  and the route discards this one with `void`.
 
 ---
 
@@ -385,7 +390,8 @@ router.post('/',
 
 ### Anti-Pattern 1: Business Logic in Routes (Bad ❌)
 
-**File:** `/form/src/routes/responseRoutes.ts` (actual production code)
+Illustrative — not from this repo. `backend/src/routes/` has no file like this, and the point of
+the layering rules is to keep it that way.
 
 ```typescript
 // ❌ ANTI-PATTERN: 200+ lines of business logic in route
@@ -421,11 +427,12 @@ router.post('/:formID/submit', async (req: Request, res: Response) => {
             });
         }
 
-        // ❌ Response processing in route
-        const post = await PrismaService.main.post.findUnique({
-            where: { id: postData.id },
-            include: { comments: true },
-        });
+        // ❌ Direct database access in route
+        const post = await db
+            .selectFrom('posts')
+            .selectAll()
+            .where('id', '=', postData.id)
+            .executeTakeFirst();
 
         // ❌ Permission check in route
         await checkPostPermissions(post, userId);
@@ -657,17 +664,17 @@ this.handleError(new ForbiddenError('No permission'), res, 'operation', 403);
 **Red Flags:**
 - Route file > 100 lines
 - Multiple try-catch blocks in one route
-- Direct database access (Prisma calls)
+- Direct database access (a `db.` query outside a repository)
 - Complex business logic (if statements, loops)
 - Permission checks in routes
 
 **Check your routes:**
 ```bash
 # Find large route files
-wc -l form/src/routes/*.ts | sort -n
+wc -l backend/src/routes/*.ts | sort -n
 
-# Find routes with Prisma usage
-grep -r "PrismaService" form/src/routes/
+# Find routes reaching past the repository layer straight into the database
+git grep -n "from '../database" -- backend/src/routes
 ```
 
 ### Refactoring Process
@@ -738,12 +745,25 @@ export class ActionService {
 
 // Repository handles data access
 export class ActionRepository {
-    async findById(id: number): Promise<Entity | null> {
-        return PrismaService.main.entity.findUnique({ where: { id } });
+    async findById(id: string, userId: string): Promise<Entity | null> {
+        const row = await db
+            .selectFrom('entities')
+            .selectAll()
+            .where('id', '=', id)
+            .where('user_id', '=', userId)   // tenancy in the predicate, not a pre-check
+            .executeTakeFirst();
+        return row ? toModel(row) : null;
     }
 
-    async update(id: number, data: Partial<Entity>): Promise<Entity> {
-        return PrismaService.main.entity.update({ where: { id }, data });
+    async update(id: string, userId: string, data: EntityUpdate): Promise<Entity> {
+        const row = await db
+            .updateTable('entities')
+            .set(data)
+            .where('id', '=', id)
+            .where('user_id', '=', userId)
+            .returningAll()
+            .executeTakeFirstOrThrow();
+        return toModel(row);
     }
 }
 ```
@@ -751,6 +771,6 @@ export class ActionRepository {
 ---
 
 **Related Files:**
-- [SKILL.md](SKILL.md) - Main guide
+- [SKILL.md](../SKILL.md) - Main guide
 - [services-and-repositories.md](services-and-repositories.md) - Service layer details
 - [complete-examples.md](complete-examples.md) - Full refactoring examples

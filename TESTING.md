@@ -203,7 +203,10 @@ by name — it never sweeps by label).
 
 **The gate.** With no Docker socket the whole suite is skipped *loudly*: it prints the reason and the
 fix, and the run stays green so `npm test` at the root is usable on a machine without Docker. Socket
-discovery is, in order: `DOCKER_SOCKET`, `/var/run/docker.sock`, `~/.docker/run/docker.sock`.
+discovery is, in order: `DOCKER_SOCKET`, `/var/run/docker.sock`, `~/.docker/run/docker.sock` (Docker
+Desktop), `~/.colima/default/docker.sock` (colima — it symlinks into neither of the other two, so
+until that entry existed this page's "discovery finds the socket" promise was false on a machine with
+colima running, and the suite skipped all 14 tests while a daemon sat right there).
 
 **`DOCKER_SOCKET` disables the skip.** If it is set and the path does not exist, the suite FAILS
 rather than skipping — "I pointed it at an engine" and "it quietly ran nothing" must not look alike.
@@ -256,6 +259,144 @@ Config: `website/e2e/playwright.config.ts` (two projects `desktop-chromium` + `m
 `website/e2e/tests/*.spec.ts`; shared helpers in `lib.mjs`; the two-authenticated-context fixture in
 `fixtures.ts`. Selectors that used to match hashed CSS-module classes now use stable `data-testid`s —
 the registry is `website/e2e/TESTIDS.md`.
+
+### The skip census — `skip-reporter.mjs`
+
+Registered as a reporter in `playwright.config.ts`. Every run ends with either
+
+```
+[skips] none — all 100 tests ran.
+```
+
+or every skipped test named, **grouped by reason** so one missing precondition reads as one line
+rather than five:
+
+```
+[skips] 14/100 tests did not run:
+  • no runner paired to this account  (3)
+      runner › a paired runner appears in the device list
+      …
+```
+
+This exists because the run that found the production login outage was 82 passed / 14 skipped / 4
+failed, and the fourteen were invisible — `list` prints a dash per skip, thousands of lines up, with
+no reason and no total. Eight of them were Today tests skipping on a run that had a database
+configured and could have provisioned what they needed.
+
+`E2E_MAX_SKIPS=<n>` turns the census into an assertion: over budget fails the run. Unset means report
+only — a default ceiling nobody chose would just get raised the first time it bit.
+
+> The reporter fails the run by returning `{ status: 'failed' }` from `onEnd()`. Setting
+> `process.exitCode` there is silently discarded — Playwright computes the exit code from the
+> aggregated result *after* reporters finish. Verified, not assumed.
+
+### Provisioned preconditions — `seed.mjs`
+
+Two of the destructive-but-reversible suites need data a fully-triaged account does not have. With
+`E2E_DATABASE_URL` set, `seed.mjs` stages **real rows in the real store** and undoes them:
+
+- `openNeedsReplyNudges()` flips a few of A's already-acted-on nudges to `open`, snapshots them, and
+  restores the exact prior `(status, snoozed_until)` in `afterAll`.
+- `seedNeedsReplyNudges()` covers the case re-opening cannot: an account with **no** acted-on
+  `needs_reply` rows. It hangs a correctly-shaped nudge on one of the user's **real** email threads —
+  real because `POST /home/suggestions/:id/draft` resolves the option's `threadId` and drafts from the
+  thread's actual messages, so a made-up id would fail with "Email thread not found", a red test that
+  says nothing about the product.
+- `cleanupSeededNudges()` deletes by the `e2e:needs_reply:` dedup-key prefix, **not** by returned ids
+  — a run that dies between INSERT and the id landing in the array would otherwise leave a nudge in a
+  real user's Today list forever.
+
+When the account has no email thread at all, seeding raises `NoSeedableThreadError` and the Today
+tests skip with that as their named, counted reason. Any *other* seeding failure propagates and reds
+the run.
+
+> **Known gap:** both QA accounts (`qa-e2e+q2a@`, `qa-e2e+q2b@`) currently have zero connections,
+> email_threads, email_messages and suggestions, so the 8 Today action tests have never actually run.
+> Fixing it means connecting Gmail for a QA account and running `POST /home/recompute`. Fabricating a
+> `connections` row directly would kick off unbounded background sync, so it is deliberately not done
+> here.
+
+---
+
+## Post-deploy smoke gate — `website/e2e/smoke/`
+
+A 60-second, **credential-free** check any deploy can be gated on. The full suite takes 13 minutes and
+needs two QA accounts; this needs neither, and it is the same assertion that guards the build in CI.
+
+```bash
+cd website/e2e
+
+# against a local `vite preview` of a fresh build (what CI runs)
+E2E_SMOKE_TARGET=http://127.0.0.1:4173 npm run test:smoke:preview
+
+# against a deployed origin, including the API reachability checks
+E2E_SMOKE_TARGET=https://www.stewra.com npm run test:smoke:deployed
+```
+
+`E2E_SMOKE_TARGET`, deliberately **not** `E2E_WEB_URL` — `.env.e2e` sets that to production, and a
+smoke gate that silently tests production when you meant to test your build is worse than no gate.
+Config is `playwright.smoke.config.ts`: one chromium project, `retries: 0`, 30s timeout, JSON into
+`.artifacts/smoke.json`.
+
+The specs import `test` straight from `@playwright/test`, never `../fixtures` — the fixture would
+trigger `loginAll()` and reintroduce the credential requirement. Shared env loading lives in
+`env.mjs`, extracted from `config.mjs` so the credential-validating half is not on this path.
+
+**What it asserts, and why that shape.** A `pageerror` + `console.error` listener is attached *before*
+`goto`, and asserted empty *before* any element assertion. That ordering is the whole point: the
+production outage was a thrown exception, and asserting only on visible elements reports "heading not
+visible" instead of the actual `TypeError: Cannot read properties of null (reading 'useRef')`.
+`waitUntil: 'load'` matters too — the module script must have *executed*, not merely parsed.
+
+- `/login` renders logged out, and toggling to "Create account" mounts the Name field and accepts
+  typing — that is the `react-hook-form useForm()` path that actually crashed
+- `/chats` redirects to `/login`, asserted clean **both** after load and after the redirect resolves
+  (`LoginPage` mounts only after the redirect)
+- `/runner` renders
+- every `/assets/*` referenced by `index.html` returns 200 — catches a half-deployed image pointing at
+  a chunk that no longer exists
+- deployed-only: `GET /api/health` is `{success:true,data:{status:'ok'}}`, and `POST /api/auth/login`
+  with a bogus credential returns 400/401 (a 5xx means the backend behind the origin is not serving)
+
+CI runs the preview form on every push: build the website, start `vite preview` on `127.0.0.1:4173`
+with a readiness loop that fails loud, run the gate. This is the step that would have caught the
+duplicate-React outage before it shipped — it is a `vite build`-only fault, and CI never built the
+website.
+
+---
+
+## Hosted cloud runners, end to end — `runner/smoke-hosted-fullstack.mts`
+
+Joins the two halves that unit and container tests cover separately: can a user **start** a cloud
+session through Stewra, and **control** it once it is running?
+
+```bash
+BASE=https://www.stewra.com/api \
+CLAUDE_CODE_OAUTH_TOKEN=… \
+  npx tsx runner/smoke-hosted-fullstack.mts
+```
+
+Both variables are required and fail loud when absent; the token is a long-lived headless credential
+from `claude setup-token`, which on a deploy lives in `stewra.env` (deliberately uncommitted).
+QA credentials come from the repo-root `.env.e2e`.
+
+The arc: log in → assert a GitHub App installation exists → assert hosted mode is enabled → provision
+→ wait for the container to dial back with `claude-code` available → **start a Claude Code session**
+→ answer its permission prompts → send a follow-up prompt mid-run → assert completion, branch, commit
+and `permissionsAnswered > 0` → start a second session and **cancel** it, polling until it leaves
+`running` → stop (offline, volumes intact) → start (workspaces survived) → destroy.
+
+It also asserts the laptop invariant against the live system: `GET /runner/hosted/workspaces` and
+`POST /runner/git-credentials` with a **local** device token must both be `403`. That is currently
+proven only against a scripted backend (`hostedRunnerService.test.ts`).
+
+Safety: it **refuses to adopt or destroy a pre-existing cloud runner**, and its `finally` destroys
+only what this run provisioned.
+
+> **Has never been executed.** Production reports `hosted enabled=false` and
+> `github-app configured=false`, so the cloud path is not live anywhere. The driver typechecks and
+> lints; standing the stack up is the four host prerequisites in `runner/HOSTED.md` plus a real GitHub
+> App. **Not covered even then:** the iptables egress fence — see the reboot trade in that document.
 
 ---
 
@@ -504,7 +645,24 @@ It is the only way to automate the physical iPhone (Maestro is simulator-only), 
 finally cover the manual checklist above. It is not ported yet because the DDI blocker above makes
 any on-device run impossible today; see that section for what is and isn't in the way.
 
-## Not wired into CI
+## What CI runs, and what it does not
 
-The suites are **run locally, one command each** (Truetalk's aren't in CI either). There is no
-`.github/workflows/` running Playwright or Maestro yet.
+`.github/workflows/ci.yml` runs, on every push:
+
+- `typecheck`, `lint`, `boundaries`
+- Vitest: backend, bridge, runner, **and provisioner** (with `DOCKER_SOCKET=/var/run/docker.sock` set
+  explicitly, so the runner's socket vanishing is a failure rather than a silent skip of all 14 tests)
+- **build the website**, then the smoke gate against a `vite preview` of that build
+
+Everything else is **run locally, one command each**:
+
+- the full Playwright suite — it needs the two QA accounts and targets production
+- Maestro — needs a device
+- `runner/smoke-*-fullstack.mts` — need a live backend, and the hosted one needs the cloud stack
+
+The website build + smoke steps exist because of a specific incident: a duplicate-React bundle made
+`stewra.com` a blank screen for every logged-out visitor, and nothing upstream could see it. It is a
+`vite build`-only fault (`vite dev` dedupes through esbuild), CI never built the website, and the only
+spec that visits a page logged out is the one that caught it — every other spec is seeded with
+`storageState` and never renders `LoginPage`. A type error cannot see a bundler-level module
+duplication.

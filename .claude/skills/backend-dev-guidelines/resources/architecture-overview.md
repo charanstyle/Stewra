@@ -50,7 +50,7 @@ Complete guide to the layered architecture pattern used in backend microservices
 ┌─────────────────────────────────────┐
 │  Layer 4: REPOSITORIES              │
 │  - Data access abstraction          │
-│  - Prisma operations                │
+│  - Kysely query construction        │
 │  - Query optimization               │
 │  - Caching                          │
 └───────────────┬─────────────────────┘
@@ -111,7 +111,7 @@ Complete guide to the layered architecture pattern used in backend microservices
    - Return result
    ↓
 7. Repository performs database operation:
-   - PrismaService.main.user.create({ data })
+   - db.insertInto('users').values(data).returning('id').executeTakeFirstOrThrow()
    - Handle database errors
    - Return created user
    ↓
@@ -254,13 +254,11 @@ form/src/
 **Naming:** PascalCase + Repository
 
 **Responsibilities:**
-- Prisma query operations
-- Query optimization
+- Kysely query construction
+- Row → domain model mapping (`toModel`)
+- Tenancy scoping in the `WHERE` clause
 - Database error handling
-- Caching layer
-- Hide Prisma implementation details
-
-**Current Gap:** Only 1 repository exists (WorkflowRepository)
+- Hide the query builder from every layer above
 
 ### Routes Directory
 
@@ -384,10 +382,10 @@ src/
 - ✅ Orchestration (multiple repos)
 - ✅ Transaction management
 - ❌ HTTP concerns (Request/Response)
-- ❌ Direct Prisma calls (use repositories)
+- ❌ Direct `db` queries (use repositories)
 
 **Repositories Layer:**
-- ✅ Prisma operations
+- ✅ Kysely queries against `db`
 - ✅ Query construction
 - ✅ Database error handling
 - ✅ Caching
@@ -433,11 +431,21 @@ async create(data: CreateUserDTO): Promise<User> {
 **Repository:**
 ```typescript
 async create(data: CreateUserDTO): Promise<User> {
-    return PrismaService.main.user.create({ data });
+    const row = await db
+        .insertInto('users')
+        .values({ email: data.email, display_name: data.name, password_hash: data.hash })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+    return toModel(row);
 }
 
 async findByEmail(email: string): Promise<User | null> {
-    return PrismaService.main.user.findUnique({ where: { email } });
+    const row = await db
+        .selectFrom('users')
+        .selectAll()
+        .where('email', '=', email)
+        .executeTakeFirst();
+    return row ? toModel(row) : null;
 }
 ```
 
@@ -446,6 +454,6 @@ async findByEmail(email: string): Promise<User | null> {
 ---
 
 **Related Files:**
-- [SKILL.md](SKILL.md) - Main guide
+- [SKILL.md](../SKILL.md) - Main guide
 - [routing-and-controllers.md](routing-and-controllers.md) - Routes and controllers details
 - [services-and-repositories.md](services-and-repositories.md) - Service and repository patterns

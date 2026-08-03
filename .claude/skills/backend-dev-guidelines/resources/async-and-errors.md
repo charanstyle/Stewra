@@ -7,7 +7,7 @@ Complete guide to async/await patterns and custom error handling.
 - [Async/Await Best Practices](#asyncawait-best-practices)
 - [Promise Error Handling](#promise-error-handling)
 - [Custom Error Types](#custom-error-types)
-- [asyncErrorWrapper Utility](#asyncerrorwrapper-utility)
+- [The async route hazard, and how this repo answers it](#the-async-route-hazard-and-how-this-repo-answers-it)
 - [Error Propagation](#error-propagation)
 - [Common Async Pitfalls](#common-async-pitfalls)
 
@@ -176,39 +176,62 @@ function errorBoundary(error, req, res, next) {
 
 ---
 
-## asyncErrorWrapper Utility
+## The async route hazard, and how this repo answers it
 
-### Pattern
+This is Express `^4.21.1`. Express 4 **does not** catch a rejected promise returned from a handler,
+so this is a genuine hole:
+
+```typescript
+// ❌ If getAll() rejects, nothing catches it. Not errorHandler.ts — it never runs.
+router.get('/users', async (req, res) => {
+    const users = await userService.getAll();
+    res.json(users);
+});
+```
+
+**This repo closes it in the controller, not with a wrapper.** Routes stay synchronous and discard
+the promise explicitly; the controller is what guarantees the catch:
+
+```typescript
+// backend/src/routes/activity.ts
+router.get('/', requireAuth, (req, res) => {
+  void activityController.list(req, res);
+});
+```
+
+```typescript
+// the controller — this try/catch is the one that is NOT optional
+async list(req: Request, res: Response): Promise<void> {
+    try {
+        this.handleSuccess(res, await activityService.list(req.userId));
+    } catch (error) {
+        this.handleError(error, res, 'list');
+    }
+}
+```
+
+The `void` is a deliberate signal, not sloppiness: it says "this promise is handled inside." It is
+only true because `handleError` exists. **Never write an `async` route handler that awaits a
+service directly.**
+
+### ⚠️ The wrapper below does not exist in this repo
+
+A `next(error)`-forwarding wrapper is the other standard answer, and earlier revisions of this file
+presented it as if it were available here. It is not — there is no `asyncErrorWrapper` and no
+`middleware/errorBoundary.ts`. Shown only so you recognise it elsewhere:
 
 ```typescript
 export function asyncErrorWrapper(
-    handler: (req: Request, res: Response, next: NextFunction) => Promise<any>
+    handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>
 ) {
-    return async (req: Request, res: Response, next: NextFunction) => {
-        try {
-            await handler(req, res, next);
-        } catch (error) {
-            next(error);
-        }
+    return (req: Request, res: Response, next: NextFunction) => {
+        handler(req, res, next).catch(next);
     };
 }
 ```
 
-### Usage
-
-```typescript
-// Without wrapper - error can be unhandled
-router.get('/users', async (req, res) => {
-    const users = await userService.getAll(); // If throws, unhandled!
-    res.json(users);
-});
-
-// With wrapper - errors caught
-router.get('/users', asyncErrorWrapper(async (req, res) => {
-    const users = await userService.getAll();
-    res.json(users);
-}));
-```
+Adding it — or upgrading to Express 5, which catches rejections natively — is a change to propose,
+not a pattern to assume.
 
 ---
 
@@ -220,7 +243,7 @@ router.get('/users', asyncErrorWrapper(async (req, res) => {
 // ✅ Propagate errors up the stack
 async function repositoryMethod() {
     try {
-        return await PrismaService.main.user.findMany();
+        return await db.selectFrom('users').selectAll().execute();
     } catch (error) {
         Sentry.captureException(error, { tags: { layer: 'repository' } });
         throw error; // Propagate to service
@@ -302,6 +325,6 @@ process.on('uncaughtException', (error) => {
 ---
 
 **Related Files:**
-- [SKILL.md](SKILL.md)
+- [SKILL.md](../SKILL.md)
 - [sentry-and-monitoring.md](sentry-and-monitoring.md)
 - [complete-examples.md](complete-examples.md)

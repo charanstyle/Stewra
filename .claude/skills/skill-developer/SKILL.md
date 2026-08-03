@@ -73,7 +73,7 @@ Defines:
 - Session-aware (don't repeat nag in same session)
 
 **Examples:**
-- `database-verification` - Verify table/column names before Prisma queries
+- `backend-dev-guidelines` - Enforce backend layering, Kysely access, unifiedConfig
 - `website-dev-guidelines` - Enforce web React/TypeScript patterns (Vite, CSS Modules, Radix UI)
 - `react-native-dev-guidelines` - Enforce mobile React Native patterns (Expo, StyleSheet, React Navigation)
 
@@ -98,7 +98,7 @@ Defines:
 **Examples:**
 - `backend-dev-guidelines` - Node.js/Express/TypeScript patterns
 - `error-tracking` - Sentry integration guidance
-- `route-tester` - API route testing with authentication
+- `api-contract-validation` - keeping shared-types and its consumers in step
 
 **When to Use:**
 - Complex systems requiring deep knowledge

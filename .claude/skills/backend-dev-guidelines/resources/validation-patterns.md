@@ -144,38 +144,72 @@ const nonEmptyArray = z.array(z.string()).nonempty();
 
 ---
 
-## Schema Examples from Codebase
+## Schema Examples from This Codebase
 
-### Form Validation Schemas
+Schemas live **next to the controller that uses them**, at module level. There is no
+`validators/` directory and no shared `zodSchemas.ts`.
 
-**File:** `/form/src/helpers/zodSchemas.ts`
+### Query params — `backend/src/controllers/activityController.ts`
 
 ```typescript
-import { z } from 'zod';
+const querySchema = z.object({
+  cursor: z.string().min(1).nullable().default(null),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+```
 
-// Question types enum
-export const questionTypeSchema = z.enum([
-    'input',
-    'textbox',
-    'editor',
-    'dropdown',
-    'autocomplete',
-    'checkbox',
-    'radio',
-    'upload',
-]);
+`z.coerce.number()` because everything in `req.query` is a string; `.max(100)` because an
+unbounded `limit` is a denial-of-service knob handed to the caller.
 
-// Upload types
-export const uploadTypeSchema = z.array(
-    z.enum(['pdf', 'image', 'excel', 'video', 'powerpoint', 'word']).nullable()
-);
+### Route params and OAuth callbacks — `backend/src/controllers/connectionController.ts`
 
-// Input types
-export const inputTypeSchema = z
-    .enum(['date', 'number', 'input', 'currency'])
-    .nullable();
+```typescript
+// The OAuth callback Google redirects the browser to — carries the code and our signed state.
+const callbackSchema = z.object({
+  code: z.string().min(1),
+  state: z.string().min(1),
+});
 
-// Question option
+const disconnectParamsSchema = z.object({
+  id: z.string().uuid(),
+});
+```
+
+`z.string().uuid()` on a path param is doing real work: it rejects malformed ids before they reach
+a query, so a bad id is a 400 with a field name rather than a database error.
+
+### Always parse through `parse()`, never `schema.parse()`
+
+`backend/src/utils/validate.ts`:
+
+```typescript
+/** Parse untrusted input against a schema; throw a ValidationError (400) on failure. Fail-fast. */
+export function parse<S extends z.ZodTypeAny>(schema: S, data: unknown): z.infer<S> {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    const details = result.error.issues.map((i) => ({
+      field: i.path.join('.'),
+      message: i.message,
+    }));
+    throw new ValidationError('Validation failed', details);
+  }
+  return result.data;
+}
+```
+
+Calling `schema.parse()` directly throws a raw `ZodError`, which is not an `AppError` — so
+`handleError` cannot recognise it, and the caller gets a **500 with "Something went wrong"**
+instead of a 400 naming the bad field. That is the entire reason this helper exists.
+
+Note it uses `safeParse` internally and converts, rather than catching `ZodError`. Same outcome,
+no control flow through exceptions it did not raise.
+
+### ⚠️ Reference only — the schemas below are not from this repo
+
+The remainder of this section is a form-builder domain kept as Zod syntax reference. None of these
+types exist here.
+
+```typescript
 export const questionOptionSchema = z.object({
     id: z.number().int().positive().optional(),
     controlTag: z.string().max(150).nullable().optional(),
@@ -748,7 +782,7 @@ router.post('/users',
 ---
 
 **Related Files:**
-- [SKILL.md](SKILL.md) - Main guide
+- [SKILL.md](../SKILL.md) - Main guide
 - [routing-and-controllers.md](routing-and-controllers.md) - Using validation in controllers
 - [services-and-repositories.md](services-and-repositories.md) - Using DTOs in services
 - [async-and-errors.md](async-and-errors.md) - Error handling patterns
