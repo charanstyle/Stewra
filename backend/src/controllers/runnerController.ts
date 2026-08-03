@@ -4,6 +4,7 @@ import { RUNNER_HARNESS_IDS } from '@stewra/shared-types';
 import { BaseController } from './baseController.js';
 import { runnerService } from '../services/runnerService.js';
 import { runnerSessionService } from '../services/runnerSessionService.js';
+import { parse } from '../utils/validate.js';
 
 /**
  * `deviceName`/`os` are bounded rather than free — they are echoed into the device list and an audit row,
@@ -90,7 +91,7 @@ class RunnerController extends BaseController {
    */
   async claimToken(req: Request, res: Response): Promise<void> {
     try {
-      const body = claimSchema.parse(req.body);
+      const body = parse(claimSchema, req.body);
       const result = await runnerService.claimToken(body);
       this.handleSuccess(res, result, 201);
     } catch (error) {
@@ -101,7 +102,7 @@ class RunnerController extends BaseController {
   /** DELETE /runner/devices/:id — kill a runner's token immediately. */
   async revokeDevice(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = deviceIdSchema.parse(req.params);
+      const { id } = parse(deviceIdSchema, req.params);
       const revoked = await runnerService.revokeDevice(this.userId(req), id);
       this.handleSuccess(res, { revoked });
     } catch (error) {
@@ -121,7 +122,7 @@ class RunnerController extends BaseController {
   /** POST /runner/sessions — start a coding session on a chosen device. */
   async startSession(req: Request, res: Response): Promise<void> {
     try {
-      const body = startSessionSchema.parse(req.body);
+      const body = parse(startSessionSchema, req.body);
       const session = await runnerSessionService.startSession(this.userId(req), body);
       this.handleSuccess(res, { session }, 201);
     } catch (error) {
@@ -132,8 +133,8 @@ class RunnerController extends BaseController {
   /** POST /runner/sessions/:id/prompt — a follow-up turn in a running session. */
   async promptSession(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = sessionIdSchema.parse(req.params);
-      const { text } = promptBodySchema.parse(req.body);
+      const { id } = parse(sessionIdSchema, req.params);
+      const { text } = parse(promptBodySchema, req.body);
       this.handleSuccess(res, await runnerSessionService.prompt(this.userId(req), id, text));
     } catch (error) {
       this.handleError(error, res, 'RunnerController.promptSession');
@@ -143,8 +144,8 @@ class RunnerController extends BaseController {
   /** POST /runner/sessions/:id/permission — relay the user's permission answer to the runner. */
   async decidePermission(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = sessionIdSchema.parse(req.params);
-      const { promptId, optionId } = permissionBodySchema.parse(req.body);
+      const { id } = parse(sessionIdSchema, req.params);
+      const { promptId, optionId } = parse(permissionBodySchema, req.body);
       this.handleSuccess(res, await runnerSessionService.decidePermission(this.userId(req), id, promptId, optionId));
     } catch (error) {
       this.handleError(error, res, 'RunnerController.decidePermission');
@@ -154,7 +155,7 @@ class RunnerController extends BaseController {
   /** POST /runner/sessions/:id/cancel — stop a running session. */
   async cancelSession(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = sessionIdSchema.parse(req.params);
+      const { id } = parse(sessionIdSchema, req.params);
       this.handleSuccess(res, await runnerSessionService.cancel(this.userId(req), id));
     } catch (error) {
       this.handleError(error, res, 'RunnerController.cancelSession');
@@ -164,7 +165,7 @@ class RunnerController extends BaseController {
   /** POST /runner/sessions/:id/push — push a finished session's branch to its remote. */
   async pushSession(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = sessionIdSchema.parse(req.params);
+      const { id } = parse(sessionIdSchema, req.params);
       this.handleSuccess(res, await runnerSessionService.pushSession(this.userId(req), id));
     } catch (error) {
       this.handleError(error, res, 'RunnerController.pushSession');
@@ -174,8 +175,8 @@ class RunnerController extends BaseController {
   /** POST /runner/sessions/:id/pr — open a pull request for a finished session's branch. */
   async openPr(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = sessionIdSchema.parse(req.params);
-      const { title, body } = openPrBodySchema.parse(req.body);
+      const { id } = parse(sessionIdSchema, req.params);
+      const { title, body } = parse(openPrBodySchema, req.body);
       this.handleSuccess(res, await runnerSessionService.openPr(this.userId(req), id, title, body), 201);
     } catch (error) {
       this.handleError(error, res, 'RunnerController.openPr');

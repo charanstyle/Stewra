@@ -6,6 +6,7 @@ import { BaseController } from './baseController.js';
 import { githubAppService } from '../services/githubAppService.js';
 import { hostedRunnerService } from '../services/hostedRunnerService.js';
 import { logger } from '../utils/logger.js';
+import { parse } from '../utils/validate.js';
 
 /**
  * The HTTP surface for Stewra-hosted cloud runners.
@@ -59,7 +60,7 @@ class HostedRunnerController extends BaseController {
   /** POST /runner/hosted — provision the container. The body's credentials are never logged or stored. */
   async provision(req: Request, res: Response): Promise<void> {
     try {
-      const { credentials } = provisionSchema.parse(req.body);
+      const { credentials } = parse(provisionSchema, req.body);
       const runner = await hostedRunnerService.provision(this.userId(req), credentials ?? {});
       this.handleSuccess(res, { runner }, 201);
     } catch (error) {
@@ -98,8 +99,8 @@ class HostedRunnerController extends BaseController {
   /** PUT /runner/hosted/credentials/:harness — replace one harness's provider login. */
   async updateCredential(req: Request, res: Response): Promise<void> {
     try {
-      const { harness } = harnessParamSchema.parse(req.params);
-      const { secret } = credentialBodySchema.parse(req.body);
+      const { harness } = parse(harnessParamSchema, req.params);
+      const { secret } = parse(credentialBodySchema, req.body);
       await hostedRunnerService.updateProviderCredential(this.userId(req), harness, secret);
       this.handleSuccess(res, { ok: true });
     } catch (error) {

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { UnlinkGithubInstallationResponse } from '@stewra/shared-types';
 import { BaseController } from './baseController.js';
 import { githubAppService } from '../services/githubAppService.js';
+import { parse } from '../utils/validate.js';
 
 /**
  * `installationId` arrives from a redirect query parameter via the setup page — bounded and integral, or
@@ -38,7 +39,7 @@ class GithubAppController extends BaseController {
   /** POST /github-app/installations — link the installation GitHub redirected back with. */
   async link(req: Request, res: Response): Promise<void> {
     try {
-      const body = linkSchema.parse(req.body);
+      const body = parse(linkSchema, req.body);
       this.handleSuccess(
         res,
         await githubAppService.linkInstallation(this.userId(req), body.installationId, body.state),
