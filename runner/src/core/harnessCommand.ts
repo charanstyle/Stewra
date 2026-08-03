@@ -63,17 +63,51 @@ function credentialsDir(): string {
 /**
  * Which environment variable each harness reads its provider login from.
  *
- * `claude-code` is verified end-to-end: `claude-agent-acp` spreads its own `process.env` into the
- * environment it hands the Claude Agent SDK, which passes it to the `claude` CLI, so the variable set
- * here is the one the CLI authenticates with.
+ * `claude-code` is absent here because it has no single answer — see `claudeCredentialVar` below.
  *
  * `codex` is deliberately absent rather than guessed. A slot written for it is a loud failure below, not
  * a silently-ignored credential that would surface later as an unexplained authentication error mid-session.
  */
 const CREDENTIAL_ENV_VAR: Partial<Record<RunnerHarnessId, string>> = {
-  'claude-code': 'CLAUDE_CODE_OAUTH_TOKEN',
   'gemini-cli': 'GEMINI_API_KEY',
 };
+
+/**
+ * The two logins the `claude` CLI accepts, and the variable each is read from.
+ *
+ * A user may paste either: a long-lived OAuth token from `claude setup-token` (`sk-ant-oat…`), which
+ * spends their Claude subscription, or a console API key (`sk-ant-api…`), which is metered per token.
+ * The CLI reads these from DIFFERENT variables, so the kind cannot be ignored — putting an API key in
+ * `CLAUDE_CODE_OAUTH_TOKEN` authenticates as nothing, and the CLI reports it as a generic auth failure
+ * mid-session, long after the paste that caused it.
+ *
+ * Verified end-to-end: `claude-agent-acp` spreads its own `process.env` into the environment it hands the
+ * Claude Agent SDK, which passes it to the `claude` CLI, so the variable set here is the one the CLI
+ * authenticates with.
+ */
+const CLAUDE_CREDENTIAL_VARS: readonly { readonly prefix: string; readonly varName: string }[] = [
+  { prefix: 'sk-ant-oat', varName: 'CLAUDE_CODE_OAUTH_TOKEN' },
+  { prefix: 'sk-ant-api', varName: 'ANTHROPIC_API_KEY' },
+];
+
+/**
+ * Resolve which variable a pasted Claude login belongs in, by its form.
+ *
+ * An unrecognised form is a hard failure rather than a default into one variable or the other. Guessing
+ * would spend the wrong account when it happened to work, and produce an unexplainable auth error when
+ * it did not; naming the two accepted forms at spawn time points straight at the fix.
+ */
+function claudeCredentialVar(secret: string): string {
+  const match = CLAUDE_CREDENTIAL_VARS.find((candidate) => secret.startsWith(candidate.prefix));
+  if (match === undefined) {
+    throw new Error(
+      'The Claude Code login supplied is not a recognised credential: expected a long-lived OAuth token ' +
+        'from `claude setup-token` (starts with "sk-ant-oat") or an Anthropic API key (starts with ' +
+        '"sk-ant-api"). Re-paste the credential — running the session would fail to authenticate.',
+    );
+  }
+  return match.varName;
+}
 
 /** Read a harness's credential slot, or null when the user has not supplied a login for it. */
 async function readCredentialSlot(id: RunnerHarnessId): Promise<string | null> {
@@ -93,7 +127,9 @@ async function readCredentialSlot(id: RunnerHarnessId): Promise<string | null> {
  * `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` are STRIPPED for Claude Code so the adapter falls back to the
  * user's Claude Code subscription login instead of billing a raw API key — the same choice the backend's
  * `ClaudeCliModelClient` makes. A runner is the user's own machine; it should spend the user's subscription,
- * not a key that might be sitting in the environment for something else.
+ * not a key that might be sitting in the environment for something else. A key the user PASTED is a
+ * different matter — that is a stated choice rather than an accident of the environment, and it is
+ * honoured below.
  *
  * On a HOSTED runner the login arrives as a credential slot and becomes the harness's provider variable.
  * The slot wins over an inherited variable of the same name: the user's stated login is the authority on a
@@ -108,7 +144,8 @@ export async function harnessEnv(id: RunnerHarnessId): Promise<NodeJS.ProcessEnv
 
   const secret = await readCredentialSlot(id);
   if (secret !== null) {
-    const varName = CREDENTIAL_ENV_VAR[id];
+    // Resolved AFTER the strip above, so a user-supplied API key is honoured while an ambient one is not.
+    const varName = id === 'claude-code' ? claudeCredentialVar(secret) : CREDENTIAL_ENV_VAR[id];
     if (varName === undefined) {
       throw new Error(
         `A provider login was supplied for ${id}, but this runner does not know how to pass one to it. ` +
