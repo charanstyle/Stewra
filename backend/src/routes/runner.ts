@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
+import { hostedRunnerController } from '../controllers/hostedRunnerController.js';
 import { runnerController } from '../controllers/runnerController.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireEmailVerification } from '../middleware/requireEmailVerification.js';
+import { requireHostedRunnerDevice, requireRunnerDevice } from '../middleware/requireRunnerDevice.js';
 
 const router = Router();
 
@@ -47,6 +49,58 @@ router.post(
 // Instant revocation — the reason a runner token is a database row and not a JWT.
 router.delete('/devices/:id', requireAuth, (req, res) => {
   void runnerController.revokeDevice(req, res);
+});
+
+// ── Hosted (cloud) runner ────────────────────────────────────────────────────────────────────────────
+// The cloud-first path: Stewra provisions and runs the container itself. Provisioning creates real
+// infrastructure that can execute code and holds the user's repositories, so every mutating route here
+// requires a VERIFIED email — the same bar as pairing a machine, for the same reason.
+//
+// These are declared BEFORE the `/sessions` block only for readability; Express matches on the literal
+// path, and none of these collide with `/devices/:id` or `/sessions/:id`.
+
+router.get('/hosted', requireAuth, (req, res) => {
+  void hostedRunnerController.status(req, res);
+});
+
+router.post('/hosted', requireAuth, verified, (req, res) => {
+  void hostedRunnerController.provision(req, res);
+});
+
+router.post('/hosted/start', requireAuth, verified, (req, res) => {
+  void hostedRunnerController.start(req, res);
+});
+
+router.post('/hosted/stop', requireAuth, verified, (req, res) => {
+  void hostedRunnerController.stop(req, res);
+});
+
+// Destroys the container AND its volumes — the cloned repositories and anything uncommitted go with it.
+router.delete('/hosted', requireAuth, verified, (req, res) => {
+  void hostedRunnerController.destroy(req, res);
+});
+
+router.put('/hosted/credentials/:harness', requireAuth, verified, (req, res) => {
+  void hostedRunnerController.updateCredential(req, res);
+});
+
+// ── Runner-facing (device token, hosted containers only) ─────────────────────────────────────────────
+// Called by the RUNNER process, not a browser: authenticated by its device token, exactly like its
+// socket. `requireHostedRunnerDevice` is what keeps the laptop invariant intact — a credential Stewra
+// minted may reach a container Stewra runs, and never a machine it does not control.
+//
+// Deliberately NOT rate-limited, unlike `/runner-token` above. That limiter exists for an endpoint that
+// is unauthenticated and guessable, and its bucket is GLOBAL (see middleware/rateLimit.ts) — putting an
+// authenticated, per-operation endpoint behind it would let one runner in a retry loop deny every other
+// user's git. The real protections here are stronger anyway: the caller must hold a live device token
+// (revoking it shuts the door instantly), and `githubAppService` caches installation tokens in memory,
+// so a chatty runner costs a map lookup rather than a request to GitHub.
+router.post('/git-credentials', requireRunnerDevice, requireHostedRunnerDevice, (req, res) => {
+  void hostedRunnerController.gitCredentials(req, res);
+});
+
+router.get('/hosted/workspaces', requireRunnerDevice, requireHostedRunnerDevice, (req, res) => {
+  void hostedRunnerController.workspaces(req, res);
 });
 
 // ── Sessions ─────────────────────────────────────────────────────────────────────────────────────────

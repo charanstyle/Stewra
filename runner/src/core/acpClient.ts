@@ -87,9 +87,12 @@ export class AcpSession {
   /** Spawn the harness, initialize the protocol, and open a session in the worktree. */
   async start(): Promise<void> {
     const { command, args } = harnessCommand(this.harness);
+    // Awaited before the spawn so a credential slot this runner cannot use fails HERE, with a message
+    // naming the harness, rather than as an authentication error from the agent several turns later.
+    const env = await harnessEnv(this.harness);
     const child = spawn(command, [...args], {
       cwd: this.cwd,
-      env: harnessEnv(this.harness),
+      env,
       // stdin+stdout carry ACP; stderr is inherited so a harness crash is visible in the runner's logs.
       stdio: ['pipe', 'pipe', 'inherit'],
     });

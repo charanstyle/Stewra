@@ -23,6 +23,7 @@ import mediaRoutes from './routes/media.js';
 import homeRoutes from './routes/home.js';
 import channelsRoutes from './routes/channels.js';
 import runnerRoutes from './routes/runner.js';
+import githubAppRoutes from './routes/githubApp.js';
 import whatsappWebhookRoutes from './routes/whatsappWebhook.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
@@ -56,6 +57,7 @@ export function createApp(): Express {
   app.use('/connections', connectionRoutes);
   app.use('/channels', channelsRoutes);
   app.use('/runner', runnerRoutes);
+  app.use('/github-app', githubAppRoutes);
   app.use('/insights', insightRoutes);
   app.use('/insights', feedbackRoutes);
   app.use('/memory', memoryRoutes);

@@ -59,6 +59,9 @@ services:
       - "127.0.0.1:3023:3001"
     networks:
       - postgres_default
+      # How the backend reaches the provisioner (http://provisioner:3050) to create/start/stop hosted
+      # runner containers. Internal-only network — see its definition at the bottom of this file.
+      - stewra_internal
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # Persisted media (recorded voice clips + Piper TTS output). Set UPLOADS_DIR=/data/uploads in
@@ -72,6 +75,46 @@ services:
     # and conflicts with the operator's own dev login, and the CLI rewrites the file to a dead state).
     # The setup-token is purpose-built for automation (~1y, no refresh dance), so a fresh writable HOME
     # (/root in the container layer) is all the CLI needs at runtime.
+
+  # Hosted coding-session runners: the provisioner is the only process on this host with the Docker
+  # socket, and the backend can reach it only over `stewra_internal`. The backend parses untrusted
+  # internet input; if it held the socket, one deserialization bug would be host root. Instead it can
+  # ask for "a container for device <uuid>" and nothing else — the hardened template (caps, limits,
+  # mounts, network) lives in provisioner/src/template.ts and no request can influence it.
+  #
+  # PREREQUISITES on the host, before the first `up`:
+  #   1. bash deploy/hosted-runner/create-network.sh        (the isolated stewra_runners network)
+  #   2. sudo bash deploy/hosted-runner/iptables-egress.sh  (fence it off the LAN — and persist it)
+  #   3. build + tag the runner image this provisioner is pinned to (RUNNER_IMAGE in provisioner.env)
+  #   4. write provisioner.env (PROVISIONER_TOKEN, DOCKER_SOCKET, RUNNER_IMAGE, RUNNER_NETWORK,
+  #      RUNNER_MEMORY_BYTES, RUNNER_NANO_CPUS, RUNNER_PIDS_LIMIT — all required, it refuses to boot
+  #      without them). The same token goes in stewra.env as HOSTED_RUNNER_PROVISIONER_TOKEN.
+  # Behind the `hosted` profile, so a deploy that has not done the four steps above is unaffected:
+  # a plain `docker compose up -d` never builds, starts, or even resolves this service, and the
+  # backend's HOSTED_RUNNER_ENABLED defaults to false. Start it with `--profile hosted`, at which
+  # point provisioner.env becomes required and its absence stops the deploy — which is correct, since
+  # a provisioner with no configuration must not run.
+  provisioner:
+    profiles: ["hosted"]
+    build:
+      context: .
+      dockerfile: provisioner/Dockerfile
+    image: stewra-provisioner:latest
+    restart: unless-stopped
+    env_file: ./provisioner.env
+    # NO published ports. Nothing outside this compose project can address it.
+    networks:
+      - stewra_internal
+    volumes:
+      # The socket, and nothing else. Read-write because creating containers requires it; :ro would
+      # be theatre (the Docker API is a socket protocol, not a filesystem).
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      # Fails when the daemon stops answering, which is exactly when hosted runners are unmanageable.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3050/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   website:
     build:
@@ -88,10 +131,16 @@ services:
     ports:
       - "127.0.0.1:3022:80"
 
-# The shared Postgres container's network, created by the postgres stack.
 networks:
+  # The shared Postgres container's network, created by the postgres stack.
   postgres_default:
     external: true
+  # backend <-> provisioner only. `internal: true` means Docker gives it no gateway at all, so even
+  # if the provisioner's token leaked, there is no route from the outside world to reach it — and no
+  # route from the provisioner out. Note this is NOT the network runner containers live on; that one
+  # is created outside compose by deploy/hosted-runner/create-network.sh and is never joined here.
+  stewra_internal:
+    internal: true
 
 volumes:
   # Owner-scoped media store (voice-in clips + TTS-out WAVs), served only via authenticated GET /media/:id.

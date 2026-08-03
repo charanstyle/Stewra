@@ -24,8 +24,28 @@ export async function saveToken(token: string): Promise<void> {
   await chmod(TOKEN_FILE, 0o600);
 }
 
-/** The stored device token, or null if this runner has never been paired. */
+/**
+ * The token a HOSTED runner was handed through its environment, or null on a paired machine.
+ *
+ * A hosted container never runs `pair`: Stewra created the device row itself and injected the token at
+ * provision time, because the pair-code dance exists to authorise a process Stewra cannot see — and this
+ * one it started. Doubling as the hosted-mode signal keeps "am I hosted?" answerable from one place
+ * instead of a second env var that could disagree with this one.
+ */
+export function hostedDeviceToken(): string | null {
+  const fromEnv = process.env['STEWRA_RUNNER_DEVICE_TOKEN'];
+  return fromEnv !== undefined && fromEnv.trim().length > 0 ? fromEnv.trim() : null;
+}
+
+/**
+ * The device token: the environment's (hosted) ahead of the stored file (paired), or null if neither.
+ *
+ * The environment wins so re-provisioning a container onto an existing home volume cannot resurrect a
+ * revoked token that happens to still be sitting on that disk.
+ */
 export async function loadToken(): Promise<string | null> {
+  const hosted = hostedDeviceToken();
+  if (hosted !== null) return hosted;
   try {
     const token = (await readFile(TOKEN_FILE, 'utf8')).trim();
     return token.length > 0 ? token : null;

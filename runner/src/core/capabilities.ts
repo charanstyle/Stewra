@@ -6,7 +6,9 @@ import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { RUNNER_HARNESS_IDS } from '@stewra/shared-types';
 import type { RunnerHarnessId, RunnerHarnessInfo, RunnerWorkspace } from '@stewra/shared-types';
+import type { RunnerConfig } from '../config.js';
 import { harnessCommand } from './harnessCommand.js';
+import { fetchHostedWorkspaces } from './hostedApi.js';
 import { describeGitDir, ensureClone } from './workspace.js';
 
 const execFileAsync = promisify(execFile);
@@ -57,22 +59,42 @@ function workspaceId(absPath: string): string {
 }
 
 /**
- * The repositories this runner exposes for sessions. Two modes, chosen by `STEWRA_RUNNER_WORKSPACE_MODE`:
+ * What a `backend`-mode runner needs in order to ask Stewra which repositories it should be running
+ * against: where the API is, and the device token that identifies this container to it.
+ */
+export interface BackendWorkspaceContext {
+  readonly config: RunnerConfig;
+  readonly token: string;
+}
+
+/**
+ * The repositories this runner exposes for sessions. Three modes, chosen by `STEWRA_RUNNER_WORKSPACE_MODE`:
  *
  *   `local` (default) — a laptop: repos already on disk, from `STEWRA_RUNNER_WORKSPACES`.
- *   `clone`           — a cloud VM: repos the runner `git clone`s from `STEWRA_RUNNER_CLONE_REPOS`.
+ *   `clone`           — a cloud VM the user owns: repos cloned from `STEWRA_RUNNER_CLONE_REPOS`.
+ *   `backend`         — a Stewra-hosted container: repos Stewra names, from the user's GitHub App install.
  *
- * It's the SAME binary either way — only where the code comes from differs — so everything downstream
+ * It's the SAME binary in every mode — only where the code comes from differs — so everything downstream
  * (worktrees, sessions, push/PR) is unchanged. An unknown mode is a config mistake we surface loudly and
  * then treat as `local`, rather than crash the hello loop.
  */
-export async function detectWorkspaces(): Promise<RunnerWorkspace[]> {
+export async function detectWorkspaces(context?: BackendWorkspaceContext): Promise<RunnerWorkspace[]> {
   // fallback-ok: 'local' names BEHAVIOUR (where repos come from), not a target the work is sent to.
   // Both modes act only on this machine, and an unrecognised value is reported loudly just below.
   const mode = (process.env['STEWRA_RUNNER_WORKSPACE_MODE'] ?? 'local').trim().toLowerCase(); // fallback-ok
   if (mode === 'clone') return detectClonedWorkspaces();
+  if (mode === 'backend') {
+    if (context === undefined) {
+      // Not recoverable by falling back to `local`: this runner has no local checkouts to fall back TO,
+      // and reporting zero workspaces would look to the user like an empty GitHub installation.
+      throw new Error(
+        'STEWRA_RUNNER_WORKSPACE_MODE=backend requires a device token, and this runner has none.',
+      );
+    }
+    return detectBackendWorkspaces(context);
+  }
   if (mode !== 'local') {
-    process.stderr.write(`Stewra Runner: unknown STEWRA_RUNNER_WORKSPACE_MODE="${mode}" (expected local|clone); using local\n`);
+    process.stderr.write(`Stewra Runner: unknown STEWRA_RUNNER_WORKSPACE_MODE="${mode}" (expected local|clone|backend); using local\n`);
   }
   return detectLocalWorkspaces();
 }
@@ -118,6 +140,20 @@ function cloneRoot(): string {
     : join(homedir(), '.stewra-runner', 'workspaces');
 }
 
+/**
+ * Hand out a unique on-disk directory name per repo. Two distinct URLs whose tail is the same name (a
+ * fork, the same repo on a different host, two owners' `api`) must not collide on disk and silently
+ * become one workspace, so the second and later claimants get a numeric suffix.
+ */
+function dirNamer(): (base: string) => string {
+  const used = new Map<string, number>();
+  return (base: string): string => {
+    const seen = used.get(base) ?? 0;
+    used.set(base, seen + 1);
+    return seen === 0 ? base : `${base}-${seen}`;
+  };
+}
+
 /** A filesystem-safe directory name from a clone URL's tail, e.g. `.../my-repo.git` -> `my-repo`. */
 function repoDirName(url: string): string {
   const tail = url.replace(/\.git$/i, '').replace(/[/:]+$/, '').split(/[/:]/).pop() ?? '';
@@ -139,14 +175,10 @@ async function detectClonedWorkspaces(): Promise<RunnerWorkspace[]> {
 
   const urls = raw.split(/[\s,;]+/).map((s) => s.trim()).filter((s) => s.length > 0);
   const root = cloneRoot();
-  const used = new Map<string, number>();
+  const uniqueDirName = dirNamer();
   const workspaces: RunnerWorkspace[] = [];
   for (const url of urls) {
-    // Two distinct URLs whose tail is the same name (a fork, a different host) must not collide on disk.
-    const base = repoDirName(url);
-    const seen = used.get(base) ?? 0;
-    used.set(base, seen + 1);
-    const name = seen === 0 ? base : `${base}-${seen}`;
+    const name = uniqueDirName(repoDirName(url));
     const dir = join(root, name);
     try {
       const cloned = await ensureClone(url, dir);
@@ -160,6 +192,54 @@ async function detectClonedWorkspaces(): Promise<RunnerWorkspace[]> {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       process.stderr.write(`Stewra Runner: skipping repo (clone/fetch failed): ${url} — ${reason}\n`);
+    }
+  }
+  return workspaces;
+}
+
+/**
+ * Stewra-hosted repos: ask the backend which repositories the user's GitHub App installation covers, then
+ * clone each one exactly as `clone` mode does.
+ *
+ * The list is fetched at every boot instead of being frozen into the container's environment at provision
+ * time, so adding a repository to the installation reaches this runner the next time it starts rather than
+ * requiring a reprovision that would discard every clone.
+ *
+ * Cloning uses the git credential helper this binary installs in hosted mode, which mints a short-lived
+ * installation token per operation — so nothing long-lived is written to the container's disk.
+ *
+ * A failure to reach the backend is fatal here, deliberately: reporting an empty workspace list would be
+ * indistinguishable, in the web app, from a user who has installed the GitHub App on no repositories.
+ * One is a fault to retry, the other is a thing to go fix — they must not look the same.
+ */
+async function detectBackendWorkspaces(context: BackendWorkspaceContext): Promise<RunnerWorkspace[]> {
+  const specs = await fetchHostedWorkspaces(context.config, context.token);
+  if (specs.length === 0) {
+    process.stderr.write('Stewra Runner: no repositories in this account\'s GitHub App installation yet\n');
+    return [];
+  }
+
+  const root = cloneRoot();
+  const uniqueDirName = dirNamer();
+  const workspaces: RunnerWorkspace[] = [];
+  for (const spec of specs) {
+    const dir = join(root, uniqueDirName(repoDirName(spec.cloneUrl)));
+    try {
+      const cloned = await ensureClone(spec.cloneUrl, dir);
+      workspaces.push({
+        // The backend's id (`owner/name`), not a path hash: it is stable across a container rebuild that
+        // lands the same repo in a different directory, and it is what the user sees named in the app.
+        id: spec.id,
+        name: spec.name,
+        path: dir,
+        gitRemote: cloned.gitRemote,
+        defaultBranch: cloned.defaultBranch,
+      });
+    } catch (error) {
+      // One unreachable repo must not cost the user every other one — but it IS reported, because a
+      // workspace silently missing from the picker is the hardest kind of failure to diagnose.
+      const reason = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Stewra Runner: skipping repo (clone/fetch failed): ${spec.id} — ${reason}\n`);
     }
   }
   return workspaces;

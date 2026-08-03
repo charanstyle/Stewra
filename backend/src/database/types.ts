@@ -23,6 +23,8 @@ import type {
   Rating,
   ReactionType,
   ResourceKind,
+  RunnerContainerStatus,
+  RunnerDeviceKind,
   RunnerHarnessId,
   RunnerHarnessInfo,
   RunnerSessionStatus,
@@ -635,9 +637,14 @@ export interface WhatsappOutboundTable {
 }
 
 /**
- * A registered Stewra Runner install on a user's own machine (migration 033). Like `bridge_devices`, there
- * is no `revoked_at`: revoking DELETES the row. `harnesses`/`workspaces` are the runner's last-reported
- * capabilities (jsonb), written as JSON strings and read back parsed.
+ * A registered Stewra Runner install (migration 033), on the user's own machine OR in a container Stewra
+ * hosts (migration 037 — `kind`). Like `bridge_devices`, there is no `revoked_at`: revoking DELETES the
+ * row. `harnesses`/`workspaces` are the runner's last-reported capabilities (jsonb), written as JSON
+ * strings and read back parsed.
+ *
+ * The `container_*` columns are populated only for `kind='hosted'` and describe what Stewra last SAW of
+ * the container — the provisioner's view of Docker is the source of truth, and the hourly reconcile is
+ * what corrects drift (e.g. after a host reboot).
  */
 export interface RunnerDevicesTable {
   id: Generated<string>;
@@ -649,6 +656,16 @@ export interface RunnerDevicesTable {
   os: Generated<string>;
   harnesses: ColumnType<readonly RunnerHarnessInfo[], string | undefined, string>;
   workspaces: ColumnType<readonly RunnerWorkspace[], string | undefined, string>;
+  /** 'local' (the user's machine) or 'hosted' (a container Stewra provisioned). Backfilled 'local'. */
+  kind: Generated<RunnerDeviceKind>;
+  /** The provisioner's handle on the container. NULL exactly when `kind='local'` (checked in the DB). */
+  container_name: ColumnType<string | null, string | null | undefined, string | null>;
+  container_status: ColumnType<
+    RunnerContainerStatus | null,
+    RunnerContainerStatus | null | undefined,
+    RunnerContainerStatus | null
+  >;
+  container_last_started_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   last_seen_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   created_at: CreatedAt;
 }
@@ -695,6 +712,19 @@ export interface RunnerSessionsTable {
   ended_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
 }
 
+/**
+ * The user's GitHub App installation (migration 036) — the one piece of GitHub state at rest, and it
+ * holds NO credential: installation tokens are minted on demand from the App's private key and cached
+ * in memory only. One row per user, and an installation can belong to only one user (both unique).
+ */
+export interface GithubAppInstallationsTable {
+  id: Generated<string>;
+  user_id: string;
+  installation_id: ColumnType<string, number | string, number | string>;
+  account_login: string;
+  created_at: CreatedAt;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -737,4 +767,5 @@ export interface Database {
   runner_devices: RunnerDevicesTable;
   runner_pair_codes: RunnerPairCodesTable;
   runner_sessions: RunnerSessionsTable;
+  github_app_installations: GithubAppInstallationsTable;
 }

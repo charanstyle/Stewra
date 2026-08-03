@@ -1,0 +1,18 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2022"],
+    "types": ["node", "vitest/globals"],
+
+    // ESM on `nodenext`, like the bridge and runner (see bridge/tsconfig.json for the full reasoning):
+    // this workspace must import `@stewra/shared-types` (still CommonJS) under the SAME module
+    // resolution Node will use at runtime, so a green typecheck reflects the real interop. Relative
+    // imports carry a `.js` extension.
+    "module": "nodenext",
+    "moduleResolution": "nodenext"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist", "node_modules"]
+}

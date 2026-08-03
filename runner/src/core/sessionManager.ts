@@ -73,6 +73,15 @@ interface CompletedSession {
  * `RunnerSessionUpdatePayload`/`...DonePayload`/`...PromptPayload` and hands them to an injected emitter;
  * the socket client owns the wire.
  */
+/**
+ * Supplies the environment `gh` runs with when opening a PR, called once per PR.
+ *
+ * Present only on a Stewra-hosted runner, where `gh` has no login of its own and is handed a freshly
+ * minted, short-lived GitHub App installation token. On a machine the user owns this is absent and `gh`
+ * uses the user's own auth, unchanged.
+ */
+export type PrEnvProvider = () => Promise<NodeJS.ProcessEnv>;
+
 export class SessionManager {
   private readonly sessions = new Map<string, LiveSession>();
   /** Finished sessions whose worktree/branch we keep so the user can push / open a PR after the run. */
@@ -84,10 +93,14 @@ export class SessionManager {
     private readonly emitter: SessionEmitter,
     private readonly resolveWorkspace: WorkspaceResolver,
     // Injectable so a test can hit the eviction path with a handful of REAL sessions instead of 101.
-    options?: { readonly maxCompleted?: number },
+    options?: { readonly maxCompleted?: number; readonly prEnv?: PrEnvProvider },
   ) {
     this.maxCompleted = options?.maxCompleted ?? 100;
+    this.prEnv = options?.prEnv;
   }
+
+  /** Set only on a Stewra-hosted runner; see {@link PrEnvProvider}. */
+  private readonly prEnv: PrEnvProvider | undefined;
 
   /**
    * Begin a session: resolve the workspace, cut a worktree, launch the harness, and — once it's genuinely
@@ -280,11 +293,13 @@ export class SessionManager {
         done.pushed = true;
       }
       const base = done.workspace.defaultBranch;
-      const pr = await openPullRequest(done.worktree, {
-        title: payload.title,
-        body: payload.body,
-        ...(base !== undefined ? { base } : {}),
-      });
+      // Minted here, per PR, rather than held: the token lives only as long as this one `gh` invocation.
+      const env = this.prEnv === undefined ? undefined : await this.prEnv();
+      const pr = await openPullRequest(
+        done.worktree,
+        { title: payload.title, body: payload.body, ...(base !== undefined ? { base } : {}) },
+        env,
+      );
       done.prUrl = pr.url;
       return { ok: true, branch: done.worktree.branch, prUrl: pr.url };
     } catch (error) {

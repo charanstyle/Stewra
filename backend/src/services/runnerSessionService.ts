@@ -14,6 +14,7 @@ import type {
 } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
 import { runnerSessionRepository } from '../repositories/runnerSessionRepository.js';
+import { hostedRunnerService } from './hostedRunnerService.js';
 import { runnerChatRelayService } from './runnerChatRelayService.js';
 import { runnerService } from './runnerService.js';
 import {
@@ -78,6 +79,26 @@ class RunnerSessionService {
       status: 'starting',
     });
 
+    // A hosted runner that is offline is not a problem to report — it is a container Stewra stopped to
+    // save resources, and starting it is Stewra's job, not the user's. Waking happens AFTER the session
+    // row exists so the wait is visible as a session in progress rather than a request that hangs, and
+    // after the capability checks, which run against what the runner last reported (a stopped container
+    // still knows what it could do). A laptop that is off stays off: nothing here can start it.
+    if (device.kind === 'hosted' && !device.online) {
+      this.emitStatus(userId, session.id, 'Waking your cloud runner…');
+      const awake = await hostedRunnerService.wakeAndAwait(userId, device.id);
+      if (!awake) {
+        await runnerSessionRepository.finish(userId, session.id, {
+          status: 'failed',
+          error: 'runner_wake_timeout',
+        });
+        const failed = await runnerSessionRepository.get(userId, session.id);
+        if (failed === null) throw new NotFoundError('session vanished after creation');
+        logger.warn('runner: hosted runner did not wake in time', { userId, deviceId: device.id, sessionId: session.id });
+        return failed;
+      }
+    }
+
     const ack = await startSessionOnRunner(userId, device.id, {
       sessionId: session.id,
       harness: req.harness,
@@ -100,6 +121,19 @@ class RunnerSessionService {
     if (fresh === null) throw new NotFoundError('session vanished after creation'); // unreachable in practice
     logger.info('runner: session start', { userId, deviceId: device.id, sessionId: session.id, status: fresh.status });
     return fresh;
+  }
+
+  /**
+   * A status line the SERVER produced, streamed on the same channel a runner's own updates use.
+   *
+   * `seq: 0` because this can only ever be the first thing said about a session — it happens before any
+   * runner has been reached, and a runner's own updates start at its own sequence. Sent as a normal
+   * session update rather than a bespoke event so every existing watcher (web, mobile, the chat relay)
+   * renders it without knowing hosted runners exist.
+   */
+  private emitStatus(userId: string, sessionId: string, text: string): void {
+    const payload: RunnerSessionUpdatePayload = { sessionId, seq: 0, kind: 'status', text };
+    emitToUser(userId, RUNNER_UI_EVENTS.SESSION_UPDATE, payload);
   }
 
   // ── Runner → user relays (called by the /runner socket handler; userId is the runner's own owner) ────

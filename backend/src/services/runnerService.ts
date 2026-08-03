@@ -3,6 +3,7 @@ import type {
   ClaimRunnerTokenResponse,
   GetRunnerStatusResponse,
   ListRunnerDevicesResponse,
+  RunnerDeviceKind,
   RunnerHarnessInfo,
   RunnerWorkspace,
   StartRunnerPairingResponse,
@@ -10,6 +11,7 @@ import type {
 import { config } from '../config/unifiedConfig.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
 import { runnerDeviceRepository } from '../repositories/runnerDeviceRepository.js';
+import { hostedRunnerService } from './hostedRunnerService.js';
 import { listOnlineDeviceIds, notifyRunnerRevoked } from '../websocket/runnerEmitter.js';
 import { AuthenticationError, ForbiddenError, ServiceUnavailableError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
@@ -87,19 +89,26 @@ class RunnerService {
   }
 
   /**
-   * Authenticate a raw runner token. The `/runner` namespace's middleware is the only caller. Returns null
-   * rather than throwing, because the socket layer wants to reject quietly, not 500.
+   * Authenticate a raw runner token. The `/runner` namespace's middleware and the REST
+   * `requireRunnerDevice` are its callers. Returns null rather than throwing, because the socket layer
+   * wants to reject quietly, not 500.
+   *
+   * `kind` comes back with it because some device-token endpoints are hosted-only: a credential Stewra
+   * minted may go to a container Stewra runs, and never to a machine it does not control.
    */
-  async authenticateRunner(token: string): Promise<{ deviceId: string; userId: string } | null> {
+  async authenticateRunner(
+    token: string,
+  ): Promise<{ deviceId: string; userId: string; kind: RunnerDeviceKind } | null> {
     if (!config.runner.enabled) return null;
     return runnerDeviceRepository.findByToken(token);
   }
 
-  /** Persist a runner's reported capabilities + liveness (driven by `runner:hello`). */
+  /** Persist a runner's reported capabilities, version, and liveness (driven by `runner:hello`). */
   async recordCapabilities(
     deviceId: string,
     params: {
       os: string;
+      appVersion: string;
       harnesses: readonly RunnerHarnessInfo[];
       workspaces: readonly RunnerWorkspace[];
     },
@@ -136,22 +145,50 @@ class RunnerService {
     };
   }
 
-  /** Revoke a runner. Instant — the reason runner tokens are database rows, not JWTs. */
+  /**
+   * Revoke a runner. Instant — the reason runner tokens are database rows, not JWTs.
+   *
+   * For a HOSTED runner, revoking also destroys the container: leaving it alive would mean Stewra keeps
+   * paying to run a process the user has disowned. Its volumes go with it, because the device row that
+   * was the only way to reach them is gone. The lookup happens BEFORE the delete (the row is what names
+   * the container) but the container teardown happens AFTER, so the token — the security-relevant part —
+   * dies first and does not wait on Docker.
+   */
   async revokeDevice(userId: string, deviceId: string): Promise<boolean> {
     this.assertEnabled();
+    // Looked up regardless of whether hosted runners are currently ENABLED. A deploy that switched the
+    // feature off still has whatever containers it provisioned while it was on, and skipping the lookup
+    // would silently strand one on every revoke — the exact leak this whole path exists to prevent.
+    // The online set is empty because whether it is connected does not change what revoking must do.
+    const hosted = await runnerDeviceRepository.findHostedById(userId, deviceId, new Set<string>());
     const revoked = await runnerDeviceRepository.revoke(userId, deviceId);
 
     if (revoked) {
       // The token row is already gone, so the device can never reconnect. This tells it to stop NOW.
       await notifyRunnerRevoked(userId, deviceId);
+      if (hosted !== null && config.hostedRunner.enabled) {
+        // Best-effort, and deliberately not awaited into a failure: the token is already dead, so a
+        // container we could not reach is inert. `hostedRunnerService.reconcile` sweeps it hourly.
+        await hostedRunnerService.destroyContainer(deviceId, { removeVolumes: true });
+      } else if (hosted !== null) {
+        // Nothing here can reach the provisioner, and nothing will sweep it either (the reconcile timer
+        // is off with the feature). This is the one case that needs a human, so it says so by name.
+        logger.error(
+          'runner: revoked a hosted device while hosted runners are DISABLED; its container must be removed by hand',
+          { userId, deviceId, containerName: `stewra-runner-${deviceId}` },
+        );
+      }
       await auditWriter.write({
         userId,
         action: 'disconnect',
         resourceType: 'system',
         resourceId: deviceId,
-        summary: 'You revoked a Stewra Runner device.',
+        summary:
+          hosted === null
+            ? 'You revoked a Stewra Runner device.'
+            : 'You revoked your Stewra Cloud Runner; its container and cloned repositories were destroyed.',
         success: true,
-        metadata: { deviceId },
+        metadata: { deviceId, kind: hosted === null ? 'local' : 'hosted' },
       });
     }
     return revoked;

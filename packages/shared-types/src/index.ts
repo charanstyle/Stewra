@@ -245,6 +245,23 @@ export type {
   OpenRunnerPrResponse,
 } from './api/runner';
 export type {
+  GithubRepoInfo,
+  GetGithubAppStatusResponse,
+  LinkGithubInstallationRequest,
+  LinkGithubInstallationResponse,
+  UnlinkGithubInstallationResponse,
+} from './api/githubApp';
+export type {
+  ProvisionHostedRunnerRequest,
+  GetHostedRunnerResponse,
+  HostedRunnerResponse,
+  DestroyHostedRunnerResponse,
+  UpdateHostedRunnerCredentialRequest,
+  RunnerGitCredentialsResponse,
+  HostedWorkspaceSpec,
+  HostedWorkspacesResponse,
+} from './api/hostedRunner';
+export type {
   IceServerConfig,
   TurnCredentialsResponse,
   CallPushPlatform,
@@ -322,6 +339,8 @@ export {
   RUNNER_CLIENT_EVENTS,
   RUNNER_SERVER_EVENTS,
   RUNNER_HARNESS_IDS,
+  RUNNER_DEVICE_KINDS,
+  RUNNER_CONTAINER_STATUSES,
   RUNNER_SESSION_STATUSES,
   RUNNER_UPDATE_KINDS,
   RUNNER_PERMISSION_KINDS,
@@ -332,6 +351,8 @@ export type {
   RunnerServerEvent,
   RunnerUiEvent,
   RunnerHarnessId,
+  RunnerDeviceKind,
+  RunnerContainerStatus,
   RunnerSessionStatus,
   RunnerUpdateKind,
   RunnerPermissionKind,

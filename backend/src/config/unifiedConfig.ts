@@ -323,6 +323,46 @@ const EnvSchema = z.object({
   RUNNER_DEVICE_TOKEN_BYTES: z.coerce.number().int().min(16).max(64).default(32),
   // How long a single-use runner pairing code is valid before it expires.
   RUNNER_PAIR_CODE_TTL_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
+
+  // ── Stewra GITHUB APP (click-through repo access for the hosted runner) ────────────────────────────
+  // The three below describe the GitHub App this deploy registered. All-or-nothing: setting some but not
+  // all is operator error and refuses to boot (enforced below). When none are set the feature simply
+  // reports itself unconfigured — a laptop-only deploy needs no GitHub App.
+  GITHUB_APP_ID: z.string().regex(/^\d+$/).optional(),
+  // The App's URL slug (github.com/apps/<slug>) — where the user is sent to install it.
+  GITHUB_APP_SLUG: z.string().min(1).optional(),
+  // The App's private key, PEM, base64-encoded so it survives env-file transport as one line. This is
+  // STEWRA'S OWN operational credential (like JWT_SECRET), not a user secret — hence env, not vault.
+  GITHUB_APP_PRIVATE_KEY_BASE64: z.string().min(1).optional(),
+  // GitHub API origin. A protocol endpoint, not a tunable — overridable so the service can be driven
+  // against a local stand-in in tests, same reasoning as WHATSAPP_GRAPH_BASE_URL.
+  GITHUB_API_BASE_URL: z.string().url().default('https://api.github.com'),
+
+  // ── HOSTED RUNNERS (the cloud-first path: Stewra runs the coding-agent container itself) ────────────
+  // Off by default and its own switch: a deploy that offers the laptop runner must not start creating
+  // containers on its host because someone enabled a neighbouring feature.
+  HOSTED_RUNNER_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // Where the provisioner answers — the ONLY process holding the Docker socket, reachable only on the
+  // internal compose network. A target: no default, ever.
+  HOSTED_RUNNER_PROVISIONER_URL: z.string().url().optional(),
+  // The provisioner's bearer token. This is the entire authentication story between the backend and a
+  // process that can create containers on the host, so it is bounded here the same way as at the other
+  // end (provisioner/src/config.ts requires ≥32 characters).
+  HOSTED_RUNNER_PROVISIONER_TOKEN: z.string().min(32).optional(),
+  // The exact runner image (repository:tag) to provision. Sent verbatim and rejected by the provisioner
+  // unless it matches what THAT service was configured with — so a compromised backend cannot choose the
+  // image its containers run.
+  HOSTED_RUNNER_IMAGE: z.string().min(1).optional(),
+  // The public origin a hosted runner dials back on (it reaches Stewra the same way any client does).
+  // A target, and one that must be the PUBLIC origin rather than an internal name: guessing it would
+  // produce runners that boot, fail to connect, and look like an image problem.
+  HOSTED_RUNNER_API_URL: z.string().url().optional(),
+  // How long a hosted runner may sit idle before its container is stopped to free the host. 0 disables
+  // idle-stop. A behaviour knob, not a target — stopping is always recoverable (the next session wakes
+  // it), and the volumes, which hold the actual work, are never touched by it.
+  HOSTED_RUNNER_IDLE_STOP_MINUTES: z.coerce.number().int().min(0).max(1440).default(60),
+  // How long to wait for a woken container to connect its socket before failing the session honestly.
+  HOSTED_RUNNER_WAKE_TIMEOUT_SECONDS: z.coerce.number().int().min(10).max(600).default(90),
 });
 
 const parsed = EnvSchema.safeParse(process.env);
@@ -431,6 +471,62 @@ if (env.RUNNER_ENABLED) {
       `RUNNER_LATEST_VERSION (${latest}) must be >= RUNNER_MIN_VERSION (${min})`,
     );
   }
+}
+
+// Fail loud when the GitHub App is partially configured. Some-but-not-all is always operator error:
+// a half-configured App would report itself "configured" to the UI and then fail at token mint time,
+// deep inside a hosted runner's git operation — the worst possible place to discover a typo'd env file.
+{
+  const githubAppKeys = ['GITHUB_APP_ID', 'GITHUB_APP_SLUG', 'GITHUB_APP_PRIVATE_KEY_BASE64'] as const;
+  const present = githubAppKeys.filter((k) => env[k]);
+  if (present.length > 0 && present.length < githubAppKeys.length) {
+    const missing = githubAppKeys.filter((k) => !env[k]);
+    throw new Error(
+      `GitHub App configuration is incomplete: ${present.join(', ')} set but ${missing.join(', ')} missing`,
+    );
+  }
+}
+
+// Fail loud when hosted runners are enabled but under-configured or unsupported by the rest of the
+// config. Each of these is a target or a credential the feature cannot invent:
+//   - without the provisioner URL/token there is nothing to create containers with;
+//   - without the image there is nothing to run;
+//   - without the public API URL every container Stewra creates boots and silently fails to connect;
+//   - without RUNNER_ENABLED the `/runner` namespace is not even mounted, so a provisioned container
+//     would have nowhere to dial — and a stopped feature that still bills for containers is worse;
+//   - without a GitHub App there is no way to give the container a repository, which is the whole point.
+// A half-configured hosted deploy fails at provision time, in front of a user, having already created a
+// container it then has to roll back. Refusing to boot puts the failure in front of the operator instead.
+if (env.HOSTED_RUNNER_ENABLED) {
+  const missing = (
+    [
+      'HOSTED_RUNNER_PROVISIONER_URL',
+      'HOSTED_RUNNER_PROVISIONER_TOKEN',
+      'HOSTED_RUNNER_IMAGE',
+      'HOSTED_RUNNER_API_URL',
+    ] as const
+  ).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`HOSTED_RUNNER_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+  if (!env.RUNNER_ENABLED) {
+    throw new Error('HOSTED_RUNNER_ENABLED=true requires RUNNER_ENABLED=true');
+  }
+  if (env.GITHUB_APP_ID === undefined) {
+    throw new Error(
+      'HOSTED_RUNNER_ENABLED=true requires the GitHub App (GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_PRIVATE_KEY_BASE64)',
+    );
+  }
+}
+
+// The App's key arrives base64-wrapped; decode once, and refuse to boot on a value that is not a PEM —
+// a corrupt key would otherwise surface as a signing error at the first token mint instead of here.
+const githubAppPrivateKeyPem =
+  env.GITHUB_APP_PRIVATE_KEY_BASE64 === undefined
+    ? ''
+    : Buffer.from(env.GITHUB_APP_PRIVATE_KEY_BASE64, 'base64').toString('utf8');
+if (env.GITHUB_APP_PRIVATE_KEY_BASE64 !== undefined && !githubAppPrivateKeyPem.includes('-----BEGIN')) {
+  throw new Error('GITHUB_APP_PRIVATE_KEY_BASE64 does not decode to a PEM private key');
 }
 
 // Fail loud when approve-to-send email over WhatsApp is enabled but its push credential is missing.
@@ -676,6 +772,37 @@ export const config = {
     latestVersion: env.RUNNER_LATEST_VERSION ?? '',
     deviceTokenBytes: env.RUNNER_DEVICE_TOKEN_BYTES,
     pairCodeTtlMs: env.RUNNER_PAIR_CODE_TTL_MINUTES * 60 * 1000,
+  },
+  githubApp: {
+    /** True when this deploy registered a GitHub App (all three settings present — enforced above). */
+    enabled: env.GITHUB_APP_ID !== undefined,
+    appId: env.GITHUB_APP_ID ?? '',
+    slug: env.GITHUB_APP_SLUG ?? '',
+    /** The App's private key, decoded to PEM. Stewra's own operational credential, like the JWT secret. */
+    privateKeyPem: githubAppPrivateKeyPem,
+    /** GitHub API origin — overridable only so tests can stand in a local server. */
+    apiBaseUrl: env.GITHUB_API_BASE_URL,
+  },
+  hostedRunner: {
+    /**
+     * The cloud-first path: Stewra provisions and runs the coding-agent container itself. Its own
+     * switch, separate from `runner.enabled`, so a deploy can offer the laptop runner without ever
+     * creating a container on its host. Enabling it REQUIRES `runner.enabled` and a GitHub App (both
+     * enforced above), so this flag alone is enough for callers to gate on.
+     */
+    enabled: env.HOSTED_RUNNER_ENABLED,
+    /** The provisioner's internal base URL. Empty unless enabled (fail-loud above). */
+    provisionerUrl: env.HOSTED_RUNNER_PROVISIONER_URL ?? '',
+    /** Bearer token for the provisioner — the whole authentication story to the Docker-socket holder. */
+    provisionerToken: env.HOSTED_RUNNER_PROVISIONER_TOKEN ?? '',
+    /** The exact repository:tag to provision. The provisioner rejects anything but its own configured image. */
+    image: env.HOSTED_RUNNER_IMAGE ?? '',
+    /** The PUBLIC origin a hosted runner dials back on, injected as STEWRA_API_URL. */
+    apiUrl: env.HOSTED_RUNNER_API_URL ?? '',
+    /** Idle window before a container is stopped. Zero disables the sweep entirely. */
+    idleStopMinutes: env.HOSTED_RUNNER_IDLE_STOP_MINUTES,
+    /** How long a session start waits for a woken container to connect before failing honestly. */
+    wakeTimeoutMs: env.HOSTED_RUNNER_WAKE_TIMEOUT_SECONDS * 1000,
   },
   uploads: {
     // Mounted volume for uploaded/synthesized media; served only via authenticated GET /media/:id.

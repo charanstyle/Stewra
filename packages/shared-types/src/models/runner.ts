@@ -1,5 +1,7 @@
 import type { ISODateString, UUID } from '../common/base';
 import type {
+  RunnerContainerStatus,
+  RunnerDeviceKind,
   RunnerHarnessId,
   RunnerHarnessInfo,
   RunnerSessionStatus,
@@ -25,6 +27,18 @@ export interface RunnerDevice {
   /** `process.platform` the runner reported (e.g. `darwin`, `linux`) — helps tell machines apart. */
   readonly os: string;
   readonly appVersion: string;
+  /**
+   * Whether this runner is the user's own machine or a container Stewra hosts. The UI shows them in one
+   * list on purpose — the same "these machines can run code for you, kill any of them" guarantee covers
+   * both — but only a hosted one can be started, stopped, or destroyed from the app.
+   */
+  readonly kind: RunnerDeviceKind;
+  /**
+   * What Stewra last saw of the container, for hosted runners only (null for a local one). Advisory:
+   * `online` is still the live truth about whether the runner is connected; this explains WHY it is not
+   * (stopped to save resources vs. failed to start) so the UI can offer the right action.
+   */
+  readonly containerStatus: RunnerContainerStatus | null;
   /** Whether one of this device's sockets is connected right now. Composed at read time, never stored. */
   readonly online: boolean;
   /** The coding harnesses this machine can host, as last reported. Empty until the runner says hello. */

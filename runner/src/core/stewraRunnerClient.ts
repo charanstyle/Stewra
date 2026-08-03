@@ -4,7 +4,9 @@ import { RUNNER_CLIENT_EVENTS, RUNNER_HARNESS_IDS, RUNNER_SERVER_EVENTS } from '
 import type { RunnerHelloPayload, RunnerUpdateAvailablePayload, RunnerWorkspace } from '@stewra/shared-types';
 import { z } from 'zod';
 import type { RunnerConfig } from '../config.js';
+import { fetchGitCredentials } from './hostedApi.js';
 import { SessionManager } from './sessionManager.js';
+import { hostedDeviceToken } from './tokenStore.js';
 
 const claimResponseSchema = z.object({
   data: z.object({
@@ -124,6 +126,16 @@ export class StewraRunnerClient {
         permission: (payload) => socket.emit(RUNNER_CLIENT_EVENTS.PERMISSION_REQUEST, payload),
       },
       (workspaceId) => this.workspaces.find((w) => w.id === workspaceId),
+      // Only a HOSTED runner supplies `gh` with a token: on a machine the user owns, `gh` has the user's
+      // own login and Stewra must not override it with one of its own.
+      hostedDeviceToken() === null
+        ? undefined
+        : {
+            prEnv: async (): Promise<NodeJS.ProcessEnv> => {
+              const credentials = await fetchGitCredentials(this.config, token);
+              return { ...process.env, GH_TOKEN: credentials.token };
+            },
+          },
     );
 
     socket.on('connect', () => {

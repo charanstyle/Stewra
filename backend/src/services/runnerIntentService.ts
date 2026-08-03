@@ -178,7 +178,10 @@ class RunnerIntentService {
     }
 
     const { devices } = await runnerService.listDevices(userId);
-    const online = devices.filter((d) => d.online);
+    // A cloud runner counts as available even when its container is stopped: starting it is Stewra's
+    // job, and `startSession` wakes it. Only a machine of the user's own is genuinely unreachable when
+    // offline — nothing here can turn a laptop on.
+    const online = devices.filter((d) => d.online || d.kind === 'hosted');
     const sessions = (await runnerSessionService.listSessions(userId)).sessions;
 
     const context = this.buildContext(
@@ -269,7 +272,8 @@ class RunnerIntentService {
   ): RunnerIntentOutcome | null {
     if (online.length === 0) {
       return {
-        reply: 'None of your runner machines are online right now, so there\'s nothing to run this on.',
+        reply:
+          'You have no runner available right now — set up a cloud runner in Stewra, or start the runner on one of your own machines.',
         proposal: null,
       };
     }
@@ -374,7 +378,7 @@ class RunnerIntentService {
         });
         return {
           started: false,
-          reply: `I couldn't start it on ${proposal.deviceName}${session.error ? `: ${session.error}` : '.'}`,
+          reply: this.startFailureReply(proposal.deviceName, session.error),
         };
       }
 
@@ -559,6 +563,22 @@ class RunnerIntentService {
     return { device, workspace, harness: chosenHarness };
   }
 
+  /**
+   * A start failure, said in words. The session row carries a machine-readable reason (it has to — the
+   * UI and the API both read it), and relaying that verbatim into a chat is how a user ends up reading
+   * "runner_wake_timeout" from an assistant. The known reasons get a sentence; anything else is passed
+   * through rather than swallowed, because an unexplained failure is worse than an ugly one.
+   */
+  private startFailureReply(deviceName: string, error: string | null): string {
+    if (error === 'runner_wake_timeout') {
+      return `Your cloud runner didn't finish starting up in time. Try again in a moment — it usually only takes a minute.`;
+    }
+    if (error === 'device_offline') {
+      return `${deviceName} isn't reachable right now — is the runner running on that machine?`;
+    }
+    return `I couldn't start it on ${deviceName}${error !== null && error.length > 0 ? `: ${error}` : '.'}`;
+  }
+
   private asHarnessId(value: string): RunnerHarnessId | null {
     return RUNNER_HARNESS_IDS.find((id) => id === value) ?? null;
   }
@@ -573,15 +593,20 @@ class RunnerIntentService {
     const lines: string[] = [];
 
     if (online.length === 0) {
-      lines.push('Online machines: none.');
+      lines.push('Available machines: none.');
     } else {
-      lines.push('Online machines:');
+      lines.push('Available machines:');
       for (const d of online) {
         // fallback-ok (both): this is prose being rendered for the model. An empty list genuinely
         // IS "none" here — nothing failed, and no caller branches on the string.
         const harnesses = d.harnesses.filter((h) => h.available).map((h) => h.id).join(', ') || 'none'; // fallback-ok
         const workspaces = d.workspaces.map((w) => `${w.name} [id=${w.id}]`).join(', ') || 'none'; // fallback-ok
-        lines.push(`- ${d.name} [deviceId=${d.id}] (${d.os}); harnesses: ${harnesses}; workspaces: ${workspaces}`);
+        // A sleeping cloud runner is still a valid target — the classifier must not rule it out, and the
+        // user should hear that starting one takes a moment rather than that their runner is broken.
+        const state = d.online ? '' : ' — asleep, wakes automatically (takes about a minute)';
+        lines.push(
+          `- ${d.name} [deviceId=${d.id}] (${d.os})${state}; harnesses: ${harnesses}; workspaces: ${workspaces}`,
+        );
       }
     }
 

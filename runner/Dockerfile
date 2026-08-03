@@ -13,8 +13,9 @@
 # ── build stage: compile @stewra/shared-types + the runner from the monorepo ──────────────────────────
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
-# Manifests first so `npm ci` caches until a dependency actually changes.
-COPY package.json package-lock.json ./
+# Manifests first so `npm ci` caches until a dependency actually changes. `tsconfig.base.json` comes with
+# them because every workspace's tsconfig extends it — without it `tsc` fails with TS5083 at build time.
+COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/shared-types/package.json packages/shared-types/
 COPY runner/package.json runner/
 RUN npm ci
@@ -50,7 +51,12 @@ COPY --from=build /app/runner/dist ./runner/dist
 # volumes so a restart re-pairs from the saved token and reuses existing clones instead of starting cold.
 RUN useradd -m -u 10001 runner \
  && mkdir -p /data/workspaces /home/runner/.stewra-runner \
- && chown -R runner:runner /data /home/runner
+ && chown -R runner:runner /data /home/runner \
+ # COPY preserves the source tree's permissions, and a developer checkout made under a restrictive umask
+ # is owner-only. That lands root-owned, mode-600 files in /app, which the non-root `runner` user cannot
+ # read — the process dies on its first import. `a+rX` grants read to everyone and execute only where it
+ # already applies (directories and real executables), so the app stays runnable without becoming writable.
+ && chmod -R a+rX /app
 USER runner
 
 ENV NODE_ENV=production \
@@ -64,3 +70,40 @@ VOLUME ["/data", "/home/runner"]
 #   then run:   docker run ... stewra-runner run   (the default CMD)
 ENTRYPOINT ["node", "runner/dist/cli.js"]
 CMD ["run"]
+
+# ── hosted stage: the image STEWRA runs on its own infrastructure ─────────────────────────────────────
+#
+# Everything above is the runner a user puts on a VM they own. This stage is the one the provisioner
+# starts per user, and it differs in three ways:
+#
+#   1. The coding agent is IN the image. A user's own VM is a machine they administer, so they install
+#      Claude Code themselves; nobody administers this container, so it ships ready to run.
+#   2. Repositories come from Stewra (`WORKSPACE_MODE=backend`), derived from the user's GitHub App
+#      installation, rather than from a list the operator wrote out by hand.
+#   3. `TMPDIR` points at the data volume. Session worktrees are created under `os.tmpdir()`, and the
+#      container's default `/tmp` is neither persistent nor sized for a checkout of a real repository.
+#
+# Build from the REPO ROOT:
+#   docker build -f runner/Dockerfile --target hosted -t stewra-runner-hosted:<version> .
+FROM runtime AS hosted
+USER root
+# Pinned exactly, not floated: this image is what a user's coding session runs inside, and an agent that
+# silently changed version underneath a running deployment is not something we could reproduce a bug in.
+#
+# Install scripts run deliberately: `@anthropic-ai/claude-code` fetches its native binary in a postinstall,
+# and with `--ignore-scripts` the package installs "successfully" but every invocation fails with
+# "claude native binary not installed" — a broken image that builds green. The verification below turns
+# that from a runtime discovery into a build failure.
+RUN npm install -g \
+      @anthropic-ai/claude-code@2.1.220 \
+      @agentclientprotocol/claude-agent-acp@0.64.2 \
+ && claude --version \
+ && claude-agent-acp --version \
+ && mkdir -p /data/tmp \
+ && chown -R runner:runner /data
+USER runner
+
+ENV STEWRA_RUNNER_WORKSPACE_MODE=backend \
+    TMPDIR=/data/tmp
+# The device token arrives as STEWRA_RUNNER_DEVICE_TOKEN at provision time — this image never pairs.
+# Provider logins are written into ~/.stewra-runner/credentials/<harness> by the provisioner, not baked in.

@@ -183,19 +183,30 @@ export interface WorktreePr {
 
 /**
  * Open a pull request for the session's branch via `gh` — the machine's GitHub CLI, using its own auth. We
- * shell to `gh` (not a stored token) for the same reason we push with local git: the credential belongs to
- * the user's machine, never to Stewra. Fails loud with `gh_missing` when the CLI isn't installed so the UI
- * can tell the user what to install, rather than hanging or guessing an API path.
+ * shell to `gh` (not a stored token) for the same reason we push with local git: on a machine the user
+ * owns, the credential belongs to them, never to Stewra. Fails loud with `gh_missing` when the CLI isn't
+ * installed so the UI can tell the user what to install, rather than hanging or guessing an API path.
+ *
+ * `env` exists for the Stewra-HOSTED case, and only that case. A hosted container has no `gh auth login`
+ * and cannot get one — there is no human at a browser inside it — so its caller passes a freshly minted
+ * GitHub App installation token as `GH_TOKEN`. It is a parameter rather than something read from the
+ * process environment because it must be minted per PR and never linger in the runner's own environment,
+ * where every harness subprocess this runner spawns would inherit it.
  */
 export async function openPullRequest(
   worktree: Worktree,
   opts: { title: string; body: string; base?: string },
+  env?: NodeJS.ProcessEnv,
 ): Promise<WorktreePr> {
   const args = ['pr', 'create', '--head', worktree.branch, '--title', opts.title, '--body', opts.body];
   if (opts.base !== undefined && opts.base.length > 0) args.push('--base', opts.base);
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync('gh', args, { cwd: worktree.path, timeout: GIT_NETWORK_TIMEOUT_MS }));
+    ({ stdout } = await execFileAsync('gh', args, {
+      cwd: worktree.path,
+      timeout: GIT_NETWORK_TIMEOUT_MS,
+      ...(env !== undefined ? { env } : {}),
+    }));
   } catch (error) {
     if (isCommandNotFound(error)) {
       // `cause` keeps the spawn failure (its errno/path) attached. Without it the only thing that ever

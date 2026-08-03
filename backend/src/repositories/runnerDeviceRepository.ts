@@ -1,5 +1,11 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto';
-import type { RunnerDevice, RunnerHarnessInfo, RunnerWorkspace } from '@stewra/shared-types';
+import type {
+  RunnerContainerStatus,
+  RunnerDevice,
+  RunnerDeviceKind,
+  RunnerHarnessInfo,
+  RunnerWorkspace,
+} from '@stewra/shared-types';
 import type { Selectable } from 'kysely';
 import { config } from '../config/unifiedConfig.js';
 import { db } from '../database/index.js';
@@ -46,11 +52,31 @@ function toModel(row: Selectable<RunnerDevicesTable>, online: boolean): RunnerDe
     os: row.os,
     appVersion: row.app_version,
     online,
+    kind: row.kind,
+    containerStatus: row.container_status,
     harnesses: row.harnesses,
     workspaces: row.workspaces,
     lastSeenAt: row.last_seen_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
   };
+}
+
+/**
+ * A hosted runner as the control plane needs it: the device model plus the owner, because the sweeps
+ * act across users and cannot get the owner from a request.
+ */
+export interface HostedRunnerRow {
+  readonly device: RunnerDevice;
+  readonly userId: string;
+}
+
+function toHostedRow(row: Selectable<RunnerDevicesTable>, online: boolean): HostedRunnerRow {
+  if (row.container_name === null) {
+    // The database CHECK constraint makes this unreachable; if it ever fires, a hosted row exists whose
+    // container nothing can address — a leak that must be loud, not skipped over.
+    throw new Error(`hosted runner device ${row.id} has no container name`);
+  }
+  return { device: toModel(row, online), userId: row.user_id };
 }
 
 /**
@@ -75,6 +101,17 @@ class RunnerDeviceRepository {
     name: string;
     appVersion: string;
     os: string;
+    /**
+     * Supplied only by the hosted path, which must know the device id BEFORE the row exists: the id is
+     * what names the container, and the row cannot be written without that name (a database CHECK). The
+     * pairing path omits it and lets Postgres mint one.
+     */
+    id?: string;
+    /** Omitted for the pairing path — a device is a laptop unless Stewra itself is creating it. */
+    kind?: RunnerDeviceKind;
+    /** Required exactly when `kind` is 'hosted' (the database enforces the pairing). */
+    containerName?: string;
+    containerStatus?: RunnerContainerStatus;
   }): Promise<{ device: RunnerDevice; token: string }> {
     const token = generateToken();
     const row = await db
@@ -85,6 +122,10 @@ class RunnerDeviceRepository {
         token_hash: hashToken(token),
         app_version: params.appVersion,
         os: params.os,
+        ...(params.id !== undefined ? { id: params.id } : {}),
+        ...(params.kind !== undefined ? { kind: params.kind } : {}),
+        ...(params.containerName !== undefined ? { container_name: params.containerName } : {}),
+        ...(params.containerStatus !== undefined ? { container_status: params.containerStatus } : {}),
       })
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -95,14 +136,19 @@ class RunnerDeviceRepository {
   /**
    * Resolve a raw runner token to its device. A revoked device's row no longer exists, so a revoked token
    * is indistinguishable from a forged one — exactly the behaviour we want, and why revocation deletes.
+   *
+   * `kind` travels with the answer because the endpoints this authenticates decide on it: a git
+   * credential Stewra minted may be handed to a hosted container and to nothing else.
    */
-  async findByToken(token: string): Promise<{ deviceId: string; userId: string } | null> {
+  async findByToken(
+    token: string,
+  ): Promise<{ deviceId: string; userId: string; kind: RunnerDeviceKind } | null> {
     const row = await db
       .selectFrom('runner_devices')
-      .select(['id', 'user_id'])
+      .select(['id', 'user_id', 'kind'])
       .where('token_hash', '=', hashToken(token))
       .executeTakeFirst();
-    return row === undefined ? null : { deviceId: row.id, userId: row.user_id };
+    return row === undefined ? null : { deviceId: row.id, userId: row.user_id, kind: row.kind };
   }
 
   /** The user's runners, newest first, with `online` overlaid from the set of currently-connected ids. */
@@ -129,11 +175,18 @@ class RunnerDeviceRepository {
     return Number(result.numDeletedRows) > 0;
   }
 
-  /** Record the runner's reported capabilities and liveness — driven by `runner:hello`. */
+  /**
+   * Record the runner's reported capabilities and liveness — driven by `runner:hello`.
+   *
+   * `app_version` is refreshed here, not only at pairing. A runner that the user upgrades reports its new
+   * build on the next hello, and without this the row kept the version it paired with forever — so the
+   * panel went on flagging an up-to-date machine as out of date, and the upgrade nudge never stopped.
+   */
   async updateCapabilities(
     deviceId: string,
     params: {
       os: string;
+      appVersion: string;
       harnesses: readonly RunnerHarnessInfo[];
       workspaces: readonly RunnerWorkspace[];
     },
@@ -142,12 +195,131 @@ class RunnerDeviceRepository {
       .updateTable('runner_devices')
       .set({
         os: params.os,
+        app_version: params.appVersion,
         harnesses: JSON.stringify(params.harnesses),
         workspaces: JSON.stringify(params.workspaces),
         last_seen_at: new Date(),
       })
       .where('id', '=', deviceId)
       .execute();
+  }
+
+  // ── Hosted runners (migration 037) ──────────────────────────────────────────────────────────────────
+
+  /**
+   * The user's ONE hosted runner, or null. The partial unique index is what makes "one" true.
+   *
+   * `onlineIds` is passed in for the same reason `listByUser` takes it: whether a socket is connected is
+   * not a fact this repository owns. The sweeps, which have no socket view, pass an empty set and never
+   * read the resulting flag.
+   */
+  async findHostedByUser(userId: string, onlineIds: ReadonlySet<string>): Promise<HostedRunnerRow | null> {
+    const row = await db
+      .selectFrom('runner_devices')
+      .selectAll()
+      .where('user_id', '=', userId)
+      .where('kind', '=', 'hosted')
+      .executeTakeFirst();
+    return row === undefined ? null : toHostedRow(row, onlineIds.has(row.id));
+  }
+
+  /** One hosted runner by id, scoped to its owner so a foreign id resolves to nothing rather than to a row. */
+  async findHostedById(
+    userId: string,
+    deviceId: string,
+    onlineIds: ReadonlySet<string>,
+  ): Promise<HostedRunnerRow | null> {
+    const row = await db
+      .selectFrom('runner_devices')
+      .selectAll()
+      .where('id', '=', deviceId)
+      .where('user_id', '=', userId)
+      .where('kind', '=', 'hosted')
+      .executeTakeFirst();
+    return row === undefined ? null : toHostedRow(row, onlineIds.has(row.id));
+  }
+
+  /**
+   * Every hosted runner on this deploy — what reconciliation compares against the provisioner's view of
+   * Docker. Deliberately not scoped to a user: a container whose row was deleted belongs to nobody, and
+   * that is exactly the case reconciliation exists to catch.
+   */
+  async listAllHosted(): Promise<HostedRunnerRow[]> {
+    const rows = await db
+      .selectFrom('runner_devices')
+      .selectAll()
+      .where('kind', '=', 'hosted')
+      .orderBy('created_at', 'asc')
+      .execute();
+    // `online` is a socket fact this repository does not own; callers that need it overlay it themselves.
+    return rows.map((row) => toHostedRow(row, false));
+  }
+
+  /**
+   * Hosted runners whose container is running, that have been idle past `idleBefore`, and that have NO
+   * session still in flight — the idle-stop candidates.
+   *
+   * "Idle" is measured from the LATEST of the container's start and the device's last hello, so a runner
+   * that has been quietly connected all along is still idle, while one that just booted is not. The
+   * active-session check is a NOT EXISTS rather than a status test on the device, because a session that
+   * is mid-agent-run has no visible traffic and would otherwise be killed under its own agent.
+   */
+  async listIdleHostedCandidates(idleBefore: Date): Promise<HostedRunnerRow[]> {
+    const rows = await db
+      .selectFrom('runner_devices')
+      .selectAll()
+      .where('kind', '=', 'hosted')
+      .where('container_status', '=', 'running')
+      .where((eb) =>
+        eb.and([
+          eb.or([
+            eb('container_last_started_at', 'is', null),
+            eb('container_last_started_at', '<', idleBefore),
+          ]),
+          eb.or([eb('last_seen_at', 'is', null), eb('last_seen_at', '<', idleBefore)]),
+        ]),
+      )
+      .where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom('runner_sessions')
+              .select('runner_sessions.id')
+              .whereRef('runner_sessions.device_id', '=', 'runner_devices.id')
+              .where('runner_sessions.ended_at', 'is', null),
+          ),
+        ),
+      )
+      .execute();
+    return rows.map((row) => toHostedRow(row, false));
+  }
+
+  /**
+   * Record what Stewra now believes about a hosted container. `startedAt` is passed only by the paths
+   * that actually started it, so a status refresh never invents a start time the container did not have.
+   */
+  async setContainerStatus(
+    deviceId: string,
+    status: RunnerContainerStatus,
+    opts?: { startedAt?: Date },
+  ): Promise<void> {
+    await db
+      .updateTable('runner_devices')
+      .set({
+        container_status: status,
+        ...(opts?.startedAt !== undefined ? { container_last_started_at: opts.startedAt } : {}),
+      })
+      .where('id', '=', deviceId)
+      .where('kind', '=', 'hosted')
+      .execute();
+  }
+
+  /**
+   * Delete a device row by id alone, for the rollback path where a half-provisioned runner must be undone
+   * and there is no user action to scope it to. Every user-facing deletion goes through `revoke`.
+   */
+  async deleteById(deviceId: string): Promise<void> {
+    await db.deleteFrom('runner_devices').where('id', '=', deviceId).execute();
   }
 
   /**

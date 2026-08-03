@@ -25,6 +25,37 @@
 export const RUNNER_HARNESS_IDS = ['claude-code', 'codex', 'gemini-cli'] as const;
 export type RunnerHarnessId = (typeof RUNNER_HARNESS_IDS)[number];
 
+/**
+ * Where a runner actually lives.
+ *
+ * 'local'  — a process on the user's OWN machine, paired with a single-use code. Stewra can start
+ *            nothing on it; it dials out, and its git credentials are the machine's own.
+ * 'hosted' — a container Stewra provisioned and can start, stop, and destroy. This is the cloud-first
+ *            default path: no install, and Stewra mints the short-lived git credentials it needs.
+ *
+ * This is not a cosmetic label. The git-credential endpoint hands out a GitHub installation token ONLY
+ * to a hosted device — giving one to a laptop would put a Stewra-minted credential on a machine Stewra
+ * does not control.
+ */
+export const RUNNER_DEVICE_KINDS = ['local', 'hosted'] as const;
+export type RunnerDeviceKind = (typeof RUNNER_DEVICE_KINDS)[number];
+
+/**
+ * What Stewra last saw of a hosted runner's container. Advisory, not authoritative — Docker (through
+ * the provisioner) is the truth, and an hourly reconcile corrects drift such as a host reboot.
+ *
+ * 'provisioning' is the brief window where the row exists but the container does not yet; a row stuck
+ * there is a failed provision that rollback did not reach, which reconcile cleans up.
+ */
+export const RUNNER_CONTAINER_STATUSES = [
+  'provisioning',
+  'starting',
+  'running',
+  'stopped',
+  'failed',
+] as const;
+export type RunnerContainerStatus = (typeof RUNNER_CONTAINER_STATUSES)[number];
+
 /** The lifecycle states a runner session moves through, as seen by the server and the UI. */
 export const RUNNER_SESSION_STATUSES = [
   'starting',

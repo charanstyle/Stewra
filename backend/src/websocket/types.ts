@@ -1,4 +1,5 @@
 import type { DefaultEventsMap, Server, Socket } from 'socket.io';
+import type { RunnerDeviceKind } from '@stewra/shared-types';
 
 /** Per-connection state set by the auth middleware. `userId` is the authenticated subject. */
 export interface SocketData {
@@ -14,6 +15,15 @@ export interface SocketData {
    * a runtime guarantee, not a type assertion papering over the library's shape.
    */
   deviceId?: string;
+  /**
+   * Whether the `/runner` socket on the other end is a machine the user owns or a container Stewra
+   * hosts. Present only on runner sockets, for the same Socket.IO reason `deviceId` is.
+   *
+   * Carried on the socket rather than looked up per event so that "is this one of ours?" — the question
+   * that decides whether Stewra will start, stop, or hand credentials to it — is answered once, at the
+   * door, from the same row that authenticated the token.
+   */
+  deviceKind?: RunnerDeviceKind;
 }
 
 /**

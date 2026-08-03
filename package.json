@@ -10,7 +10,8 @@
     "website",
     "frontend",
     "bridge",
-    "runner"
+    "runner",
+    "provisioner"
   ],
   "engines": {
     "node": ">=22"
@@ -19,21 +20,20 @@
     "build:types": "npm run build -w @stewra/shared-types",
     "build:agent": "npm run build -w @stewra/agent-runtime",
     "build": "npm run build:types && npm run build:agent && npm run build -w backend",
-    "typecheck": "npm run typecheck -w @stewra/shared-types && npm run typecheck -w @stewra/agent-runtime && npm run typecheck -w backend && npm run typecheck -w website && npm run typecheck -w frontend && npm run typecheck -w @stewra/bridge && npm run typecheck -w @stewra/runner",
+    "typecheck": "npm run typecheck -w @stewra/shared-types && npm run typecheck -w @stewra/agent-runtime && npm run typecheck -w backend && npm run typecheck -w website && npm run typecheck -w frontend && npm run typecheck -w @stewra/bridge && npm run typecheck -w @stewra/runner && npm run typecheck -w @stewra/provisioner",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "dev:backend": "npm run dev -w backend",
     "dev:web": "npm run dev -w website",
     "db:migrate": "npm run db:migrate -w backend",
     "package:release": "node scripts/package-release.mjs",
-    "test": "npm test -w backend && npm test -w @stewra/bridge && npm test -w @stewra/runner",
+    "test": "npm test -w backend && npm test -w @stewra/bridge && npm test -w @stewra/runner && npm test -w @stewra/provisioner",
     "boundaries": "depcruise --config .dependency-cruiser.cjs packages/agent-runtime/src",
     "scan:fallbacks": "node scripts/fallback-scan.mjs",
     "tunnel": "bash scripts/tunnel.sh"
   },
   "overrides": {
     "body-parser": "^1.20.6",
-    "brace-expansion": "^2.0.2",
     "fast-uri": "^3.1.4",
     "postcss": "^8.5.25",
     "sharp": "^0.35.3",

@@ -15,6 +15,7 @@ import ContactsPage from './app/contacts/ContactsPage';
 import StewraPage from './app/stewra/StewraPage';
 import SettingsPage from './app/settings/SettingsPage';
 import RunnerDownloadPage from './app/runner/RunnerDownloadPage';
+import GithubSetupPage from './app/github/GithubSetupPage';
 
 export default function App(): React.JSX.Element {
   return (
@@ -24,6 +25,15 @@ export default function App(): React.JSX.Element {
           <Route path="/login" element={<LoginPage />} />
           {/* Public: the RUNNER_DOWNLOAD_URL target — opened on the machine that will host agents. */}
           <Route path="/runner" element={<RunnerDownloadPage />} />
+          {/* The GitHub App's Setup URL target — GitHub redirects here after a click-through install. */}
+          <Route
+            path="/github/setup"
+            element={
+              <ProtectedRoute>
+                <GithubSetupPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/verify-email"
             element={

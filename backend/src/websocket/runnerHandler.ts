@@ -18,6 +18,7 @@ import type {
   RunnerWorkspace,
 } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
+import { hostedRunnerService } from '../services/hostedRunnerService.js';
 import { runnerService } from '../services/runnerService.js';
 import { runnerSessionService } from '../services/runnerSessionService.js';
 import { logger } from '../utils/logger.js';
@@ -133,7 +134,7 @@ function normalizeWorkspace(w: z.infer<typeof workspaceSchema>): RunnerWorkspace
  * session-done, and permission-request.
  */
 export function registerRunnerHandler(socket: RunnerSocketLike): void {
-  const { userId, deviceId } = socket.data;
+  const { userId, deviceId, deviceKind } = socket.data;
 
   // The door check. `runnerAuthMiddleware` sets `deviceId` on every socket that gets this far, so this can
   // only fire if something is wired wrong — and a runner whose device we cannot name is one we cannot
@@ -177,10 +178,18 @@ export function registerRunnerHandler(socket: RunnerSocketLike): void {
     guard(RUNNER_CLIENT_EVENTS.HELLO, () =>
       runnerService.recordCapabilities(deviceId, {
         os: parsed.data.os,
+        appVersion: parsed.data.appVersion,
         harnesses: parsed.data.harnesses.map(normalizeHarness),
         workspaces: parsed.data.workspaces.map(normalizeWorkspace),
       }),
     );
+
+    // A hosted runner that says hello has proved its container is up, which is stronger evidence than
+    // anything the provisioner can report — Docker's "running" only means the process started. This is
+    // also what closes the gap after a wake: the row says 'starting' until the runner itself lands here.
+    if (deviceKind === 'hosted') {
+      guard(RUNNER_CLIENT_EVENTS.HELLO, () => hostedRunnerService.noteConnected(deviceId));
+    }
 
     // Notify-only upgrade nudge: a runner behind the latest published build gets told, once per hello,
     // where to get the new one. Nothing more — the runner never self-replaces its binary. Runners older
