@@ -31,7 +31,16 @@ function resolveSocket(): string | null {
     }
     return explicit;
   }
-  for (const candidate of ['/var/run/docker.sock', `${homedir()}/.docker/run/docker.sock`]) {
+  for (const candidate of [
+    '/var/run/docker.sock',
+    // Docker Desktop on macOS.
+    `${homedir()}/.docker/run/docker.sock`,
+    // colima, which does NOT symlink into either path above. TESTING.md promised discovery would
+    // find a colima daemon; without this entry the suite skipped on a machine that had one running,
+    // which is the exact "quietly ran nothing" outcome the explicit-DOCKER_SOCKET rule exists to
+    // prevent — just arrived at by discovery instead.
+    `${homedir()}/.colima/default/docker.sock`,
+  ]) {
     if (existsSync(candidate)) return candidate;
   }
   return null;

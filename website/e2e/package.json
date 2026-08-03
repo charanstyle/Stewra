@@ -6,6 +6,8 @@
   "scripts": {
     "postinstall": "playwright install chromium",
     "test:e2e": "playwright test",
+    "test:smoke:preview": "playwright test -c playwright.smoke.config.ts smoke/render.smoke.ts",
+    "test:smoke:deployed": "playwright test -c playwright.smoke.config.ts",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report .artifacts/report",

@@ -7,56 +7,8 @@
 // wrong host or authenticate as the wrong user.
 //
 // See `../../.env.e2e.example` for the file shape and `README.md` for the env-var names.
-import { existsSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-
-// Parse the shared repo-root .env.e2e (KEY=VALUE lines). Does NOT overwrite real env vars.
-function fromEnvFile() {
-  const p = join(HERE, '..', '..', '.env.e2e');
-  if (!existsSync(p)) {
-    return {};
-  }
-  const out = {};
-  for (const raw of readFileSync(p, 'utf8').split('\n')) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) {
-      continue;
-    }
-    const eq = line.indexOf('=');
-    if (eq === -1) {
-      continue;
-    }
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (key) {
-      out[key] = value;
-    }
-  }
-  return out;
-}
-
-const file = fromEnvFile();
-// Env wins over the file so CI can inject the same names.
-const env = { ...file, ...process.env };
-
-function required(value, name) {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new Error(
-      `[e2e] Missing required config "${name}". Set it in the repo-root .env.e2e ` +
-        `(copy .env.e2e.example) or as an environment variable. See README.md.`,
-    );
-  }
-  return value;
-}
+// The loader itself lives in `env.mjs`, shared with the credential-free smoke config.
+import { env, required } from './env.mjs';
 
 const webUrl = required(env.E2E_WEB_URL, 'E2E_WEB_URL').replace(/\/$/, '');
 

@@ -19,7 +19,10 @@ export default tseslint.config(
     // Don't lint build output, deps, or the hooks' own tooling. `build/` is listed alongside `dist/`
     // because runner/package.json's `clean` removes both — without it, `eslint .` spent all its findings
     // on the generated runner/build/runner.cjs bundle (627 of 690) and buried the real ones.
-    ignores: ['**/dist/**', '**/build/**', '**/node_modules/**', '.claude/**'],
+    // `**/.artifacts/**` is Playwright's output (traces, and the bundled HTML report — which ships
+    // its own minified viewer). It is gitignored, but eslint does not read .gitignore, so any run of
+    // the e2e suite left `npm run lint` reporting thousands of errors in vendored report assets.
+    ignores: ['**/dist/**', '**/build/**', '**/node_modules/**', '**/.artifacts/**', '.claude/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

@@ -111,3 +111,54 @@ jobs:
 
       - name: Runner tests
         run: npm test -w @stewra/runner
+
+      # ubuntu-latest ships a working Docker socket, so this suite genuinely runs here rather than
+      # skipping. DOCKER_SOCKET is set EXPLICITLY: the suite's own gate turns a missing socket into a
+      # hard failure, which keeps "I pointed it at an engine" and "it quietly ran nothing" apart.
+      - name: Provisioner tests (real Docker)
+        env:
+          DOCKER_SOCKET: /var/run/docker.sock
+        run: npm test -w @stewra/provisioner
+
+      # Everything below exists because a `vite build`-only fault reached production: the built bundle
+      # carried two React copies, every hook read a null dispatcher, and www.stewra.com served a blank
+      # login page. Typecheck cannot see a bundler-level module duplication, and CI never built the
+      # website at all — `npm run build` at the root stops at the backend. Building it and then
+      # RENDERING it is the smallest thing that makes that class of fault impossible to ship again.
+      #
+      # This is not the full e2e suite (that runs against production with dedicated QA accounts, by
+      # hand). The smoke gate is credential-free by construction, which is why it can live here.
+      - name: Build website
+        env:
+          # Compile-time constant baked into the bundle. It is never dialled in this job — the smoke
+          # gate's render half runs against a static `vite preview` with no backend — but the app
+          # refuses to build without it, deliberately, so it gets a CI-local placeholder rather than
+          # a default hidden inside the app.
+          VITE_API_BASE_URL: http://127.0.0.1:3001
+        run: npm run build -w website
+
+      # website/e2e is deliberately NOT a workspace (the Vite app must never depend on Playwright),
+      # so the root `npm ci` above does not touch it. Its own postinstall fetches the browser; only
+      # the Linux system libraries have to be added on top.
+      - name: Install the smoke gate
+        working-directory: website/e2e
+        run: npm ci && npx playwright install-deps chromium
+
+      - name: Smoke-test the built website
+        working-directory: website/e2e
+        env:
+          E2E_SMOKE_TARGET: http://127.0.0.1:4173
+        run: |
+          # Bind explicitly to 127.0.0.1: `vite preview` otherwise listens on ::1 only, and the
+          # target above would be refused with the server apparently running fine.
+          npm --prefix ../../website run preview -- --port 4173 --strictPort --host 127.0.0.1 &
+          preview=$!
+          trap 'kill $preview' EXIT
+          for _ in $(seq 1 30); do
+            curl -sf -o /dev/null "$E2E_SMOKE_TARGET/" && break
+            sleep 1
+          done
+          # Fail loud rather than letting Playwright report a confusing ECONNREFUSED per test.
+          curl -sf -o /dev/null "$E2E_SMOKE_TARGET/" \
+            || { echo "vite preview never came up on $E2E_SMOKE_TARGET"; exit 1; }
+          npm run test:smoke:preview

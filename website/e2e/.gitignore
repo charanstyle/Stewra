@@ -4,5 +4,8 @@ e2e.config.json
 # Test tooling + Playwright artifacts
 node_modules/
 .artifacts/
+# Playwright's default outputDir — traces/screenshots/videos from failed tests land here even
+# though the reporters are pointed at .artifacts/, so it appears on any run that has a failure.
+test-results/
 shots/
 *.png
