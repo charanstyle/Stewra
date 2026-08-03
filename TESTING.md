@@ -50,13 +50,185 @@ A run needs only the two QA **emails + passwords** — both suites log in for yo
 ## Unit / integration (Vitest)
 
 ```bash
-npm test                 # root: runs backend + bridge Vitest suites
+npm test                 # root: backend + bridge + runner + provisioner
 npm test -w backend
 npm test -w @stewra/bridge
+npm test -w @stewra/runner
+npm test -w @stewra/provisioner   # skipped without a Docker socket — see below
 ```
 
 Real dependencies only — no `jest.mock`/stubs. A green Vitest run does **not** prove Node ESM↔CJS
 interop; the bridge adds a `test:esm-interop` check for that.
+
+---
+
+## Bridge autostart — `bridge/src/tests/autostart.test.ts`
+
+"Start at login" is the one setting whose failure is invisible: it does not break at the moment it is
+switched on, it breaks at the next reboot, when the bridge is simply not there and Stewra has quietly
+stopped relaying WhatsApp. So the suite asserts against **real files in a real directory**, never
+against the intent to write one.
+
+Electron's `app.setLoginItemSettings` is macOS/Windows only and a silent no-op on Linux, so the `deb`
+and `AppImage` builds need a hand-written XDG entry (`~/.config/autostart/stewra-bridge.desktop`). The
+Linux tests pass a `LoginItemAdapter` that **throws if touched**, which is what keeps the platform split
+honest — a regression that routed Linux back through Electron's API would fail loudly here instead of
+shipping a checkbox that does nothing.
+
+What the suite pins down, each because getting it wrong produces a bridge that never comes back:
+
+- the `Exec=` path is quoted, so the deb's `/opt/Stewra Bridge/stewra-bridge` launches at all;
+- an AppImage entry names the `.AppImage` file, not the throwaway `/tmp` mount that will not exist next boot;
+- an entry carrying `Hidden=true` or `X-GNOME-Autostart-enabled=false` reads as **off** — desktops switch
+  an entry off by writing one of those rather than deleting the file, and `Hidden=true` is the freedesktop
+  autostart spec's own disable, which conformant sessions *must* honour;
+- re-enabling **replaces** a disabled entry outright, so no stale `Hidden=true` survives to produce a file
+  that reads as enabled and still never launches;
+- a development run **refuses** to enable (it would register Electron itself) but is still allowed to
+  switch off, since that is how a bad entry gets cleared;
+- macOS accepting a registration it has not yet approved reports **off**, because the read-back — not the
+  value we asked for — is what the checkbox shows.
+
+No Electron process is started: everything here is plain files and an injected adapter, so it runs in the
+normal `npm test -w @stewra/bridge` pass.
+
+The `Hidden=true` case above came from **running the real generated entry through a real session tool**
+rather than from reading the spec: in a `debian:13` container, `dex --autostart` skipped an entry the code
+still reported as enabled. Two other oracles were tried and rejected on the way, and both are worth not
+repeating — `dex` ignores `X-GNOME-Autostart-enabled` because that key is GNOME-specific, and `gio launch`
+honours neither key because it launches a named file directly instead of applying autostart filtering. A
+tool that launches a `.desktop` file is not evidence about what a *session* does with it.
+
+### The full-reboot check, and the two bugs only it could find
+
+The file-level tests above cannot answer the question the feature is actually about: *does a real
+graphical login start the bridge?* That was verified once, by hand, against a **Lima VM running Debian
+13** with lightdm autologin into a real xfce session (`xserver-xorg-video-dummy`, because Lima's `vz`
+VM has no GPU — which also means lightdm needs `logind-check-graphical=false`, or it waits forever for
+a seat logind will never mark graphical). The real `.deb` was built inside that VM from the committed
+lockfile, installed to `/opt/Stewra Bridge`, autostart switched on **through the app's own
+renderer→IPC→main path**, then the VM was rebooted. After boot: `/opt/Stewra Bridge/stewra-bridge
+--hidden` was running, started by nobody but the session, with no window on screen.
+
+Two shipping bugs surfaced only there, both invisible to any test that stops at the file:
+
+- **The `.deb` declared no ALSA dependency.** electron-builder's default `Depends` omits it, but
+  Electron links `libasound.so.2`, so on a clean Debian 13 the app died at the loader with an error
+  that never mentions audio. Fixed in `bridge/electron-builder.yml`; see the comment there before
+  editing that list, since `depends` *replaces* the defaults rather than adding to them.
+- **The bridge could not start on XFCE at all** — see below.
+
+Re-running this by hand is only worth it when the autostart or packaging surface changes. It needs a
+graphical login; Xvfb cannot substitute, because it has no display manager and therefore no login.
+
+---
+
+## The Linux keyring backend — `bridge/src/tests/keyStorageBackend.test.ts`
+
+Chromium chooses its key storage backend from `XDG_CURRENT_DESKTOP`: libsecret on GNOME-like sessions,
+kwallet on KDE, and its hardcoded-key `basic_text` store on anything it does not recognise. Since
+`secretStore.ts` rightly **refuses** to run on `basic_text` (it is a single key shared by every copy of
+the app, not encryption), the bridge could not start on XFCE, LXQt, i3 or sway *even with gnome-keyring
+installed, running and unlocked* — and it said "no system keyring is running", which was simply untrue.
+Same VM, same keyring, named the backend, started first try.
+
+`linuxKeyStorageBackend()` is a pure function precisely so this is testable without booting Electron.
+The two directions that must never break: **KDE is left alone** (kwallet is correct there, and real
+sessions spell it `plasma:KDE`), and an explicit `--password-store=` from whoever launched the app
+always wins. The choice can only widen where a real keyring is found — when libsecret is genuinely
+missing, Chromium still lands on `basic_text` and the loud refusal still fires.
+
+---
+
+## Hosted cloud runners — `backend/src/tests/hostedRunnerService.test.ts`
+
+Everything a hosted runner touches is real except Docker: the `stewra_test` Postgres, a scripted GitHub
+that verifies every App JWT against the App's public key, a scripted **provisioner** that enforces the
+Phase 2 contract (bearer token, exact image, env allowlist, 404/409), and the backend's own Express
+router behind a real HTTP server for the device-token endpoints.
+
+The scripted provisioner **refuses** what the real one refuses, which is the point of scripting it
+rather than stubbing it: a backend that sends the wrong image, or an environment variable outside
+`^STEWRA_(API_URL|API_PREFIX|RUNNER_[A-Z0-9_]+)$`, fails here instead of in production. Every refusal
+is collected and asserted empty after each test, so an unexpected one fails whatever test caused it.
+
+Docker itself is absent on purpose — the provisioner's own suite (below) drives a real daemon, which is
+where container-level claims belong.
+
+Two of these tests take real time and cannot be shortened honestly: waking polls until
+`HOSTED_RUNNER_WAKE_TIMEOUT_SECONDS` elapses (pinned to 10s in the suite), because "gave up in time" is
+the behaviour under test.
+
+---
+
+## Runner hosted mode — `runner/src/tests/`
+
+Three suites cover what a Stewra-hosted container does that a paired laptop never does.
+
+**`gitCredentialHelper.test.ts` — driven by real `git`.** The helper's consumer is
+`git credential fill`: it reads the helper configuration, spawns the helper, speaks the protocol on
+pipes, and parses the reply. Calling the helper directly would skip everything that can actually be
+wrong — the shell-quoting of the configured command, the blank-line request terminator, the exact
+reply keys — so these tests go through git itself, against a real HTTP server that **refuses** a
+request without the device token exactly as the backend does.
+
+Because git spawns the helper as a subprocess, it runs the *built* artifact. The suite therefore runs
+`npm run build` in `beforeAll` (hence its ~2s floor) rather than trusting whatever is in `dist/`.
+
+> If you write a test that pipes into a child here, use `spawn` and `child.stdin.end(input)`.
+> `execFile` has **no** `input` option: its stdin pipe is opened and never closed, so a child that
+> reads to end-of-input hangs until the test times out.
+
+**`backendWorkspaces.test.ts` — real repositories over `file://`.** Proves a workspace list from the
+backend becomes usable checkouts with the right base branch, that two repos sharing a name stay apart
+on disk, and that a later boot fetches new commits. The sharpest assertion is the negative one: an
+unreachable backend must **fail**, never report an empty list — "your GitHub App covers no
+repositories" is a thing for the user to go fix, and the two must not look identical.
+
+**`harnessCredentials.test.ts` — real slot files.** The `claude-code` → `CLAUDE_CODE_OAUTH_TOKEN`
+mapping was verified end-to-end against the real `claude-agent-acp`, the real Claude Agent SDK and the
+real `claude` CLI by recording the environment the CLI is spawned with. `codex` is deliberately
+unmapped, and a slot written for it throws rather than being ignored.
+
+---
+
+## Provisioner suite (real Docker) — `provisioner/src/tests/`
+
+The provisioner's claims are claims about what the **Docker daemon** accepts and produces — "CapDrop
+is ALL", "there is no swap headroom", "the volumes die with the device", "a pasted provider token
+lands mode 0600 owned by uid 10001". Nothing but a daemon can vouch for those, so this suite creates
+real containers, inspects what Docker recorded, starts/stops them, writes and reads back a credential
+file, and destroys everything it made (`afterAll` removes only the containers and volumes it created,
+by name — it never sweeps by label).
+
+**The gate.** With no Docker socket the whole suite is skipped *loudly*: it prints the reason and the
+fix, and the run stays green so `npm test` at the root is usable on a machine without Docker. Socket
+discovery is, in order: `DOCKER_SOCKET`, `/var/run/docker.sock`, `~/.docker/run/docker.sock`.
+
+**`DOCKER_SOCKET` disables the skip.** If it is set and the path does not exist, the suite FAILS
+rather than skipping — "I pointed it at an engine" and "it quietly ran nothing" must not look alike.
+
+Ways to give it a daemon:
+
+```bash
+# a) Docker Desktop / colima on the dev machine — nothing to configure, discovery finds the socket
+npm test -w @stewra/provisioner
+
+# b) a remote daemon over SSH (what to use when the dev machine has none). Forward the socket, then
+#    point the suite at the local end. Test containers are created on THAT host — they are uniquely
+#    named per run and removed in afterAll, but be deliberate about which host you pick.
+ssh -nNT -L /tmp/stewra-docker.sock:/var/run/docker.sock home &
+DOCKER_SOCKET=/tmp/stewra-docker.sock npm test -w @stewra/provisioner
+
+# c) on the deploy host itself, where the socket is already local
+```
+
+**The test image is not arbitrary.** `CapDrop: ALL` denies `CAP_SETUID`, so any image whose
+entrypoint drops privilege at runtime (`setpriv`/`su-exec`/`gosu` — the shape of the official redis,
+postgres, and nginx images) exits immediately with `setresuid failed`. The suite uses
+`nginxinc/nginx-unprivileged:alpine`, which declares its user at build time exactly like
+`runner/Dockerfile` does. This is a real constraint on `RUNNER_IMAGE` in production, not a test
+detail — see the image-contract note in `provisioner/src/template.ts`.
 
 ---
 
