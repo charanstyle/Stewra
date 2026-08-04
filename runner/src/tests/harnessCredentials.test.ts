@@ -66,7 +66,10 @@ describe('harnessEnv credential slots', () => {
     // and be unexplainable when it did not. Name both accepted forms at spawn time instead.
     await writeFile(join(dir, 'claude-code'), 'pasted-the-wrong-thing-entirely');
 
-    await expect(harnessEnv('claude-code')).rejects.toThrow(/not a recognised credential/);
+    // The message must name BOTH accepted forms, not merely say "invalid": the whole point of failing
+    // here is to tell the user what to paste instead.
+    await expect(harnessEnv('claude-code')).rejects.toThrow(/sk-ant-oat/);
+    await expect(harnessEnv('claude-code')).rejects.toThrow(/sk-ant-api/);
   });
 
   it('maps each harness to its own variable, and leaves other harnesses untouched', async () => {

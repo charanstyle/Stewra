@@ -1,10 +1,11 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { RUNNER_HARNESS_IDS } from '@stewra/shared-types';
+import { RUNNER_HARNESS_IDS, runnerCredentialProblem } from '@stewra/shared-types';
 import type { RunnerGitCredentialsResponse } from '@stewra/shared-types';
 import { BaseController } from './baseController.js';
 import { githubAppService } from '../services/githubAppService.js';
 import { hostedRunnerService } from '../services/hostedRunnerService.js';
+import { ValidationError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { parse } from '../utils/validate.js';
 
@@ -27,11 +28,31 @@ import { parse } from '../utils/validate.js';
 const provisionSchema = z.object({
   credentials: z
     .record(z.enum(RUNNER_HARNESS_IDS), z.string().min(1).max(8192))
-    .optional(),
+    .optional()
+    // Form-checked here, at the paste, rather than only at spawn. `harnessCommand.ts` already refuses
+    // an unrecognised Claude login — but that refusal happens inside a container the user cannot see,
+    // minutes later, and reaches them as a generic authentication failure. The message this produces
+    // names the two accepted forms while the field is still on screen.
+    //
+    // Iterating the known ids rather than the object's own keys keeps `harness` typed without an
+    // assertion, and means an unknown key cannot smuggle a value past the check.
+    .superRefine((credentials, ctx) => {
+      if (credentials === undefined) return;
+      for (const harness of RUNNER_HARNESS_IDS) {
+        const secret = credentials[harness];
+        if (secret === undefined) continue;
+        const problem = runnerCredentialProblem(harness, secret);
+        if (problem !== null) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: problem, path: [harness] });
+        }
+      }
+    }),
 });
 
 const harnessParamSchema = z.object({ harness: z.enum(RUNNER_HARNESS_IDS) });
 
+// The harness this secret is for arrives in the PATH, not the body, so the form check cannot live in
+// this schema — it runs in `setCredential` once both halves have been parsed.
 const credentialBodySchema = z.object({ secret: z.string().min(1).max(8192) });
 
 class HostedRunnerController extends BaseController {
@@ -101,6 +122,12 @@ class HostedRunnerController extends BaseController {
     try {
       const { harness } = parse(harnessParamSchema, req.params);
       const { secret } = parse(credentialBodySchema, req.body);
+      // Same form check the provision body gets, applied once the path has named the harness. Without
+      // it, replacing a login is the one route where a malformed paste still reaches the container.
+      const problem = runnerCredentialProblem(harness, secret);
+      if (problem !== null) {
+        throw new ValidationError('Validation failed', [{ field: 'secret', message: problem }]);
+      }
       await hostedRunnerService.updateProviderCredential(this.userId(req), harness, secret);
       this.handleSuccess(res, { ok: true });
     } catch (error) {

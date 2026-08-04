@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { CLAUDE_CODE_CREDENTIAL_FORMS, runnerCredentialProblem } from '@stewra/shared-types';
 import type { RunnerHarnessId } from '@stewra/shared-types';
 
 /** The command that launches a harness in ACP mode (JSON-RPC over stdio), and its fixed args. */
@@ -85,10 +86,10 @@ const CREDENTIAL_ENV_VAR: Partial<Record<RunnerHarnessId, string>> = {
  * Claude Agent SDK, which passes it to the `claude` CLI, so the variable set here is the one the CLI
  * authenticates with.
  */
-const CLAUDE_CREDENTIAL_VARS: readonly { readonly prefix: string; readonly varName: string }[] = [
-  { prefix: 'sk-ant-oat', varName: 'CLAUDE_CODE_OAUTH_TOKEN' },
-  { prefix: 'sk-ant-api', varName: 'ANTHROPIC_API_KEY' },
-];
+const CLAUDE_ENV_VAR_BY_PREFIX: Readonly<Record<string, string>> = {
+  'sk-ant-oat': 'CLAUDE_CODE_OAUTH_TOKEN',
+  'sk-ant-api': 'ANTHROPIC_API_KEY',
+};
 
 /**
  * Resolve which variable a pasted Claude login belongs in, by its form.
@@ -98,15 +99,23 @@ const CLAUDE_CREDENTIAL_VARS: readonly { readonly prefix: string; readonly varNa
  * it did not; naming the two accepted forms at spawn time points straight at the fix.
  */
 function claudeCredentialVar(secret: string): string {
-  const match = CLAUDE_CREDENTIAL_VARS.find((candidate) => secret.startsWith(candidate.prefix));
-  if (match === undefined) {
+  const problem = runnerCredentialProblem('claude-code', secret);
+  if (problem !== null) {
+    throw new Error(`${problem} Running the session would fail to authenticate.`);
+  }
+
+  const match = CLAUDE_CODE_CREDENTIAL_FORMS.find((form) => secret.startsWith(form.prefix));
+  // Unreachable while the two agree, which is the point of asserting it: if a form is added to the
+  // shared list without a variable to put it in, this says so at spawn instead of silently dropping
+  // the user's login and letting the CLI report an unexplained auth failure.
+  const varName = match === undefined ? undefined : CLAUDE_ENV_VAR_BY_PREFIX[match.prefix];
+  if (varName === undefined) {
     throw new Error(
-      'The Claude Code login supplied is not a recognised credential: expected a long-lived OAuth token ' +
-        'from `claude setup-token` (starts with "sk-ant-oat") or an Anthropic API key (starts with ' +
-        '"sk-ant-api"). Re-paste the credential — running the session would fail to authenticate.',
+      'This runner does not know which environment variable that Claude Code login belongs in. ' +
+        'Update the runner — running the session would fail to authenticate.',
     );
   }
-  return match.varName;
+  return varName;
 }
 
 /** Read a harness's credential slot, or null when the user has not supplied a login for it. */

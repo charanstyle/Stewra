@@ -25,6 +25,65 @@
 export const RUNNER_HARNESS_IDS = ['claude-code', 'codex', 'gemini-cli'] as const;
 export type RunnerHarnessId = (typeof RUNNER_HARNESS_IDS)[number];
 
+/** One accepted shape of a pasted provider login: the literal it starts with, and how to describe it. */
+export interface RunnerCredentialForm {
+  /** The literal prefix the credential must start with, e.g. `sk-ant-oat`. */
+  readonly prefix: string;
+  /** How to name this form to the person who pasted it, e.g. "a long-lived OAuth token". */
+  readonly label: string;
+}
+
+/**
+ * The two logins the `claude` CLI accepts.
+ *
+ * These are not interchangeable: the CLI reads them from DIFFERENT environment variables, so the form
+ * decides where the value has to go. The runner does that routing (`runner/src/core/harnessCommand.ts`);
+ * this list is the single source of truth both it and the API boundary read, so a new accepted form
+ * cannot be added in one place and silently rejected in the other.
+ */
+export const CLAUDE_CODE_CREDENTIAL_FORMS: readonly RunnerCredentialForm[] = [
+  { prefix: 'sk-ant-oat', label: 'a long-lived OAuth token from `claude setup-token`' },
+  { prefix: 'sk-ant-api', label: 'an Anthropic API key from the Anthropic Console' },
+];
+
+/**
+ * Accepted credential forms per harness.
+ *
+ * A harness is absent when its credential has no prefix we can check for. That is deliberate rather
+ * than a gap to fill in later: asserting a shape we are not sure of would reject the user's VALID key
+ * at the paste field, which is a worse failure than accepting a malformed one and surfacing it at
+ * session start. Only forms that are documented and stable belong here.
+ */
+export const RUNNER_CREDENTIAL_FORMS: Partial<Record<RunnerHarnessId, readonly RunnerCredentialForm[]>> = {
+  'claude-code': CLAUDE_CODE_CREDENTIAL_FORMS,
+};
+
+/**
+ * Why this pasted credential is unusable, or `null` when it looks well-formed.
+ *
+ * Checked at the API boundary so a bad paste is a 400 while the user is still looking at the field,
+ * instead of an authentication error inside a container minutes later — by which point the message the
+ * user sees comes from the CLI and says nothing about the paste that caused it.
+ *
+ * This validates FORM only. Whether the credential actually authenticates is not knowable here, and
+ * a `null` return must never be read as "this login works".
+ */
+export function runnerCredentialProblem(harness: RunnerHarnessId, secret: string): string | null {
+  if (secret !== secret.trim()) {
+    return 'The credential has leading or trailing whitespace — copy it again without the surrounding spaces or newline.';
+  }
+  if (/\s/.test(secret)) {
+    return 'The credential contains a space or line break, so it was not copied whole. Paste the entire value on one line.';
+  }
+
+  const forms = RUNNER_CREDENTIAL_FORMS[harness];
+  if (forms === undefined) return null;
+  if (forms.some((form) => secret.startsWith(form.prefix))) return null;
+
+  const expected = forms.map((form) => `${form.label} (starts with "${form.prefix}")`).join(', or ');
+  return `That does not look like a ${harness} login: expected ${expected}.`;
+}
+
 /**
  * Where a runner actually lives.
  *
