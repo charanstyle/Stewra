@@ -1,7 +1,12 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import type {
+  GetEmailOverWhatsappResponse,
+  SetEmailOverWhatsappResponse,
+} from '@stewra/shared-types';
 import { BaseController } from './baseController.js';
 import { whatsappEmailApprovalService } from '../services/whatsappEmailApprovalService.js';
+import { parse } from '../utils/validate.js';
 
 /**
  * `password` is optional at the schema level because it is only needed to turn the opt-in ON; the
@@ -30,7 +35,10 @@ class WhatsappEmailApprovalController extends BaseController {
   /** GET /channels/whatsapp-email-approval — deploy switch + the user's opt-in state. */
   async status(req: Request, res: Response): Promise<void> {
     try {
-      this.handleSuccess(res, await whatsappEmailApprovalService.getStatus(this.userId(req)));
+      const body: GetEmailOverWhatsappResponse = await whatsappEmailApprovalService.getStatus(
+        this.userId(req),
+      );
+      this.handleSuccess(res, body);
     } catch (error) {
       this.handleError(error, res, 'WhatsappEmailApprovalController.status');
     }
@@ -39,11 +47,14 @@ class WhatsappEmailApprovalController extends BaseController {
   /** POST /channels/whatsapp-email-approval — turn the opt-in on (password-gated) or off. */
   async set(req: Request, res: Response): Promise<void> {
     try {
-      const body = setSchema.parse(req.body);
-      const result = await whatsappEmailApprovalService.setEnabled(
+      // `parse`, not `setSchema.parse`: a raw ZodError escapes as a 500 with a Sentry event, because
+      // BaseController.handleError has no ZodError branch. A malformed body is the caller's mistake
+      // and must read as 400.
+      const { enabled, password } = parse(setSchema, req.body);
+      const result: SetEmailOverWhatsappResponse = await whatsappEmailApprovalService.setEnabled(
         this.userId(req),
-        body.enabled,
-        body.password,
+        enabled,
+        password,
       );
       this.handleSuccess(res, result);
     } catch (error) {

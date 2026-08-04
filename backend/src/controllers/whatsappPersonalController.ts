@@ -1,7 +1,15 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import type {
+  ClaimBridgeTokenResponse,
+  GetWhatsappPersonalResponse,
+  GrantWhatsappPersonalConsentResponse,
+  RevokeBridgeDeviceResponse,
+  StartBridgePairingResponse,
+} from '@stewra/shared-types';
 import { BaseController } from './baseController.js';
 import { whatsappPersonalService } from '../services/whatsappPersonalService.js';
+import { parse } from '../utils/validate.js';
 
 /**
  * `sentence` is capped at a sane length rather than left unbounded: it is echoed back into an audit row,
@@ -39,7 +47,10 @@ class WhatsappPersonalController extends BaseController {
   /** GET /channels/whatsapp-personal — consent state + linked devices, for the "Your sources" panel. */
   async status(req: Request, res: Response): Promise<void> {
     try {
-      this.handleSuccess(res, await whatsappPersonalService.getStatus(this.userId(req)));
+      const body: GetWhatsappPersonalResponse = await whatsappPersonalService.getStatus(
+        this.userId(req),
+      );
+      this.handleSuccess(res, body);
     } catch (error) {
       this.handleError(error, res, 'WhatsappPersonalController.status');
     }
@@ -53,8 +64,11 @@ class WhatsappPersonalController extends BaseController {
    */
   async consent(req: Request, res: Response): Promise<void> {
     try {
-      const body = consentSchema.parse(req.body);
-      const result = await whatsappPersonalService.grantConsent(this.userId(req), body.sentence);
+      // `parse`, not `consentSchema.parse`: a raw ZodError reaches BaseController.handleError, which
+      // has no ZodError branch, so a malformed body became a 500 plus a spurious Sentry alert.
+      const { sentence } = parse(consentSchema, req.body);
+      const result: GrantWhatsappPersonalConsentResponse =
+        await whatsappPersonalService.grantConsent(this.userId(req), sentence);
       this.handleSuccess(res, result, 201);
     } catch (error) {
       this.handleError(error, res, 'WhatsappPersonalController.consent');
@@ -64,7 +78,9 @@ class WhatsappPersonalController extends BaseController {
   /** POST /channels/whatsapp-personal/pair — mint the code the user types into the bridge app. */
   async startPairing(req: Request, res: Response): Promise<void> {
     try {
-      const result = await whatsappPersonalService.startPairing(this.userId(req));
+      const result: StartBridgePairingResponse = await whatsappPersonalService.startPairing(
+        this.userId(req),
+      );
       this.handleSuccess(res, result, 201);
     } catch (error) {
       this.handleError(error, res, 'WhatsappPersonalController.startPairing');
@@ -77,8 +93,10 @@ class WhatsappPersonalController extends BaseController {
    */
   async claimToken(req: Request, res: Response): Promise<void> {
     try {
-      const body = claimSchema.parse(req.body);
-      const result = await whatsappPersonalService.claimBridgeToken(body);
+      // Unauthenticated route: a malformed body here is the most likely thing a stranger sends, and
+      // it must cost a 400, not a 500 and an alert.
+      const body = parse(claimSchema, req.body);
+      const result: ClaimBridgeTokenResponse = await whatsappPersonalService.claimBridgeToken(body);
       this.handleSuccess(res, result, 201);
     } catch (error) {
       this.handleError(error, res, 'WhatsappPersonalController.claimToken');
@@ -88,9 +106,11 @@ class WhatsappPersonalController extends BaseController {
   /** DELETE /channels/whatsapp-personal/devices/:id — kill a bridge's token immediately. */
   async revokeDevice(req: Request, res: Response): Promise<void> {
     try {
-      const { id } = deviceIdSchema.parse(req.params);
+      // A non-UUID in the path is a 400 too — same reasoning as the bodies above.
+      const { id } = parse(deviceIdSchema, req.params);
       const revoked = await whatsappPersonalService.revokeDevice(this.userId(req), id);
-      this.handleSuccess(res, { revoked });
+      const body: RevokeBridgeDeviceResponse = { revoked };
+      this.handleSuccess(res, body);
     } catch (error) {
       this.handleError(error, res, 'WhatsappPersonalController.revokeDevice');
     }
