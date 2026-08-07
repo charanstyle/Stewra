@@ -1,6 +1,11 @@
 import type { Selectable } from 'kysely';
 import { sql } from 'kysely';
-import type { CommerceContact, CommerceTag, ContactAttributes } from '@stewra/shared-types';
+import type {
+  CommerceContact,
+  CommercePlatform,
+  CommerceTag,
+  ContactAttributes,
+} from '@stewra/shared-types';
 import { db } from '../../database/index.js';
 import type { CommerceContactsTable } from '../../database/types.js';
 
@@ -104,6 +109,53 @@ class ContactRepository {
       contact: toContact(row),
       tags: row.tag_names ?? [],
     }));
+  }
+
+  /**
+   * Create a contact the organization already knows about, rather than one that messaged in.
+   *
+   * Deliberately NOT an upsert, unlike `commerceInboxRepository.upsertContact` next door. That one
+   * serves a webhook where the same person arriving twice is ordinary and merging is the only sane
+   * answer. This one serves a person typing into a form or loading a file, where an existing row is
+   * a fact they need told: silently merging would let an import overwrite a display name that an
+   * operator had corrected by hand, with nothing anywhere to show it happened.
+   *
+   * Returns `created: false` and the existing id instead of throwing, so the caller can decide —
+   * the form says "this contact already exists" and links to them, the importer counts a skip.
+   */
+  async create(params: {
+    orgId: string;
+    platform: CommercePlatform;
+    externalId: string;
+    displayName: string | null;
+    phoneE164: string | null;
+    attributes: ContactAttributes;
+  }): Promise<{ id: string; created: boolean }> {
+    const inserted = await db
+      .insertInto('commerce_contacts')
+      .values({
+        org_id: params.orgId,
+        platform: params.platform,
+        external_id: params.externalId,
+        display_name: params.displayName,
+        phone_e164: params.phoneE164,
+        attributes: JSON.stringify(params.attributes),
+      })
+      // The unique index is the check, not a prior SELECT: two operators adding the same number at
+      // the same moment would both pass a pre-check, and one would still fail here.
+      .onConflict((oc) => oc.columns(['org_id', 'platform', 'external_id']).doNothing())
+      .returning('id')
+      .executeTakeFirst();
+    if (inserted !== undefined) return { id: inserted.id, created: true };
+
+    const existing = await db
+      .selectFrom('commerce_contacts')
+      .select('id')
+      .where('org_id', '=', params.orgId)
+      .where('platform', '=', params.platform)
+      .where('external_id', '=', params.externalId)
+      .executeTakeFirstOrThrow();
+    return { id: existing.id, created: false };
   }
 
   async findById(orgId: string, contactId: string): Promise<ContactWithTags | null> {

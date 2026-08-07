@@ -1,8 +1,15 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
+import {
+  COMMERCE_PLATFORMS,
+  CONSENT_PURPOSES,
+  CONSENT_SOURCES,
+  CONSENT_STATES,
+} from '@stewra/shared-types';
 import type {
   AddContactTagResponse,
   CommerceContactWithTags,
+  CreateCommerceContactResponse,
   DeleteCommerceTagResponse,
   GetCommerceContactResponse,
   ListCommerceContactsResponse,
@@ -42,6 +49,33 @@ const updateContactSchema = z.object({
 
 const addTagSchema = z.object({ tag: z.string().min(1).max(64) });
 
+/**
+ * Creating a contact.
+ *
+ * `platform` defaults to `whatsapp_cloud` rather than being required, because it is the only
+ * platform anything can be sent on today (`OUTBOUND_CAPABLE_PLATFORMS`) and making every client
+ * state it would be ceremony. It is still accepted so the field exists the day a second one does.
+ *
+ * `consent` is all-or-nothing: a request either carries a complete provenance or none at all. There
+ * is no shape here that records a state without a source, because a consent row whose origin is
+ * unknown cannot be defended and would still satisfy the send gate.
+ */
+const createContactSchema = z.object({
+  phoneE164: z.string().min(1).max(32),
+  displayName: z.string().max(200).nullable().optional(),
+  attributes: z.record(z.string(), z.string()).optional(),
+  tags: z.array(z.string().min(1).max(64)).max(20).optional(),
+  platform: z.enum(COMMERCE_PLATFORMS).optional(),
+  consent: z
+    .object({
+      purpose: z.enum(CONSENT_PURPOSES),
+      state: z.enum(CONSENT_STATES),
+      source: z.enum(CONSENT_SOURCES),
+      evidence: z.string().min(1).max(500),
+    })
+    .optional(),
+});
+
 function toContactResponse(found: ContactWithTags): CommerceContactWithTags {
   return { ...found.contact, tags: found.tags };
 }
@@ -70,6 +104,33 @@ class ContactsController extends BaseController {
       this.handleSuccess(res, body);
     } catch (error) {
       this.handleError(error, res, 'ContactsController.list');
+    }
+  }
+
+  /** POST /orgs/:orgId/contacts */
+  async create(req: Request, res: Response): Promise<void> {
+    try {
+      const { orgId } = orgContext(req);
+      const userId = req.userId;
+      if (userId === undefined) throw new Error('requireAuth middleware missing');
+      const input = parse(createContactSchema, req.body);
+      const result = await audienceService.createContact({
+        orgId,
+        platform: input.platform ?? 'whatsapp_cloud',
+        phone: input.phoneE164,
+        displayName: input.displayName ?? null,
+        attributes: input.attributes,
+        tags: input.tags ?? [],
+        consent: input.consent,
+        recordedByUserId: userId,
+      });
+      const body: CreateCommerceContactResponse = {
+        contact: toContactResponse(result.contact),
+        consent: result.consent,
+      };
+      this.handleSuccess(res, body, 201);
+    } catch (error) {
+      this.handleError(error, res, 'ContactsController.create');
     }
   }
 

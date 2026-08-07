@@ -415,6 +415,8 @@ export type {
   ListCommerceContactsRequest,
   ListCommerceContactsResponse,
   CommerceContactWithTags,
+  CreateCommerceContactRequest,
+  CreateCommerceContactResponse,
   GetCommerceContactResponse,
   UpdateCommerceContactRequest,
   UpdateCommerceContactResponse,
