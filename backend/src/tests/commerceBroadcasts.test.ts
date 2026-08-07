@@ -7,6 +7,7 @@ import { sql } from 'kysely';
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 // Type-only, so they are erased and do NOT load these modules before the environment below is set.
 import type { db as dbType, closeDb as closeDbType } from '../database/index.js';
+import type { SegmentDefinition } from '@stewra/shared-types';
 
 /**
  * BROADCASTS — the first feature that spends a client's money with nobody watching.
@@ -96,7 +97,6 @@ const { whatsappInboundAdapter } = await import(
 const { commerceWorker } = await import('../commerce/jobs/worker.js');
 const { vault } = await import('../control-plane/vault/vault.js');
 const { ConflictError } = await import('../utils/errors.js');
-type SegmentDefinition = import('@stewra/shared-types').SegmentDefinition;
 
 const PASSWORD_HASH = await bcrypt.hash(randomUUID(), 10);
 const createdOrgs: string[] = [];
