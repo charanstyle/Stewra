@@ -1,0 +1,42 @@
+; Re-apply the hosted-runner egress fence whenever Docker (re)starts, including at boot.
+;
+; Install on the deploy host:
+;   sudo cp deploy/hosted-runner/stewra-runner-fence.service /etc/systemd/system/
+;   sudo sed -i "s#@REPO@#$(pwd)#" /etc/systemd/system/stewra-runner-fence.service
+;   sudo systemctl daemon-reload
+;   sudo systemctl enable --now stewra-runner-fence.service
+;   systemctl status stewra-runner-fence.service      # must be "active (exited)"
+;
+; Verify it really survives, which is the whole point and the one thing reading the file cannot prove:
+;   sudo reboot
+;   sudo bash deploy/hosted-runner/assert-fence.sh    # must print "fence intact."
+;
+; WHY A UNIT RATHER THAN iptables-persistent: Docker REBUILDS the DOCKER-USER chain every time it
+; starts, discarding whatever a restore-on-boot put there if it landed first. A saved ruleset is
+; restored once, early; this runs after Docker, every time Docker starts. `netfilter-persistent` is
+; still fine for the INPUT rule, but it cannot be trusted for the forward rules, and half a fence is
+; not a fence.
+;
+; PartOf is the load-bearing line. Without it the unit runs at boot and never again, so a mid-life
+; `systemctl restart docker` — a routine thing during an upgrade — rebuilds DOCKER-USER and leaves
+; the host unfenced until someone notices. With it, systemd restarts this unit as part of that same
+; restart.
+
+[Unit]
+Description=Fence the Stewra hosted-runner network off private address space
+Documentation=file://@REPO@/runner/HOSTED.md
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/env bash @REPO@/deploy/hosted-runner/iptables-egress.sh
+; The applier asserts its own work, but ExecStartPost is checked independently so a future change to
+; the applier cannot quietly drop the check. A failure here marks the unit failed, which is what makes
+; an unfenced host visible to `systemctl --failed` and to monitoring, rather than silently active.
+ExecStartPost=/usr/bin/env bash @REPO@/deploy/hosted-runner/assert-fence.sh
+
+[Install]
+WantedBy=multi-user.target

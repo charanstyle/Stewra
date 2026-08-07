@@ -21,8 +21,13 @@
 #
 # Re-running is safe — every rule is checked before it is inserted.
 #
-# NOT PERSISTENT ACROSS REBOOT. iptables rules live in kernel memory. See the tail of this script for
-# what to do about that; until it is done, a reboot silently unfences every runner.
+# NOT PERSISTENT BY ITSELF. iptables rules live in kernel memory, so this script has to be re-run
+# after every boot AND after every Docker restart (Docker rebuilds the DOCKER-USER chain when it
+# starts). `stewra-runner-fence.service`, next to this file, does exactly that; install it, or a
+# reboot silently unfences every runner. The tail of this script prints the install commands.
+#
+# This script now ASSERTS its own result via assert-fence.sh before exiting 0 — it cannot report
+# success while the rules are absent.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -82,29 +87,29 @@ fi
 
 echo
 echo "active rules:"
-iptables -n -L DOCKER-USER --line-numbers | grep -F "$RUNNER_SUBNET" || echo "  (none — something is wrong)"
-iptables -n -L INPUT --line-numbers | grep -F "$RUNNER_SUBNET" || echo "  (none — something is wrong)"
+iptables -n -L DOCKER-USER --line-numbers | grep -F "$RUNNER_SUBNET" || true
+iptables -n -L INPUT --line-numbers | grep -F "$RUNNER_SUBNET" || true
+
+# Assert rather than describe. This used to print "(none — something is wrong)" and exit 0, so a run
+# that inserted nothing was indistinguishable, to any caller checking the exit code, from a run that
+# fenced the host. `set -e` carries a failure here straight out of the script.
+echo
+bash "$HERE/assert-fence.sh"
 
 cat <<PERSIST
 
-These rules do NOT survive a reboot. Make them permanent with ONE of:
+PERSISTENCE: iptables rules live in kernel memory and do NOT survive a reboot on their own. Ship the
+unit next to this script, which re-applies them after docker.service and on every Docker restart:
 
-  * netfilter-persistent (Debian/Ubuntu):
-      apt-get install iptables-persistent && netfilter-persistent save
-    Re-save after every change to this script.
+  sudo cp $HERE/stewra-runner-fence.service /etc/systemd/system/
+  sudo sed -i "s#@REPO@#$(cd "$HERE/../.." && pwd)#" /etc/systemd/system/stewra-runner-fence.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now stewra-runner-fence.service
 
-  * a systemd unit that re-runs this script after docker.service, which is more robust because the
-    DOCKER-USER chain is recreated by Docker on start:
-      /etc/systemd/system/stewra-runner-fence.service
-        [Unit]
-        After=docker.service
-        Requires=docker.service
-        [Service]
-        Type=oneshot
-        ExecStart=$HERE/iptables-egress.sh
-        RemainAfterExit=yes
-        [Install]
-        WantedBy=multi-user.target
+Prefer it over netfilter-persistent alone: Docker REBUILDS the DOCKER-USER chain each time it starts,
+discarding a restore that ran earlier in boot. Confirm it held with, after a reboot:
+
+  sudo bash $HERE/assert-fence.sh
 
 Verify from inside a runner container (all three must behave as stated):
   docker exec <runner> sh -c 'nc -z -w2 <host-lan-ip> 22; echo "host: \$?  (want non-zero)"'

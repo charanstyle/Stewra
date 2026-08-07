@@ -64,18 +64,40 @@ nothing that the alternative would have saved.
 **Consequence:** the token is visible to anything that can already read the Docker API, which is the
 provisioner and root. Both are already inside the trust boundary.
 
-### The egress firewall does not survive a reboot
+### The egress firewall must be installed as a unit, or it does not survive a reboot
 
 *The most important one on this page.*
 
 `deploy/hosted-runner/iptables-egress.sh` is the **entire isolation claim** of the hosted design, and
-iptables rules live in kernel memory. Its own header says so: *"until it is done, a reboot silently
-unfences every runner."*
+iptables rules live in kernel memory — applying them by hand fences the host until the next reboot and
+no longer.
 
-**Consequence:** after any host reboot, runner containers can reach the LAN, this host, the shared
-Postgres and Redis, and every other project's stack, until the script is re-run. Persisting the rules
-(`iptables-persistent`, a systemd unit, or the equivalent) is host configuration and lives outside
-this repo. **Until it is persistent, treat a reboot as an incident.**
+`deploy/hosted-runner/stewra-runner-fence.service` now ships next to it and closes that. It re-applies
+the rules `After=docker.service`, and `PartOf=docker.service` makes systemd re-run it on every Docker
+restart — which matters because **Docker rebuilds the DOCKER-USER chain when it starts**, so a
+`systemctl restart docker` during a routine upgrade would otherwise leave the host unfenced with
+nothing said. That is also why the unit is preferred over `iptables-persistent` alone: a ruleset
+restored early in boot is discarded when Docker comes up after it.
+
+Two things now refuse to claim a fence that is not there:
+
+* `deploy/hosted-runner/assert-fence.sh` checks every rule and exits non-zero if any is missing (or if
+  IPv6 has since been enabled on the network, which only-IPv4 rules do not cover).
+* `iptables-egress.sh` runs that assertion before exiting 0. It previously printed
+  *"(none — something is wrong)"* and exited **0**, so a run that inserted nothing looked like success
+  to any caller reading the exit code.
+
+The unit runs the assertion as `ExecStartPost`, so a boot where the rules did not land leaves the unit
+**failed** and visible to `systemctl --failed`, rather than silently active over an unfenced network.
+
+**Consequence if you skip the install:** after any host reboot, runner containers can reach the LAN,
+this host, the shared Postgres and Redis, and every other project's stack, until the script is re-run.
+**Until the unit is installed and a reboot has been rehearsed, treat a reboot as an incident.**
+
+**Still unproven here:** nothing in this repo has executed the fence against a real Docker daemon —
+this host has no provisioner container and `HOSTED_RUNNER_ENABLED=false`. The unit and the assertion
+are written and reviewed, not exercised. Installing them on a host that actually runs runners, then
+rebooting it and running `assert-fence.sh`, is what turns that from reviewed into proven.
 
 ## Prerequisites
 
@@ -88,8 +110,15 @@ resolves it. On the host, before the first `--profile hosted` up:
 #    cannot reach another's.
 bash deploy/hosted-runner/create-network.sh
 
-# 2. Fence it off everything private. Re-runnable; NOT persistent across reboot (see above).
+# 2. Fence it off everything private. Re-runnable, and it now asserts its own result.
 sudo bash deploy/hosted-runner/iptables-egress.sh
+
+# 2b. Make the fence survive reboots and Docker restarts. Skipping this leaves the host fenced
+#     only until it next reboots (see above).
+sudo cp deploy/hosted-runner/stewra-runner-fence.service /etc/systemd/system/
+sudo sed -i "s#@REPO@#$(pwd)#" /etc/systemd/system/stewra-runner-fence.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now stewra-runner-fence.service
 
 # 3. Build and tag the runner image the provisioner is pinned to.
 docker build -f runner/Dockerfile -t stewra-runner:0.1.0 .
