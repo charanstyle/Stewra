@@ -30,7 +30,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../../utils/error
  * about a customer — and low enough that an import bug filling it with a field per order is refused
  * at the write instead of discovered as a slow query weeks later.
  */
-const MAX_ATTRIBUTES = 50;
+export const MAX_ATTRIBUTES = 50;
 
 /**
  * Contacts, labels and segments — everything that answers "who is this going to" before a send.

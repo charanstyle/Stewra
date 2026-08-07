@@ -108,6 +108,10 @@ import type {
   ListCommerceContactsResponse,
   CreateCommerceContactRequest,
   CreateCommerceContactResponse,
+  CommercePlatform,
+  CreateContactImportResponse,
+  ListContactImportsResponse,
+  GetContactImportResponse,
   GetCommerceContactResponse,
   UpdateCommerceContactRequest,
   UpdateCommerceContactResponse,
@@ -623,6 +627,30 @@ export const api = {
     body: CreateCommerceContactRequest,
   ): Promise<CreateCommerceContactResponse> =>
     request(`/orgs/${orgId}/contacts`, { method: 'POST', body }),
+
+  /**
+   * Upload a contact list. Multipart, because the file is the request — see
+   * `CreateContactImportResponse` for the columns it must carry.
+   *
+   * Answers 202 with an import that has not run yet. The contacts appear only after
+   * `getContactImport` reports `done`, which is why the caller polls rather than reloading the list.
+   */
+  createContactImport: (
+    orgId: string,
+    file: File,
+    platform?: CommercePlatform,
+  ): Promise<CreateContactImportResponse> => {
+    const form = new FormData();
+    form.append('file', file);
+    if (platform !== undefined) form.append('platform', platform);
+    return requestMultipart(`/orgs/${orgId}/contacts/import`, form);
+  },
+
+  listContactImports: (orgId: string): Promise<ListContactImportsResponse> =>
+    request(`/orgs/${orgId}/contacts/imports`),
+
+  getContactImport: (orgId: string, importId: string): Promise<GetContactImportResponse> =>
+    request(`/orgs/${orgId}/contacts/imports/${importId}`),
 
   getCommerceContact: (orgId: string, contactId: string): Promise<GetCommerceContactResponse> =>
     request(`/orgs/${orgId}/contacts/${contactId}`),

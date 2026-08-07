@@ -18,6 +18,7 @@ import { describe, it, expect } from 'vitest';
 process.env['META_COMMERCE_ENABLED'] = 'false';
 
 const { broadcastService } = await import('../commerce/services/broadcastService.js');
+const { contactImportService } = await import('../commerce/services/contactImportService.js');
 const { NotFoundError, ServiceUnavailableError } = await import('../utils/errors.js');
 
 /**
@@ -68,6 +69,27 @@ describe('broadcasts, with the commerce integration disabled', () => {
 
     expect(error).toBeInstanceOf(ServiceUnavailableError);
     expect(error).not.toBeInstanceOf(NotFoundError);
+  });
+
+  it('refuses a contact import onto the same queue, for the same reason', async () => {
+    // An import needs no Meta credential to run — it sends nothing. It does need the worker, which
+    // only starts alongside one. Accepting the file would answer 202 and show a progress bar that
+    // could never move, which is the same false promise in a different shape.
+    const error = await contactImportService
+      .create({
+        orgId: randomUUID(),
+        createdByUserId: randomUUID(),
+        filename: 'list.csv',
+        platform: 'whatsapp_cloud',
+        // Deliberately valid. A file refused for its own faults would prove nothing about the guard.
+        csv:
+          'phone,consent_purpose,consent_state,consent_source,consent_evidence\n' +
+          '+442079460000,marketing,opted_in,web_form,https://acme.invalid/signup\n',
+      })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ServiceUnavailableError);
+    expect((error as Error).message).toContain('META_COMMERCE_ENABLED');
   });
 
   it('refuses to resume a paused broadcast onto a queue with no worker', async () => {

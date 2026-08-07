@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
+import multer from 'multer';
+import type { ApiResponse } from '@stewra/shared-types';
 import { contactsController } from '../controllers/contactsController.js';
+import { contactImportsController } from '../controllers/contactImportsController.js';
 import { segmentsController } from '../controllers/segmentsController.js';
 import { requireOrgMember } from '../middleware/requireOrgMember.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
@@ -38,6 +41,90 @@ router.get('/contacts', requireAuth, verified, requireOrgMember('viewer'), (req,
 router.post('/contacts', requireAuth, verified, requireOrgMember('admin'), (req, res) => {
   void contactsController.create(req, res);
 });
+
+// --- Bulk import ----------------------------------------------------------------------------
+//
+// Declared before `/contacts/:contactId` so the literal "import" and "imports" can never be read as
+// a contact id — the same ordering `/segments/preview` needs, for the same reason.
+
+/**
+ * The uploaded file, in memory and size-capped.
+ *
+ * 8 MB is comfortably above `MAX_IMPORT_ROWS` rows of realistic width and far below anything that
+ * threatens the process. The cap is enforced HERE rather than after parsing because a file this
+ * route will refuse should never be read into a buffer at all, and because `source_csv` stores what
+ * arrives — an unbounded upload would be an unbounded row.
+ *
+ * `files: 1`: one list per import. Two files in one request would be two imports sharing a single
+ * ledger and a single count, which no report could then take apart.
+ */
+const uploadCsv = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+}).single('file');
+
+/**
+ * Multer's own failures, answered in this route's voice.
+ *
+ * Without this an oversized upload reaches the generic error handler as an unhandled exception and
+ * becomes a 500 with an alert attached — a request that is entirely the client's to fix, reported as
+ * our fault. Same argument as `318167b` and `6a2c983`: a malformed request is a 400 at the paste.
+ */
+const acceptCsv = (req: Request, res: Response, next: NextFunction): void => {
+  uploadCsv(req, res, (error: unknown) => {
+    if (error instanceof multer.MulterError) {
+      const body: ApiResponse<never> = {
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message:
+            error.code === 'LIMIT_FILE_SIZE'
+              ? 'That file is larger than 8 MB. Split the list and import it in parts.'
+              : `That upload could not be read: ${error.message}`,
+          details: [{ field: 'file', message: error.code }],
+        },
+      };
+      res.status(400).json(body);
+      return;
+    }
+    if (error !== null && error !== undefined) {
+      next(error);
+      return;
+    }
+    next();
+  });
+};
+
+router.post(
+  '/contacts/import',
+  requireAuth,
+  verified,
+  requireOrgMember('admin'),
+  acceptCsv,
+  (req, res) => {
+    void contactImportsController.create(req, res);
+  },
+);
+
+router.get(
+  '/contacts/imports',
+  requireAuth,
+  verified,
+  requireOrgMember('viewer'),
+  (req, res) => {
+    void contactImportsController.list(req, res);
+  },
+);
+
+router.get(
+  '/contacts/imports/:importId',
+  requireAuth,
+  verified,
+  requireOrgMember('viewer'),
+  (req, res) => {
+    void contactImportsController.get(req, res);
+  },
+);
 
 router.get('/contacts/:contactId', requireAuth, verified, requireOrgMember('viewer'), (req, res) => {
   void contactsController.get(req, res);

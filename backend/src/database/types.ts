@@ -32,6 +32,8 @@ import type {
   ProcessTier,
   SuppressionReason,
   CommerceJobKind,
+  ContactImportSkipReason,
+  ContactImportStatus,
   CommerceJobStatus,
   MessagePricingCategory,
   TemplateCategory,
@@ -1123,6 +1125,48 @@ export interface CommerceJobsTable {
   finished_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
 }
 
+/**
+ * An uploaded contact list (migration 048).
+ *
+ * `source_csv` is the file itself. It is never read by a status poll — every select that is not the
+ * handler's own naming its columns explicitly is the reason this stays cheap.
+ */
+export interface CommerceContactImportsTable {
+  id: Generated<string>;
+  org_id: string;
+  created_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  filename: string;
+  platform: CommercePlatform;
+  status: Generated<ContactImportStatus>;
+  source_csv: string;
+  total_rows: number;
+  imported_count: Generated<number>;
+  skipped_count: Generated<number>;
+  error: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+  finished_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+}
+
+/**
+ * What became of one row of an import (migration 048). Unique on `(import_id, row_number)`, which is
+ * what lets a re-claimed job resume without writing any row's outcome twice.
+ */
+export interface CommerceContactImportRowsTable {
+  id: Generated<string>;
+  import_id: string;
+  row_number: number;
+  raw_phone: string;
+  contact_id: ColumnType<string | null, string | null | undefined, string | null>;
+  imported: boolean;
+  skip_reason: ColumnType<
+    ContactImportSkipReason | null,
+    ContactImportSkipReason | null | undefined,
+    ContactImportSkipReason | null
+  >;
+  detail: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -1186,4 +1230,6 @@ export interface Database {
   commerce_templates: CommerceTemplatesTable;
   commerce_broadcasts: CommerceBroadcastsTable;
   commerce_broadcast_recipients: CommerceBroadcastRecipientsTable;
+  commerce_contact_imports: CommerceContactImportsTable;
+  commerce_contact_import_rows: CommerceContactImportRowsTable;
 }

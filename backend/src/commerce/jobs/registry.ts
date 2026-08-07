@@ -4,6 +4,7 @@ import { channelTokenRefreshHandler } from './channelTokenRefreshHandler.js';
 import { templateSyncHandler } from './templateSyncHandler.js';
 import { broadcastDispatchHandler } from './broadcastDispatchHandler.js';
 import { broadcastSendHandler } from './broadcastSendHandler.js';
+import { contactImportHandler } from './contactImportHandler.js';
 
 /**
  * Every job kind, mapped to the thing that runs it.
@@ -18,6 +19,7 @@ const HANDLERS: Record<CommerceJobKind, JobHandler> = {
   template_sync: templateSyncHandler,
   broadcast_dispatch: broadcastDispatchHandler,
   broadcast_send: broadcastSendHandler,
+  contact_import: contactImportHandler,
 };
 
 /**

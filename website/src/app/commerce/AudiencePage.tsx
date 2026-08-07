@@ -8,6 +8,8 @@ import type {
   CommerceTag,
   ConsentSource,
   ContactConsent,
+  ContactImport,
+  ContactImportRow,
   MessagingPolicy,
   SegmentDefinition,
   Suppression,
@@ -87,6 +89,12 @@ export default function AudiencePage(): React.JSX.Element {
   const [newConsentSource, setNewConsentSource] = useState<ConsentSource>('web_form');
   const [newConsentEvidence, setNewConsentEvidence] = useState('');
   const [adding, setAdding] = useState(false);
+
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [activeImport, setActiveImport] = useState<ContactImport | null>(null);
+  const [skippedRows, setSkippedRows] = useState<ReadonlyArray<ContactImportRow>>([]);
+  const [skippedTruncated, setSkippedTruncated] = useState(false);
 
   const [tags, setTags] = useState<ReadonlyArray<CommerceTag>>([]);
 
@@ -198,6 +206,66 @@ export default function AudiencePage(): React.JSX.Element {
       setAdding(false);
     }
   }, [orgId, newPhone, newName, newTags, newConsent, newConsentSource, newConsentEvidence, loadAll]);
+
+  /**
+   * Upload a list.
+   *
+   * Answers before the work is done — the import is queued, not applied — so the button hands over
+   * to the poll below rather than reporting success. Saying "imported" here would be a claim about
+   * rows nothing has looked at yet.
+   */
+  const uploadImport = useCallback(async (): Promise<void> => {
+    if (orgId === null || importFile === null) return;
+    setError(null);
+    setNotice(null);
+    setUploading(true);
+    setSkippedRows([]);
+    setSkippedTruncated(false);
+    try {
+      const res = await api.createContactImport(orgId, importFile);
+      setActiveImport(res.import);
+      setImportFile(null);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setUploading(false);
+    }
+  }, [orgId, importFile]);
+
+  /**
+   * Follow a running import until it stops.
+   *
+   * Polled rather than pushed, and the contact list is reloaded only once the import is `done` —
+   * refreshing it half way would show a list that grows while the operator reads it and a skipped
+   * count that is not final, which invites acting on a report that has not finished being written.
+   */
+  useEffect(() => {
+    if (orgId === null || activeImport === null) return;
+    if (activeImport.status !== 'queued' && activeImport.status !== 'running') return;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async (): Promise<void> => {
+        try {
+          const res = await api.getContactImport(orgId, activeImport.id);
+          if (cancelled) return;
+          setActiveImport(res.import);
+          setSkippedRows(res.skippedRows);
+          setSkippedTruncated(res.skippedTruncated);
+          if (res.import.status === 'done' || res.import.status === 'failed') {
+            await loadAll(orgId);
+          }
+        } catch (err) {
+          if (!cancelled) setError(describeError(err));
+        }
+      })();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [orgId, activeImport, loadAll]);
 
   const openContact = useCallback(
     async (contactId: string): Promise<void> => {
@@ -561,6 +629,78 @@ export default function AudiencePage(): React.JSX.Element {
                   >
                     {adding ? 'Adding…' : 'Add contact'}
                   </button>
+                </div>
+              )}
+
+              {isAdmin && (
+                <div className={styles.subsection}>
+                  <h3 className={styles.subTitle}>Import a list</h3>
+                  {/*
+                    The columns are stated up front, and the consent ones are marked required.
+                    This is where a business's real list arrives, and the difference between a list
+                    that carries its provenance and one that does not is the whole of whether the
+                    people on it can lawfully be messaged. A row without it is reported back, not
+                    imported — better said here than discovered afterwards.
+                  */}
+                  <p className={styles.muted}>
+                    CSV with a header row. Required: <code>phone</code>, <code>consent_purpose</code>{' '}
+                    (service or marketing), <code>consent_state</code> (opted_in or opted_out),{' '}
+                    <code>consent_source</code>, <code>consent_evidence</code>. Optional:{' '}
+                    <code>name</code>, <code>tags</code> (separated by semicolons). Any other column
+                    becomes an attribute segments can target. Rows with no consent on them are
+                    reported back and not imported.
+                  </p>
+                  <div className={styles.row}>
+                    <input
+                      className={styles.input}
+                      type="file"
+                      accept=".csv,text/csv"
+                      onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+                    />
+                    <button
+                      type="button"
+                      className={styles.primary}
+                      disabled={uploading || importFile === null}
+                      onClick={() => void uploadImport()}
+                    >
+                      {uploading ? 'Uploading…' : 'Import'}
+                    </button>
+                  </div>
+
+                  {activeImport !== null && (
+                    <div className={styles.subsection}>
+                      <p className={styles.muted}>
+                        {activeImport.filename} —{' '}
+                        {activeImport.status === 'queued' || activeImport.status === 'running'
+                          ? `${activeImport.importedCount + activeImport.skippedCount} of ${activeImport.totalRows} rows read…`
+                          : activeImport.status === 'failed'
+                            ? `Import failed: ${activeImport.error ?? 'unknown reason'}`
+                            : `Done. ${activeImport.importedCount} imported, ${activeImport.skippedCount} skipped.`}
+                      </p>
+                      {skippedRows.length > 0 && (
+                        <ul className={styles.list}>
+                          {skippedRows.map((skipped) => (
+                            <li key={skipped.id} className={styles.listRow}>
+                              {/* The row number and the number in its original form — the two
+                                  things that let someone find the line in their spreadsheet. */}
+                              <span>
+                                Row {skipped.rowNumber}: {skipped.rawPhone || '(no number)'}
+                              </span>
+                              <span className={clsx(styles.tag, styles.tagError)}>
+                                {skipped.detail ?? skipped.skipReason}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {skippedTruncated && (
+                        <p className={styles.muted}>
+                          Showing the first {skippedRows.length} skipped rows of{' '}
+                          {activeImport.skippedCount}.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
