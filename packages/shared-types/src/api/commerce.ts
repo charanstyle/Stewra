@@ -21,6 +21,8 @@ import type {
   ConsentSource,
   ConsentState,
   ContactConsent,
+  ContactImport,
+  ContactImportRow,
   MessageTemplate,
   MessagingPolicy,
   SegmentDefinition,
@@ -344,6 +346,53 @@ export interface UpdateCommerceContactRequest {
 
 export interface UpdateCommerceContactResponse {
   readonly contact: CommerceContactWithTags;
+}
+
+/**
+ * POST /orgs/:orgId/contacts/import — upload a list.
+ *
+ * There is no request INTERFACE for this one, and that is not an omission: the body is
+ * `multipart/form-data` carrying the CSV itself, because a fifty-thousand-row file does not belong
+ * inside a JSON string and `express.json` is capped at 1mb. The optional `platform` field rides
+ * alongside as a form field. The shape that matters is the file's own header, and it is documented
+ * here because that is the actual contract:
+ *
+ *   `phone`             — required. Any dialable form; must carry a country code.
+ *   `consent_purpose`   — required. `service` or `marketing`.
+ *   `consent_state`     — required. `opted_in` or `opted_out`.
+ *   `consent_source`    — required. One of {@link CONSENT_SOURCES}.
+ *   `consent_evidence`  — required, non-empty. The form URL, ad id, or list name.
+ *   `name`, `tags`      — optional. `tags` is semicolon-separated, since commas belong to the CSV.
+ *   anything else       — an attribute, keyed by the column name.
+ *
+ * **Consent is REQUIRED here, where the single-contact form leaves it optional, and the asymmetry is
+ * the point.** A person adding one contact by hand is present and answerable for that one assertion,
+ * and a contact with no consent is simply one marketing cannot reach. A file has no such presence:
+ * the rows are strangers in bulk, and a bulk list with no provenance is precisely the purchased list
+ * the consent regime exists to refuse. So a row that carries none is reported back and NOT imported —
+ * never imported-without-consent, which would look like the import working, and never guessed at.
+ */
+export interface CreateContactImportResponse {
+  /** Accepted, queued, and not yet run. Poll {@link GetContactImportResponse} for the outcome. */
+  readonly import: ContactImport;
+}
+
+export interface ListContactImportsResponse {
+  readonly imports: readonly ContactImport[];
+}
+
+/**
+ * GET /orgs/:orgId/contacts/imports/:importId — the progress, and then the report.
+ *
+ * `rows` carries the SKIPPED rows only, and it is capped. The imported ones are already visible as
+ * contacts, so repeating them here would bury the hundred rows that need attention under the nine
+ * hundred that do not. `skippedTruncated` says when the list was cut, so a client never presents a
+ * partial report as the whole of it.
+ */
+export interface GetContactImportResponse {
+  readonly import: ContactImport;
+  readonly skippedRows: readonly ContactImportRow[];
+  readonly skippedTruncated: boolean;
 }
 
 /**

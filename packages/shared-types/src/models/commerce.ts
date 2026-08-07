@@ -512,6 +512,7 @@ export const COMMERCE_JOB_KINDS = [
   'template_sync',
   'broadcast_dispatch',
   'broadcast_send',
+  'contact_import',
 ] as const;
 
 export type CommerceJobKind = (typeof COMMERCE_JOB_KINDS)[number];
@@ -795,4 +796,94 @@ export interface CommerceJob {
   readonly updatedAt: ISODateString;
   /** When it reached a terminal state. Null while it is still queued or running. */
   readonly finishedAt: ISODateString | null;
+}
+
+/**
+ * Where a contact import is.
+ *
+ * Deliberately NOT the job's own statuses. A job that is `dead` after five attempts and an import
+ * that read a file it could not parse are the same state to a queue and different sentences to the
+ * person who uploaded the file, and this is the status that gets shown to them.
+ *
+ * There is no `partial`. An import that imported nine hundred rows and skipped a hundred is `done` —
+ * the hundred are not a failure of the import, they are its findings, and each one is a row in
+ * {@link ContactImportRow} saying which row it was and why. `failed` is reserved for the import as a
+ * whole not having happened: the file did not parse, or the queue gave up.
+ */
+export const CONTACT_IMPORT_STATUSES = ['queued', 'running', 'done', 'failed'] as const;
+
+export type ContactImportStatus = (typeof CONTACT_IMPORT_STATUSES)[number];
+
+/**
+ * Why a row was not imported.
+ *
+ * A closed union rather than a free-text note, because this list is the answer to "why is my list
+ * smaller than my file" and it has to be countable. Free text would make the report readable and the
+ * summary impossible.
+ *
+ * `missing_consent` and `invalid_consent` are separate on purpose. The first means the row said
+ * nothing about how this person agreed to be messaged; the second means it said something that is
+ * not a thing we can record. The fix for one is "your export is missing a column" and for the other
+ * is "that word is not one of the sources" — telling someone the wrong one costs them an afternoon.
+ */
+export const CONTACT_IMPORT_SKIP_REASONS = [
+  'invalid_phone',
+  'missing_consent',
+  'invalid_consent',
+  'invalid_attribute',
+  'duplicate_in_file',
+  'already_a_contact',
+] as const;
+
+export type ContactImportSkipReason = (typeof CONTACT_IMPORT_SKIP_REASONS)[number];
+
+/** One uploaded file and what became of it. */
+export interface ContactImport {
+  readonly id: UUID;
+  readonly orgId: UUID;
+  /**
+   * Who uploaded it, and therefore who the consent this import records is attributed to. Null only
+   * once that user has been erased — an import whose uploader is gone is refused rather than run,
+   * because consent evidence signed by nobody is not evidence.
+   */
+  readonly createdByUserId: UUID | null;
+  /** What the operator called the file. Shown back to them; never used as a path. */
+  readonly filename: string;
+  readonly platform: CommercePlatform;
+  readonly status: ContactImportStatus;
+  /** Data rows in the file, excluding the header. Known from the moment it is accepted. */
+  readonly totalRows: number;
+  readonly importedCount: number;
+  readonly skippedCount: number;
+  /**
+   * Why the import as a whole did not happen. Null unless `status` is `failed` — a `done` import
+   * with skipped rows explains itself per row instead.
+   */
+  readonly error: string | null;
+  readonly createdAt: ISODateString;
+  readonly updatedAt: ISODateString;
+  readonly finishedAt: ISODateString | null;
+}
+
+/**
+ * What became of one row.
+ *
+ * Every processed row gets one of these, imported or not — this table IS the import's ledger, in the
+ * same shape and for the same reason as `commerce_broadcast_recipients`. It is also what makes the
+ * handler idempotent: a job whose lease expired half way is claimed again, and the rows already
+ * written here are the record of how far it got.
+ */
+export interface ContactImportRow {
+  readonly id: UUID;
+  readonly importId: UUID;
+  /** 1-based, counting data rows only, so it matches what the operator sees below their header. */
+  readonly rowNumber: number;
+  /** The phone exactly as the file wrote it — the only way to find the row again in their export. */
+  readonly rawPhone: string;
+  /** Null when the row was skipped, or when it named a contact that already existed. */
+  readonly contactId: UUID | null;
+  readonly imported: boolean;
+  readonly skipReason: ContactImportSkipReason | null;
+  /** The specific complaint, for a row the reason alone does not locate. */
+  readonly detail: string | null;
 }
