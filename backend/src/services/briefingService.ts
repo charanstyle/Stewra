@@ -11,9 +11,7 @@ import { config } from '../config/unifiedConfig.js';
 import { modelClient } from '../agent-host/modelClient.js';
 import { vault } from '../control-plane/vault/vault.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
-import { connectionRepository } from '../repositories/connectionRepository.js';
-import { fetchUpcomingEvents } from './googleOAuthService.js';
-import { extractCalendarFacts } from './calendarFacts.js';
+import { broker } from '../control-plane/broker/broker.js';
 import {
   emailThreadRepository,
   emailMessageRepository,
@@ -29,9 +27,15 @@ import { logger } from '../utils/logger.js';
 /**
  * Builds the proactive briefing + nudges (control plane, trusted — a peer of insightService). It reads
  * the DECRYPTED email store + calendar facts + the user's style, and calls the model DIRECTLY for the
- * natural-language briefing. This is the deliberate two-plane note: bodies live in the control plane
- * and are summarised by this trusted orchestrator, NOT through the broker and NOT inside the agent
- * runtime — the broker/minimized-facts contract is untouched, so `npm run boundaries` stays green.
+ * natural-language briefing. This is the deliberate two-plane note: email bodies live in the control
+ * plane and are summarised by this trusted orchestrator, NOT inside the agent runtime — the
+ * broker/minimized-facts contract is untouched, so `npm run boundaries` stays green.
+ *
+ * The CALENDAR half is different and goes through the broker (`calendarFactsFor`). Not because the
+ * boundary demands it of trusted code, but because the broker's path is simply the better one: it
+ * already spans every connected Google account, audits the read into the activity feed, and turns a
+ * revoked grant into a "please reconnect" instead of silence. Reading it here by hand was a second,
+ * worse copy of `connectionService.googleFacts` — see that method for what each difference cost.
  *
  * Nudges are derived DETERMINISTICALLY from the email data (so an option's action targets a REAL
  * thread), not invented by the model — the model only writes the briefing prose. If the model's
@@ -125,18 +129,37 @@ class BriefingService {
     }
   }
 
-  /** Calendar facts for the user's first active Google account; empty on any failure (calendar is
-   * optional to the briefing). */
+  /**
+   * Calendar facts for the briefing, read THROUGH the broker; empty on denial or failure, because the
+   * calendar is optional to a briefing that is mostly about mail.
+   *
+   * This used to read the calendar itself — `listActive('google')`, take `connections[0]`, vault the
+   * token, fetch, extract — which is what `connectionService.googleFacts` already does, only worse in
+   * three ways that were invisible from here:
+   *
+   *  - It read the FIRST Google account and stopped. A user with a work and a personal calendar
+   *    connected was briefed on one of them, with nothing anywhere saying which.
+   *  - The read was never audited. Every other read of this user's data writes a `read` row that
+   *    surfaces in the activity feed; this one did not, so the feed's answer to "what has it looked
+   *    at?" was incomplete for the single most regular job in the product.
+   *  - `catch { return [] }` swallowed a REVOKED token. `connectionService` treats that as terminal:
+   *    it flips the connection to `revoked` and audits a `disconnect` so the user is told to
+   *    reconnect. Swallowed here, a dead grant just meant the calendar quietly vanished from the
+   *    briefing forever, and nothing ever asked the user to fix it.
+   *
+   * The email half of this service still reads the decrypted store directly and summarises it here —
+   * that part is the deliberate two-plane note in this file's header and is unchanged. Only the
+   * calendar moves, and it moves onto a path that already existed.
+   */
   private async calendarFactsFor(userId: string): Promise<ReadonlyArray<string>> {
     try {
-      const connections = await connectionRepository.listActive(userId, 'google');
-      const connection = connections[0];
-      if (connection === undefined) {
-        return [];
-      }
-      const refreshToken = await vault.get(connection.vaultRef);
-      const events = await fetchUpcomingEvents(refreshToken);
-      return extractCalendarFacts(events, new Date());
+      const result = await broker.request({
+        userId,
+        kind: 'calendar',
+        purpose: 'your daily briefing',
+        params: {},
+      });
+      return result.allowed ? result.facts : [];
     } catch (error) {
       Sentry.captureException(error);
       return [];

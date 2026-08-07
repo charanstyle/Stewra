@@ -108,3 +108,33 @@ describe('agent containment', () => {
     expect(Object.keys(pkg.dependencies ?? {})).toEqual(['@stewra/shared-types']);
   });
 });
+
+/**
+ * The agent's containment is proven above. This block is about the OTHER direction: a trusted
+ * control-plane service is allowed to reach data directly, so nothing stops one from growing its own
+ * copy of a read the broker already owns — and `npm run boundaries` cannot see it, because both files
+ * are legitimately inside the control plane.
+ *
+ * `briefingService` had exactly that. Its calendar read took only the FIRST Google account, wrote no
+ * audit row, and swallowed a revoked grant that `connectionService` would have flipped to `revoked`
+ * and told the user about. Every one of those is invisible at the call site and none of them fails
+ * loudly, which is why the guard has to be structural rather than behavioural.
+ */
+describe('the briefing reads the calendar through the broker, not around it', () => {
+  const briefingSource = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../services/briefingService.ts'),
+    'utf8',
+  );
+
+  it('asks the broker for the calendar slice', () => {
+    expect(briefingSource).toContain('broker.request');
+    expect(briefingSource).toMatch(/kind:\s*'calendar'/);
+  });
+
+  it('does not fetch or extract calendar events itself', () => {
+    // These two are the whole of the direct path: fetch the events, reduce them to facts. Importing
+    // either from here means the second copy is back, whatever it looks like at the call site.
+    expect(briefingSource).not.toContain('fetchUpcomingEvents');
+    expect(briefingSource).not.toContain('extractCalendarFacts');
+  });
+});
