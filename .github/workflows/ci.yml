@@ -93,6 +93,15 @@ jobs:
           SMTP_USER=stewra-test
           SMTP_PASSWORD=ci-throwaway-smtp-password
           EMAIL_FROM=test@stewra.invalid
+          # MODEL_PROVIDER defaults to 'claude_cli', and this runner has no `claude` binary — so
+          # chooseModelProvider threw at IMPORT time and every suite that transitively reaches
+          # agentHost failed to collect. Naming an API provider takes the CLI branch out of play.
+          # No suite calls the model (verified: all four affected files pass with this key), so the
+          # key is a CI-local dummy in the same spirit as every other value above, and is shaped so
+          # it cannot be mistaken for a real one.
+          MODEL_PROVIDER=anthropic
+          MODEL_ID=ci-local-model-id-guards-nothing
+          ANTHROPIC_API_KEY=ci-local-dummy-guards-nothing
           EOF
 
       - name: Migrate test database
