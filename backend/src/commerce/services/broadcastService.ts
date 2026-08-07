@@ -12,7 +12,13 @@ import { segmentRepository } from '../repositories/segmentRepository.js';
 import { audienceService } from './audienceService.js';
 import { countryCallingCode } from './callingCodes.js';
 import { templateService } from './templateService.js';
-import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors.js';
+import { config } from '../../config/unifiedConfig.js';
+import {
+  ConflictError,
+  NotFoundError,
+  ServiceUnavailableError,
+  ValidationError,
+} from '../../utils/errors.js';
 
 /**
  * Scheduling and steering broadcasts. The actual sending lives in the job handlers —
@@ -26,6 +32,28 @@ import { ConflictError, NotFoundError, ValidationError } from '../../utils/error
  * enqueue and cancel race each other.
  */
 class BroadcastService {
+  /**
+   * Refuse to put work on a queue nothing is draining.
+   *
+   * `startCommerceScheduler` returns before `commerceWorker.start()` when the integration is off, and
+   * it argues there that enqueue and drain must not be separable — a deploy that enqueues without
+   * draining looks healthy because every enqueue succeeds. That argument does not stop at the
+   * scheduler: with the flag off, `create` would write a broadcast, enqueue its dispatch, answer 201,
+   * and the campaign would sit in `commerce_jobs` forever. The client would have been told their
+   * campaign was scheduled, which is the one thing that must never be said falsely here.
+   *
+   * A 503 rather than a 400: nothing about the request is wrong, and it will work unchanged once the
+   * operator turns the integration on. {@link ServiceUnavailableError} exists for exactly this shape.
+   */
+  private assertDispatchable(): void {
+    if (!config.metaCommerce.enabled) {
+      throw new ServiceUnavailableError(
+        'Broadcasts are not enabled on this install, so a campaign scheduled now would never be ' +
+          'sent. Set META_COMMERCE_ENABLED=true and bring up the commerce worker first.',
+      );
+    }
+  }
+
   async list(orgId: string, limit: number): Promise<CommerceBroadcast[]> {
     return broadcastRepository.listForOrg(orgId, limit);
   }
@@ -52,6 +80,8 @@ class BroadcastService {
     variables: readonly string[];
     scheduledFor: Date;
   }): Promise<CommerceBroadcast> {
+    this.assertDispatchable();
+
     const account = await channelAccountRepository.findForOrg(params.orgId, params.channelAccountId);
     if (account === null) throw new NotFoundError('Channel account not found');
     if (account.platform !== 'whatsapp_cloud') {
@@ -168,6 +198,11 @@ class BroadcastService {
 
   /** Put a paused broadcast back on the queue, immediately, without waiting for the retry cadence. */
   async resume(orgId: string, broadcastId: string): Promise<CommerceBroadcast> {
+    // Guarded for the same reason as `create`, and checked before the transition rather than after:
+    // moving a broadcast to `running` and then failing to enqueue would leave it in a state whose
+    // name says work is happening while the queue holds nothing.
+    this.assertDispatchable();
+
     const resumed = await broadcastRepository.transition({
       orgId,
       broadcastId,
