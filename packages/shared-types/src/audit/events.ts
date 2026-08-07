@@ -33,6 +33,12 @@ export type AuditResourceType =
  * covers the user proving ownership of email; `view` covers an insight being surfaced to the user
  * (a passive impression), and `dismiss` covers the user closing an insight without rating it — the
  * implicit-engagement signal, so a shown-and-ignored insight is no longer invisible to the record.
+ *
+ * `dismiss` also carries the REJECTED leg of the confirmation gate: a user declining a proposed email
+ * rather than sending it. Same word for the same act — the user was offered something and said no —
+ * and it is what makes the gate's record complete, since `draft` logs the proposal and `send` logs the
+ * approval. Without it the log shows an offer and then nothing, which reads identically to an offer
+ * that was silently dropped.
  */
 export type AuditAction =
   | 'read'

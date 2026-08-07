@@ -11,6 +11,7 @@ import { runnerIntentService } from './runnerIntentService.js';
 import type { RunnerChatChannel } from './runnerChatRelayService.js';
 import { presenceService } from './presenceService.js';
 import { emitToUser } from '../websocket/emitter.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../utils/errors.js';
 
 const DEFAULT_LIMIT = 30;
@@ -248,6 +249,26 @@ class MessageService {
     let updated: ProposedEmail;
     if (action === 'cancel') {
       updated = { ...proposal, status: 'cancelled' };
+      // The rejected leg of the confirmation gate. `draft` recorded the proposal and `send` records
+      // the approval, so without this row the log could say Stewra offered to email someone and then
+      // fall silent — leaving "did that go out?" answerable only by inspecting the message row. A
+      // decision not to act is still a decision the user made about their own mail, and the activity
+      // feed is the one place they can see it.
+      //
+      // `success: true` because the dismissal succeeded. Nothing failed here; the user said no, and
+      // recording a declined proposal as a failure would put a red mark in the feed for the safest
+      // thing the gate can do.
+      await auditWriter.write({
+        userId,
+        action: 'dismiss',
+        resourceType: 'email',
+        resourceId: messageId,
+        summary: `Dismissed the draft email to ${proposal.to} — "${proposal.subject || '(no subject)'}"`,
+        success: true,
+        // `previousStatus`, not `from`: next to `to` that would read as the sender's address. It
+        // records whether the user turned down a fresh draft or one that had already failed a send.
+        metadata: { to: proposal.to, previousStatus: proposal.status },
+      });
     } else {
       const result = await emailActionService.send(userId, proposal);
       updated = result.ok
