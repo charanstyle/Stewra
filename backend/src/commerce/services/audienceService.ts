@@ -1,8 +1,13 @@
 import type {
   AudienceMember,
   AudiencePreview,
+  CommercePlatform,
   CommerceSegment,
   CommerceTag,
+  ConsentPurpose,
+  ConsentSource,
+  ConsentState,
+  ContactConsent,
   SegmentDefinition,
 } from '@stewra/shared-types';
 import { AUDIENCE_BLOCK_REASONS } from '@stewra/shared-types';
@@ -13,6 +18,8 @@ import { segmentRepository } from '../repositories/segmentRepository.js';
 import { consentRepository } from '../repositories/consentRepository.js';
 import { isUniqueViolation } from '../../database/pgErrors.js';
 import { ATTRIBUTE_VALUE_MAX, attributeKeySchema } from './segmentQuery.js';
+import { normalizeE164 } from './callingCodes.js';
+import { consentService } from './consentService.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors.js';
 
 /**
@@ -51,24 +58,113 @@ class AudienceService {
   }
 
   /**
-   * Apply an attribute patch: keys with a value are set, keys with null are removed.
+   * Add a contact the organization already holds, with its consent provenance if it has any.
    *
-   * Keys are validated against the same schema the segment compiler accepts. A key that no rule could
-   * ever reference is a field the client can fill in and then never target, which looks like the
-   * feature working right up until the campaign that needed it.
+   * This is the single validated write path into the audience for every door that is not the
+   * webhook — the form today, the CSV importer and the opt-in link next. Sharing it is the point:
+   * phone normalization, the attribute rules the segment compiler can actually query, and the
+   * consent write all happen once, so no future entry point can create a contact the send gate
+   * understands differently from the one the form creates.
+   *
+   * ORDER MATTERS, and it is the safe way round. The contact is written first and consent second, so
+   * a failure between them leaves a contact with no consent — which marketing refuses, exactly as an
+   * unknown contact is refused. The reverse order, or a rollback that dropped the contact and kept
+   * nothing, could not produce a row that is permitted to be messaged without evidence on file.
+   * These are not in one transaction because `consentService.recordConsent` is the audited,
+   * append-only path shared with the inbound keyword handler; routing it through a caller-supplied
+   * transaction to save an inconsistency that is already safe is not a trade worth making.
    */
-  async updateContact(params: {
+  async createContact(params: {
     orgId: string;
-    contactId: string;
-    /** `undefined` leaves the name alone; `null` clears it. */
-    displayName: string | null | undefined;
-    attributes: Readonly<Record<string, string | null>> | undefined;
-  }): Promise<ContactWithTags> {
-    const existing = await this.getContact(params.orgId, params.contactId);
+    platform: CommercePlatform;
+    phone: string;
+    displayName: string | null;
+    attributes: Readonly<Record<string, string>> | undefined;
+    tags: readonly string[];
+    consent:
+      | {
+          purpose: ConsentPurpose;
+          state: ConsentState;
+          source: ConsentSource;
+          evidence: string;
+        }
+      | undefined;
+    recordedByUserId: string;
+  }): Promise<{ contact: ContactWithTags; consent: ContactConsent | null }> {
+    const normalized = normalizeE164(params.phone);
+    if (!normalized.ok) {
+      throw new ValidationError('Validation failed', [
+        { field: 'phoneE164', message: normalized.reason },
+      ]);
+    }
 
+    const { setAttributes } = this.validateAttributePatch(params.attributes);
+    if (Object.keys(setAttributes).length > MAX_ATTRIBUTES) {
+      throw new ValidationError(
+        `A contact may carry at most ${MAX_ATTRIBUTES} attributes; this one has ` +
+          `${Object.keys(setAttributes).length}.`,
+      );
+    }
+
+    // The platform id is DERIVED, never accepted. For WhatsApp it is the E.164 number without its
+    // `+`, which is the form Meta's webhook reports and therefore the form
+    // `commerceInboundService.upsertContact` will collide with when this person messages in — one
+    // row for one human, rather than a duplicate that splits their consent history.
+    const externalId = normalized.phoneE164.slice(1);
+
+    const { id, created } = await contactRepository.create({
+      orgId: params.orgId,
+      platform: params.platform,
+      externalId,
+      displayName: params.displayName,
+      phoneE164: normalized.phoneE164,
+      attributes: setAttributes,
+    });
+    if (!created) {
+      throw new ConflictError(
+        `${normalized.phoneE164} is already a contact in this organization. Open them to edit ` +
+          'their details or record consent — adding again would not merge, it would overwrite.',
+      );
+    }
+
+    for (const name of params.tags) {
+      const trimmed = name.trim();
+      if (trimmed === '') continue;
+      const tag = await contactRepository.upsertTag(params.orgId, trimmed);
+      await contactRepository.attachTag(params.orgId, id, tag.id);
+    }
+
+    let consent: ContactConsent | null = null;
+    if (params.consent !== undefined) {
+      consent = await consentService.recordConsent({
+        orgId: params.orgId,
+        contactId: id,
+        platform: params.platform,
+        purpose: params.consent.purpose,
+        state: params.consent.state,
+        source: params.consent.source,
+        evidence: params.consent.evidence,
+        recordedByUserId: params.recordedByUserId,
+      });
+    }
+
+    return { contact: await this.getContact(params.orgId, id), consent };
+  }
+
+  /**
+   * The attribute rules, in one place because two doors now write attributes.
+   *
+   * Keys are checked against the same schema the segment compiler accepts. A key no rule could ever
+   * reference is a field the client can fill in and then never target, which looks like the feature
+   * working right up until the campaign that needed it.
+   */
+  private validateAttributePatch(attributes: Readonly<Record<string, string | null>> | undefined): {
+    setAttributes: Record<string, string>;
+    removeAttributeKeys: string[];
+  } {
     const setAttributes: Record<string, string> = {};
     const removeAttributeKeys: string[] = [];
-    for (const [key, value] of Object.entries(params.attributes ?? {})) {
+    for (const [key, value] of Object.entries(attributes ?? {})) {
       const parsedKey = attributeKeySchema.safeParse(key);
       if (!parsedKey.success) {
         throw new ValidationError(
@@ -86,6 +182,26 @@ class AudienceService {
       }
       setAttributes[key] = value;
     }
+    return { setAttributes, removeAttributeKeys };
+  }
+
+  /**
+   * Apply an attribute patch: keys with a value are set, keys with null are removed.
+   *
+   * Keys are validated against the same schema the segment compiler accepts. A key that no rule could
+   * ever reference is a field the client can fill in and then never target, which looks like the
+   * feature working right up until the campaign that needed it.
+   */
+  async updateContact(params: {
+    orgId: string;
+    contactId: string;
+    /** `undefined` leaves the name alone; `null` clears it. */
+    displayName: string | null | undefined;
+    attributes: Readonly<Record<string, string | null>> | undefined;
+  }): Promise<ContactWithTags> {
+    const existing = await this.getContact(params.orgId, params.contactId);
+
+    const { setAttributes, removeAttributeKeys } = this.validateAttributePatch(params.attributes);
 
     const resulting = new Set(Object.keys(existing.contact.attributes));
     for (const key of removeAttributeKeys) resulting.delete(key);

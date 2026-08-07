@@ -66,3 +66,59 @@ export function countryCallingCode(phoneE164: string): string | null {
   }
   return null;
 }
+
+/**
+ * Turn what an operator typed into E.164, or explain why it is not a phone number.
+ *
+ * Accepts the punctuation people actually paste — `+44 20 7946 0000`, `(415) 555-0100`, `+91-98765
+ * 43210` — because refusing a number for containing a space is the kind of validation that makes a
+ * CSV import fail on a file that was perfectly correct.
+ *
+ * What it does NOT do is guess a country. A number with no `+` and no recognizable calling code is
+ * refused rather than assumed to be local: the organization loading the list and the person on the
+ * other end are routinely in different countries, and a wrong guess does not fail — it silently
+ * addresses a stranger, who then receives a marketing message they never opted into. `00` as an
+ * international prefix is accepted because it is the same statement as `+`, explicitly made.
+ *
+ * The 7–15 digit bound is E.164's own, and it is also exactly what `commerceInboundService.toE164`
+ * requires of a platform id, so a contact created here and the same contact arriving later over the
+ * webhook normalize to one row rather than two.
+ */
+export function normalizeE164(input: string): { ok: true; phoneE164: string } | { ok: false; reason: string } {
+  const trimmed = input.trim();
+  if (trimmed === '') return { ok: false, reason: 'A phone number is required' };
+
+  // Strip formatting, but only formatting. Letters are left in so that they survive to the
+  // digits-only check below and are reported as "not a phone number" rather than quietly deleted —
+  // dropping them would turn "call me on x" into a number and send to whatever remained.
+  const cleaned = trimmed.replace(/[\s().\-‐-―]/g, '');
+
+  const international = cleaned.startsWith('+')
+    ? cleaned.slice(1)
+    : cleaned.startsWith('00')
+      ? cleaned.slice(2)
+      : null;
+  if (international === null) {
+    return {
+      ok: false,
+      reason:
+        'Include the country code, starting with + (for example +14155550100). A number without ' +
+        'one cannot be dialled from another country, and guessing would address a stranger.',
+    };
+  }
+  if (!/^\d{7,15}$/.test(international)) {
+    return {
+      ok: false,
+      reason: 'A phone number is 7 to 15 digits after the country code, and digits only',
+    };
+  }
+
+  const phoneE164 = `+${international}`;
+  if (countryCallingCode(phoneE164) === null) {
+    return {
+      ok: false,
+      reason: `'+${international.slice(0, 3)}…' is not a country calling code we recognize`,
+    };
+  }
+  return { ok: true, phoneE164 };
+}

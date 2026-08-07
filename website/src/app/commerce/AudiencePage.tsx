@@ -6,6 +6,7 @@ import type {
   CommerceContactWithTags,
   CommerceSegment,
   CommerceTag,
+  ConsentSource,
   ContactConsent,
   MessagingPolicy,
   SegmentDefinition,
@@ -29,6 +30,25 @@ function describeError(err: unknown): string {
 const ATTESTATION_TEXT =
   'I attest that this organization holds documented, lawful opt-in for every contact it sends ' +
   'marketing messages to, and that it honors opt-outs immediately.';
+
+/**
+ * The consent sources a member can assert from this screen, and what each one is called here.
+ *
+ * `inbound_message` and `keyword` are deliberately absent: those are recorded by the customer's own
+ * action, and a person is the proof. Offering them in a dropdown would let a member claim the
+ * strongest, self-evidencing kind of consent for something nobody can go back and read.
+ */
+const SELECTABLE_CONSENT_SOURCES: ReadonlyArray<{ value: ConsentSource; label: string }> = [
+  { value: 'web_form', label: 'Sign-up form' },
+  { value: 'ad_click', label: 'Clicked an ad' },
+  { value: 'import', label: 'Imported list' },
+  { value: 'attested', label: 'Held on file elsewhere' },
+];
+
+/** Narrow a `<select>` value without asserting: an unknown string falls back to the first option. */
+function toConsentSource(value: string): ConsentSource {
+  return SELECTABLE_CONSENT_SOURCES.find((s) => s.value === value)?.value ?? 'web_form';
+}
 
 const BLOCK_REASON_LABELS: Record<(typeof AUDIENCE_BLOCK_REASONS)[number], string> = {
   suppressed: 'on the suppression list',
@@ -59,6 +79,14 @@ export default function AudiencePage(): React.JSX.Element {
   const [consents, setConsents] = useState<ReadonlyArray<ContactConsent>>([]);
   const [consentEvidence, setConsentEvidence] = useState('');
   const [newTag, setNewTag] = useState('');
+
+  const [newPhone, setNewPhone] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newTags, setNewTags] = useState('');
+  const [newConsent, setNewConsent] = useState(false);
+  const [newConsentSource, setNewConsentSource] = useState<ConsentSource>('web_form');
+  const [newConsentEvidence, setNewConsentEvidence] = useState('');
+  const [adding, setAdding] = useState(false);
 
   const [tags, setTags] = useState<ReadonlyArray<CommerceTag>>([]);
 
@@ -119,6 +147,57 @@ export default function AudiencePage(): React.JSX.Element {
       setError(describeError(err));
     }
   }, [orgId, search]);
+
+  /**
+   * Add a contact the organization already holds.
+   *
+   * The consent half is optional on purpose, and the copy says what omitting it means rather than
+   * leaving the operator to find out from a broadcast that skipped them. Recording an opt-in here is
+   * a claim about something that happened elsewhere — so the evidence box is required the moment the
+   * box is ticked, and the source names which kind of proof it is.
+   */
+  const addContact = useCallback(async (): Promise<void> => {
+    if (orgId === null || newPhone.trim() === '') return;
+    setError(null);
+    setNotice(null);
+    setAdding(true);
+    try {
+      const res = await api.createCommerceContact(orgId, {
+        phoneE164: newPhone.trim(),
+        ...(newName.trim() === '' ? {} : { displayName: newName.trim() }),
+        tags: newTags
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter((tag) => tag !== ''),
+        ...(newConsent
+          ? {
+              consent: {
+                purpose: 'marketing' as const,
+                state: 'opted_in' as const,
+                source: newConsentSource,
+                evidence: newConsentEvidence.trim(),
+              },
+            }
+          : {}),
+      });
+      setNewPhone('');
+      setNewName('');
+      setNewTags('');
+      setNewConsent(false);
+      setNewConsentEvidence('');
+      setNotice(
+        res.consent === null
+          ? `${res.contact.phoneE164 ?? 'Contact'} added. Marketing cannot reach them until an ` +
+            'opt-in is on file.'
+          : `${res.contact.phoneE164 ?? 'Contact'} added with marketing opt-in recorded.`,
+      );
+      await loadAll(orgId);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setAdding(false);
+    }
+  }, [orgId, newPhone, newName, newTags, newConsent, newConsentSource, newConsentEvidence, loadAll]);
 
   const openContact = useCallback(
     async (contactId: string): Promise<void> => {
@@ -414,9 +493,80 @@ export default function AudiencePage(): React.JSX.Element {
                   Search
                 </button>
               </div>
+
+              {isAdmin && (
+                <div className={styles.subsection}>
+                  <h3 className={styles.subTitle}>Add a contact</h3>
+                  <div className={styles.row}>
+                    <input
+                      className={styles.input}
+                      placeholder="+44 7700 900123"
+                      value={newPhone}
+                      onChange={(e) => setNewPhone(e.target.value)}
+                    />
+                    <input
+                      className={styles.input}
+                      placeholder="Name (optional)"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                    />
+                    <input
+                      className={styles.input}
+                      placeholder="Tags, comma separated"
+                      value={newTags}
+                      onChange={(e) => setNewTags(e.target.value)}
+                    />
+                  </div>
+                  <label className={styles.checkboxRow}>
+                    <input
+                      type="checkbox"
+                      checked={newConsent}
+                      onChange={(e) => setNewConsent(e.target.checked)}
+                    />
+                    <span>This person has given marketing opt-in</span>
+                  </label>
+                  {newConsent ? (
+                    <div className={styles.row}>
+                      <select
+                        className={styles.input}
+                        value={newConsentSource}
+                        onChange={(e) => setNewConsentSource(toConsentSource(e.target.value))}
+                      >
+                        {SELECTABLE_CONSENT_SOURCES.map((source) => (
+                          <option key={source.value} value={source.value}>
+                            {source.label}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className={styles.input}
+                        placeholder="Where it came from — a form URL, ad id, or list name"
+                        value={newConsentEvidence}
+                        onChange={(e) => setNewConsentEvidence(e.target.value)}
+                      />
+                    </div>
+                  ) : (
+                    // Said here rather than discovered from a campaign that skipped them. Absence of
+                    // consent refuses marketing; it does not quietly permit it.
+                    <p className={styles.muted}>
+                      Without an opt-in on file this contact can be tagged and segmented, but
+                      marketing messages to them will be refused.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    className={styles.primary}
+                    disabled={adding || newPhone.trim() === ''}
+                    onClick={() => void addContact()}
+                  >
+                    {adding ? 'Adding…' : 'Add contact'}
+                  </button>
+                </div>
+              )}
+
               {contacts.length === 0 ? (
                 <p className={styles.muted}>
-                  No contacts yet. People appear here when they message a connected number.
+                  No contacts yet. Add one above, or wait for someone to message a connected number.
                 </p>
               ) : (
                 <ul className={styles.list}>

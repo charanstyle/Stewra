@@ -283,6 +283,49 @@ export interface GetCommerceContactResponse {
 }
 
 /**
+ * POST /orgs/:orgId/contacts — put a person into the audience without waiting for them to write in.
+ *
+ * Until this existed the only way a contact came to exist was `commerceInboundService` upserting one
+ * when a customer messaged first, which meant a tenant with a perfectly lawful opt-in list had no way
+ * to load it and no campaign they could run on day one.
+ *
+ * `phoneE164` is the only identifier accepted, and it is normalized and range-checked server-side.
+ * The platform id is derived from it rather than supplied: it is the address messages are delivered
+ * to and the key consent is recorded against, so a client that could assert it directly could point
+ * a new contact's history at a stranger's phone.
+ *
+ * `consent` is OPTIONAL, and that is deliberate in both directions. Omitting it creates a contact
+ * that can be seen, tagged and segmented but that marketing cannot reach — `assertMaySend` refuses on
+ * a missing consent record, as it does everywhere else, so absence stays the refusing state. Making
+ * it mandatory would not produce more consent; it would produce an evidence field with "yes" typed
+ * into it, which is worse than an empty one because it looks like proof. When it IS supplied it must
+ * carry a real source and real evidence, and it is written through `consentService` — the same
+ * versioned, append-only path the inbound keyword handler uses — so no door into the audience can
+ * record permission the send gate would not recognize.
+ */
+export interface CreateCommerceContactRequest {
+  /** Any dialable form; normalized to E.164 server-side. Must resolve to a known calling code. */
+  readonly phoneE164: string;
+  readonly displayName?: string | null;
+  readonly attributes?: Readonly<Record<string, string>>;
+  /** Label names, created on first use — the same find-or-create as `POST .../tags`. */
+  readonly tags?: readonly string[];
+  readonly consent?: {
+    readonly purpose: ConsentPurpose;
+    readonly state: ConsentState;
+    readonly source: ConsentSource;
+    /** How it was obtained: a form URL, an ad id, a list name. Never empty. */
+    readonly evidence: string;
+  };
+}
+
+export interface CreateCommerceContactResponse {
+  readonly contact: CommerceContactWithTags;
+  /** The consent row written alongside, or null when the request carried none. */
+  readonly consent: ContactConsent | null;
+}
+
+/**
  * PATCH /orgs/:orgId/contacts/:contactId — edit what the organization knows about a person.
  *
  * `attributes` MERGES rather than replaces, and a null value deletes that key. Replacing the whole

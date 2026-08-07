@@ -106,6 +106,8 @@ import type {
   CreateCommerceMessageResponse,
   ListCommerceContactsRequest,
   ListCommerceContactsResponse,
+  CreateCommerceContactRequest,
+  CreateCommerceContactResponse,
   GetCommerceContactResponse,
   UpdateCommerceContactRequest,
   UpdateCommerceContactResponse,
@@ -615,6 +617,12 @@ export const api = {
     const suffix = query.toString();
     return request(`/orgs/${orgId}/contacts${suffix ? `?${suffix}` : ''}`);
   },
+
+  createCommerceContact: (
+    orgId: string,
+    body: CreateCommerceContactRequest,
+  ): Promise<CreateCommerceContactResponse> =>
+    request(`/orgs/${orgId}/contacts`, { method: 'POST', body }),
 
   getCommerceContact: (orgId: string, contactId: string): Promise<GetCommerceContactResponse> =>
     request(`/orgs/${orgId}/contacts/${contactId}`),

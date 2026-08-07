@@ -31,6 +31,14 @@ router.get('/contacts', requireAuth, verified, requireOrgMember('viewer'), (req,
   void contactsController.list(req, res);
 });
 
+// `admin`, matching PATCH below rather than the `viewer` reads. Adding a contact is asserting that
+// this organization holds a person's number, and — when the request carries consent — that they
+// agreed to be messaged. That is the same class of statement as editing a segment, not a step in
+// answering an inbox message.
+router.post('/contacts', requireAuth, verified, requireOrgMember('admin'), (req, res) => {
+  void contactsController.create(req, res);
+});
+
 router.get('/contacts/:contactId', requireAuth, verified, requireOrgMember('viewer'), (req, res) => {
   void contactsController.get(req, res);
 });

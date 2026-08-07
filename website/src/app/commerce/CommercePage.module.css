@@ -39,6 +39,37 @@
   align-items: center;
 }
 
+/* A bordered-off block of related controls inside a card — the add-contact form, and whatever
+   follows it. Wraps on narrow screens because .row does not, and three inputs side by side is a
+   phone-width overflow otherwise. */
+.subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.subsection .row {
+  flex-wrap: wrap;
+}
+
+.subTitle {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.checkboxRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 14px;
+  cursor: pointer;
+}
+
 .input {
   flex: 1;
   background: var(--bg);
