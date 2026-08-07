@@ -40,6 +40,15 @@ import * as m034 from './migrations/034_runner_sessions.js';
 import * as m035 from './migrations/035_runner_session_git.js';
 import * as m036 from './migrations/036_github_app_installations.js';
 import * as m037 from './migrations/037_hosted_runner_devices.js';
+import * as m038 from './migrations/038_organizations.js';
+import * as m039 from './migrations/039_channel_accounts.js';
+import * as m040 from './migrations/040_commerce_conversations.js';
+import * as m041 from './migrations/041_channel_account_token_expiry.js';
+import * as m042 from './migrations/042_commerce_consent.js';
+import * as m043 from './migrations/043_commerce_jobs.js';
+import * as m044 from './migrations/044_commerce_audience.js';
+import * as m045 from './migrations/045_commerce_templates.js';
+import * as m046 from './migrations/046_commerce_broadcasts.js';
 import { logger } from '../utils/logger.js';
 
 interface Migration {
@@ -86,6 +95,15 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '035_runner_session_git', up: m035.up },
   { name: '036_github_app_installations', up: m036.up },
   { name: '037_hosted_runner_devices', up: m037.up },
+  { name: '038_organizations', up: m038.up },
+  { name: '039_channel_accounts', up: m039.up },
+  { name: '040_commerce_conversations', up: m040.up },
+  { name: '041_channel_account_token_expiry', up: m041.up },
+  { name: '042_commerce_consent', up: m042.up },
+  { name: '043_commerce_jobs', up: m043.up },
+  { name: '044_commerce_audience', up: m044.up },
+  { name: '045_commerce_templates', up: m045.up },
+  { name: '046_commerce_broadcasts', up: m046.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

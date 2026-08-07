@@ -104,6 +104,33 @@ test.describe('smoke: the built app renders', () => {
     assertClean(errors, 'by the end of the test');
   });
 
+  // Meta's App Review opens the privacy policy in a logged-out browser and rejects the app if it
+  // lands on a sign-in screen. That is not a hypothetical failure mode here: `App.tsx` sends every
+  // unmatched path to `/today`, which is behind `ProtectedRoute`, so these two routes are one
+  // accidental deletion away from redirecting to `/login` and sinking a review that takes weeks to
+  // resubmit. The URL assertion is the point of this test — the heading is the corroboration.
+  for (const { path, heading, anchor } of [
+    { path: '/privacy', heading: 'Privacy policy', anchor: 'delete' },
+    { path: '/terms', heading: 'Terms of service', anchor: 'business' },
+  ]) {
+    test(`${path} renders for a logged-out visitor and does not redirect`, async ({ page }) => {
+      const errors = watchForErrors(page);
+
+      await open(page, path);
+      assertClean(errors, `while rendering ${path}`);
+
+      // Still on the page we asked for. A redirect to /login here is the review-rejecting bug.
+      await expect(page).toHaveURL(new RegExp(`${path}$`));
+      await expect(page.getByRole('heading', { name: heading, level: 1 })).toBeVisible();
+
+      // The section Meta and the ICO both care about has to exist and be reachable by anchor —
+      // the data-deletion instructions on one, the controller obligations on the other.
+      await expect(page.locator(`#${anchor}`)).toBeAttached();
+
+      assertClean(errors, 'by the end of the test');
+    });
+  }
+
   test('every asset index.html references is actually served', async ({ page, baseURL }) => {
     // Catches a half-deployed image: index.html rebuilt with new hashed chunk names while the old
     // assets are still on disk (or vice versa). The browser would show a blank page with a 404 in

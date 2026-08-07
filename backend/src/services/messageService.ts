@@ -1,5 +1,6 @@
 import { SERVER_EVENTS } from '@stewra/shared-types';
-import type { ChatDeliveredEvent, ConfirmEmailAction, ConfirmRunnerSessionAction, Conversation, Message, Paginated, ProposedEmail, ReactionType, ReadReceipt } from '@stewra/shared-types';
+import type { ChatDeliveredEvent, ConfirmCommerceReplyAction, ConfirmEmailAction, ConfirmRunnerSessionAction, Conversation, Message, Paginated, ProposedEmail, ReactionType, ReadReceipt } from '@stewra/shared-types';
+import { commerceProposalExecutorRegistry } from '../ports/turnIntent.js';
 import { messageRepository, MessageRepository } from '../repositories/messageRepository.js';
 import { conversationService } from './conversationService.js';
 import { emailActionService } from './emailActionService.js';
@@ -296,6 +297,47 @@ class MessageService {
         'stewra_chat',
       );
     }
+
+    const refreshed = await messageRepository.findById(messageId, userId);
+    if (refreshed === undefined) throw new NotFoundError('Message not found');
+    return refreshed;
+  }
+
+  /**
+   * Resolve a proposed reply to one of an organization's CUSTOMERS from the app's card:
+   * `send` delivers it, `cancel` dismisses it.
+   *
+   * The button-driven twin of the natural-language "yes"/"no", and deliberately not a second
+   * implementation of it — both run the one executor the commerce plane registered. This file may not
+   * import that plane at all (`.dependency-cruiser.cjs` forbids it in both directions), which is why
+   * it goes through `ports/turnIntent`.
+   *
+   * A `failed` proposal is re-sendable, matching the runner card: the usual cause is transient, and a
+   * card that can only be dismissed after one bad minute makes the user retype the whole reply. A
+   * `sent` one is not — that message is already with the customer and there is no undo.
+   */
+  async confirmCommerceReplyAction(
+    userId: string,
+    messageId: string,
+    action: ConfirmCommerceReplyAction,
+  ): Promise<Message> {
+    const message = await messageRepository.findById(messageId, userId);
+    if (message === undefined) throw new NotFoundError('Message not found');
+    await conversationService.assertParticipant(userId, message.conversationId);
+
+    const proposal = message.proposedCommerceReply;
+    if (proposal === null) throw new ValidationError('This message has no customer reply to confirm');
+    if (proposal.status !== 'pending' && proposal.status !== 'failed') {
+      throw new ValidationError(`This reply was already ${proposal.status}`);
+    }
+
+    await commerceProposalExecutorRegistry.require().execute({
+      userId,
+      messageId,
+      proposal,
+      action,
+      settle: (id, next) => messageRepository.updateProposedCommerceReply(id, next),
+    });
 
     const refreshed = await messageRepository.findById(messageId, userId);
     if (refreshed === undefined) throw new NotFoundError('Message not found');

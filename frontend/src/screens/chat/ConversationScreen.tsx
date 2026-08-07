@@ -20,6 +20,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type {
   ChatDeliveredEvent,
   ChatReadEvent,
+  ConfirmCommerceReplyAction,
   ConfirmEmailAction,
   ConfirmRunnerSessionAction,
   Message,
@@ -38,6 +39,7 @@ import { theme } from '../../theme/colors';
 import type { IconProps } from '../../components/icons/Icons';
 import { ImageIcon, MicIcon, PhoneIcon, PhoneOffIcon, VideoIcon } from '../../components/icons/Icons';
 import { MessageStatusIndicator } from '../../components/chat/MessageStatusIndicator';
+import { ProposedCommerceReplyCard } from '../../components/chat/ProposedCommerceReplyCard';
 import { ProposedEmailCard } from '../../components/chat/ProposedEmailCard';
 import { ProposedRunnerSessionCard } from '../../components/chat/ProposedRunnerSessionCard';
 import { TypingIndicator } from '../../components/chat/TypingIndicator';
@@ -125,6 +127,8 @@ export default function ConversationScreen({ route, navigation }: Props): React.
   const [confirmingEmailId, setConfirmingEmailId] = useState<string | null>(null);
   // Same, for a proposed runner-session confirm request (disables its card while the start/cancel is in flight).
   const [confirmingRunnerId, setConfirmingRunnerId] = useState<string | null>(null);
+  // Same, for a proposed reply to a business customer (disables its card while the send/cancel is in flight).
+  const [confirmingCommerceId, setConfirmingCommerceId] = useState<string | null>(null);
   const listRef = useRef<FlatList<Message> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -190,6 +194,28 @@ export default function ConversationScreen({ route, navigation }: Props): React.
         // Leave the proposal actionable so the user can retry; a transient failure shouldn't lose it.
       } finally {
         setConfirmingRunnerId((current) => (current === messageId ? null : current));
+      }
+    },
+    [upsertMessage],
+  );
+
+  /**
+   * Send (or dismiss) a reply Stewra proposed to one of the user's business CUSTOMERS. Mirrors
+   * {@link handleConfirmEmail}, and deliberately hits the same backend executor a natural-language
+   * "yes" in chat does — this button is the fallback surface for that conversation, not a second
+   * send path. The response carries the updated message (`proposedCommerceReply.status` now terminal
+   * or `failed`); we upsert it so the card re-renders, and the socket echo is idempotent by id.
+   */
+  const handleConfirmCommerce = useCallback(
+    async (messageId: string, action: ConfirmCommerceReplyAction): Promise<void> => {
+      setConfirmingCommerceId(messageId);
+      try {
+        const res = await api.confirmCommerceReply(messageId, { action });
+        upsertMessage(res.message);
+      } catch {
+        // Leave the proposal actionable so the user can retry; a transient failure shouldn't lose it.
+      } finally {
+        setConfirmingCommerceId((current) => (current === messageId ? null : current));
       }
     },
     [upsertMessage],
@@ -513,6 +539,13 @@ export default function ConversationScreen({ route, navigation }: Props): React.
                 onConfirm={(action) => void handleConfirmRunnerSession(item.id, action)}
               />
             ) : null}
+            {item.proposedCommerceReply !== null ? (
+              <ProposedCommerceReplyCard
+                proposal={item.proposedCommerceReply}
+                busy={confirmingCommerceId === item.id}
+                onConfirm={(action) => void handleConfirmCommerce(item.id, action)}
+              />
+            ) : null}
             <View style={styles.metaRow}>
               <Text style={styles.metaTime}>{time}</Text>
               {mine ? <MessageStatusIndicator status={item.status} /> : null}
@@ -536,6 +569,8 @@ export default function ConversationScreen({ route, navigation }: Props): React.
       handleConfirmEmail,
       confirmingRunnerId,
       handleConfirmRunnerSession,
+      confirmingCommerceId,
+      handleConfirmCommerce,
     ],
   );
 

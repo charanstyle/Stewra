@@ -1,0 +1,597 @@
+// @skip-validation — this file IS the shared-types package. The api-contract guard requires a literal
+// `@stewra/shared-types` import in any file declaring *Request/*Response types, which is unsatisfiable
+// here (it would be a self-import); every sibling in this directory imports relatively for the same
+// reason. Remove this marker if the guard ever learns to exclude packages/shared-types/.
+import type {
+  AudienceMember,
+  AudiencePreview,
+  BroadcastCostForecast,
+  BroadcastRecipient,
+  ChannelAccount,
+  CommerceBroadcast,
+  CommerceContact,
+  CommerceConversationSummary,
+  CommerceCostSummary,
+  CommerceJob,
+  CommerceJobStatus,
+  CommerceMessage,
+  CommerceSegment,
+  CommerceTag,
+  ConsentPurpose,
+  ConsentSource,
+  ConsentState,
+  ContactConsent,
+  MessageTemplate,
+  MessagingPolicy,
+  SegmentDefinition,
+  Suppression,
+  SuppressionReason,
+  TemplateCategory,
+} from '../models/commerce';
+
+/**
+ * The commerce plane's channel and inbox surface. Every route here is mounted under
+ * `/orgs/:orgId/...` and sits behind `requireOrgMember` — there is no un-scoped commerce endpoint.
+ */
+
+/**
+ * GET /orgs/:orgId/channels — the organization's connected messaging accounts.
+ *
+ * `signup` carries what the browser needs to launch Meta's Embedded Signup dialog. It is served by
+ * the API rather than baked into the bundle so a deploy can be reconfigured without a rebuild, and
+ * so the website never has to know a Meta app id that might differ per environment.
+ */
+export interface ListChannelAccountsResponse {
+  readonly accounts: readonly ChannelAccount[];
+  readonly signup: EmbeddedSignupConfig | null;
+}
+
+/**
+ * The public half of the Meta app's identity — safe to hand a browser, since Embedded Signup runs
+ * client-side and returns only a short-lived code. The app SECRET never leaves the server.
+ * Null when the deploy has the commerce Meta integration switched off.
+ */
+export interface EmbeddedSignupConfig {
+  readonly appId: string;
+  /** Meta's Embedded Signup flow configuration id, which pins the permissions being requested. */
+  readonly configId: string;
+  readonly graphVersion: string;
+}
+
+/**
+ * POST /orgs/:orgId/channels/whatsapp — complete a WhatsApp connection.
+ *
+ * The browser runs Meta's Embedded Signup and hands back a one-time `code`. The server does
+ * everything else: exchange the code for a business token, read the WABA and phone number,
+ * register the number, subscribe this app to the WABA's webhooks, and vault the token. The client
+ * never sees a credential, and the ids it reports are re-read from Meta rather than trusted.
+ */
+export interface CreateChannelAccountRequest {
+  readonly code: string;
+  /**
+   * The number's six-digit two-step verification PIN, required to register it for Cloud API sending.
+   *
+   * Per CLIENT NUMBER, never per deploy — it belongs to the business connecting, not to Stewra, so it
+   * cannot live in configuration without recreating the single-tenant assumption this whole surface
+   * exists to remove. It is used once, at registration, and is never stored.
+   *
+   * Optional because a number Meta already reports as `CONNECTED` needs no registration; the server
+   * checks that first and only demands a PIN when the number actually requires one.
+   */
+  readonly pin?: string;
+}
+
+export interface CreateChannelAccountResponse {
+  readonly account: ChannelAccount;
+}
+
+/**
+ * DELETE /orgs/:orgId/channels/:accountId — disconnect. Unsubscribes the app from the WABA's
+ * webhooks and deletes the vaulted token, so a disconnect actually severs access rather than only
+ * hiding the row. Requires `admin` or above.
+ */
+export interface DeleteChannelAccountResponse {
+  readonly disconnected: boolean;
+}
+
+/** GET /orgs/:orgId/conversations — the shared inbox, most recently active first. */
+export interface ListCommerceConversationsRequest {
+  /** Page size. Server clamps to a sane maximum; omitted means the server default. */
+  readonly limit?: number;
+  /** Opaque cursor from the previous page's `nextCursor`. */
+  readonly cursor?: string;
+}
+
+export interface ListCommerceConversationsResponse {
+  readonly conversations: readonly CommerceConversationSummary[];
+  /** Null when this is the last page. */
+  readonly nextCursor: string | null;
+}
+
+/** GET /orgs/:orgId/conversations/:conversationId/messages — oldest-first within the page. */
+export interface ListCommerceMessagesRequest {
+  readonly limit?: number;
+  readonly cursor?: string;
+}
+
+export interface ListCommerceMessagesResponse {
+  readonly messages: readonly CommerceMessage[];
+  readonly nextCursor: string | null;
+}
+
+/**
+ * POST /orgs/:orgId/conversations/:conversationId/messages — an agent's free-form reply.
+ *
+ * Valid only inside the 24-hour customer-service window; the server rejects the send with a clear
+ * error when the window has closed rather than silently dropping it, because Meta accepts the API
+ * call and then never delivers. Business-initiated (template) sends are a separate surface, not
+ * this one. Requires `agent` or above.
+ */
+export interface CreateCommerceMessageRequest {
+  readonly body: string;
+}
+
+export interface CreateCommerceMessageResponse {
+  readonly message: CommerceMessage;
+}
+
+/**
+ * The consent surface — how an organization proves it may message the people on its list.
+ *
+ * Read routes are open to `viewer` because seeing why a contact cannot be messaged is part of doing
+ * the job. Every WRITE here requires `admin` or above: recording consent on someone else's behalf,
+ * lifting a block, and signing the attestation are all statements the organization is answerable
+ * for, and an `agent` working the inbox is not the person who should be making them.
+ */
+
+/** GET /orgs/:orgId/contacts/:contactId/consents — the full history, newest first. */
+export interface ListContactConsentsResponse {
+  readonly consents: readonly ContactConsent[];
+}
+
+/**
+ * POST /orgs/:orgId/contacts/:contactId/consents — record consent gathered outside Stewra.
+ *
+ * `evidence` is required and cannot be blank. A consent record with no proof is indistinguishable
+ * from an unchecked box, and it is the one field here that has to survive being read by someone who
+ * does not take the organization's word for it.
+ */
+export interface RecordContactConsentRequest {
+  readonly purpose: ConsentPurpose;
+  readonly state: ConsentState;
+  readonly source: ConsentSource;
+  /** How this consent was obtained: a form URL, an ad id, an import file name. */
+  readonly evidence: string;
+}
+
+export interface RecordContactConsentResponse {
+  readonly consent: ContactConsent;
+}
+
+/** GET /orgs/:orgId/suppressions — addresses this organization may not message. */
+export interface ListSuppressionsRequest {
+  readonly limit?: number;
+}
+
+export interface ListSuppressionsResponse {
+  readonly suppressions: readonly Suppression[];
+}
+
+/**
+ * POST /orgs/:orgId/suppressions — block an address by hand.
+ *
+ * Keyed on the platform address rather than a contact id, because that is what the block has to
+ * follow: contact rows get deleted and re-imported, and a block attached to the row would lift
+ * itself the next time someone uploaded a list.
+ */
+export interface CreateSuppressionRequest {
+  readonly platform: string;
+  readonly externalId: string;
+  readonly reason: SuppressionReason;
+  readonly detail?: string;
+}
+
+export interface CreateSuppressionResponse {
+  readonly suppression: Suppression;
+}
+
+/**
+ * DELETE /orgs/:orgId/suppressions/:platform/:externalId — unblock.
+ *
+ * Lifting a block does NOT record consent. Unblocking an address so support can answer a question
+ * and holding permission to market to it are separate facts, and merging them would let a routine
+ * operational action manufacture an opt-in.
+ */
+export interface DeleteSuppressionResponse {
+  readonly lifted: boolean;
+}
+
+/**
+ * GET /orgs/:orgId/messaging-policy — quiet hours and the attestation.
+ *
+ * `policy` is null for an organization that has never set one, and that is not a gap to paper over:
+ * it means no marketing send is permitted yet. The client should read null as "not configured", never
+ * as "no restrictions".
+ */
+export interface GetMessagingPolicyResponse {
+  readonly policy: MessagingPolicy | null;
+}
+
+/**
+ * PUT /orgs/:orgId/messaging-policy — set quiet hours.
+ *
+ * `timezone` is required with no default. A marketing message that lands at 3am is a complaint, and a
+ * guessed zone would produce exactly that while looking configured. Setting quiet hours deliberately
+ * does not touch the attestation: changing when you send is an operational edit, and signing a
+ * statement about how you obtained consent is not.
+ */
+export interface UpdateMessagingPolicyRequest {
+  /** IANA zone, e.g. `Europe/London`. Rejected at write time if the runtime cannot resolve it. */
+  readonly timezone: string;
+  /** Local wall-clock `HH:MM` bounds of the window in which marketing sends are NOT permitted. */
+  readonly quietHoursStart: string;
+  readonly quietHoursEnd: string;
+}
+
+export interface UpdateMessagingPolicyResponse {
+  readonly policy: MessagingPolicy;
+}
+
+/**
+ * POST /orgs/:orgId/messaging-policy/attestation — sign the lawful-opt-in statement.
+ *
+ * The exact sentence the member accepted is stored verbatim, for the same reason `bridge_consents`
+ * stores the user's typed words: if the statement is reworded next quarter, this record still proves
+ * what THIS organization actually agreed to. Requires an existing policy — an attestation without
+ * quiet hours would read as signed while leaving the org half-configured.
+ */
+export interface AttestMessagingPolicyRequest {
+  readonly attestationText: string;
+}
+
+export interface AttestMessagingPolicyResponse {
+  readonly policy: MessagingPolicy;
+}
+
+// --- Audience: contacts, tags, segments -------------------------------------------------------
+
+/**
+ * GET /orgs/:orgId/contacts — the organization's people, newest first.
+ *
+ * `search` matches the display name, the phone number and the platform id. Three columns rather than
+ * one because an operator looking for a contact has whichever of the three the customer just quoted
+ * at them, and a search that only covers names fails on exactly the call where it is needed.
+ */
+export interface ListCommerceContactsRequest {
+  readonly limit?: number;
+  readonly search?: string;
+  /** Only contacts carrying this tag, by name, case-insensitively. */
+  readonly tag?: string;
+}
+
+export interface ListCommerceContactsResponse {
+  readonly contacts: readonly CommerceContactWithTags[];
+}
+
+/** A contact plus its labels, so the list view needs one request rather than one per row. */
+export interface CommerceContactWithTags extends CommerceContact {
+  readonly tags: readonly string[];
+}
+
+export interface GetCommerceContactResponse {
+  readonly contact: CommerceContactWithTags;
+}
+
+/**
+ * PATCH /orgs/:orgId/contacts/:contactId — edit what the organization knows about a person.
+ *
+ * `attributes` MERGES rather than replaces, and a null value deletes that key. Replacing the whole
+ * map would mean any client that read the contact before another operator added a field would erase
+ * that field on save, silently, with no conflict anywhere to notice. Merge makes the request say what
+ * it actually intends to change.
+ *
+ * The platform id is not editable by anyone. It is the address messages are delivered to and the key
+ * consent and suppression are recorded against; changing it would redirect a person's history onto a
+ * stranger's phone.
+ */
+export interface UpdateCommerceContactRequest {
+  readonly displayName?: string | null;
+  readonly attributes?: Readonly<Record<string, string | null>>;
+}
+
+export interface UpdateCommerceContactResponse {
+  readonly contact: CommerceContactWithTags;
+}
+
+/**
+ * POST /orgs/:orgId/contacts/:contactId/tags — label a contact, creating the tag if it is new.
+ *
+ * By NAME rather than by id, because that is how tagging is actually used: someone types "vip" in a
+ * box. Requiring the client to create the tag first and then attach it would make every first use of
+ * a label a two-request dance that can half-fail.
+ */
+export interface AddContactTagRequest {
+  readonly tag: string;
+}
+
+export interface AddContactTagResponse {
+  readonly tag: CommerceTag;
+}
+
+export interface RemoveContactTagResponse {
+  readonly removed: boolean;
+}
+
+export interface ListCommerceTagsResponse {
+  readonly tags: readonly CommerceTag[];
+}
+
+/**
+ * DELETE /orgs/:orgId/tags/:tagId — delete a label everywhere it is applied.
+ *
+ * REFUSED while any segment's rules still mention the tag, with those segments named in the error. A
+ * tag rule left pointing at a deleted label turns a campaign's audience to zero — or, with `not_has`,
+ * to everyone — and neither failure announces itself at send time.
+ */
+export interface DeleteCommerceTagResponse {
+  readonly deleted: boolean;
+}
+
+export interface ListCommerceSegmentsResponse {
+  readonly segments: readonly CommerceSegment[];
+}
+
+export interface CreateCommerceSegmentRequest {
+  readonly name: string;
+  readonly description?: string | null;
+  readonly definition: SegmentDefinition;
+}
+
+export interface CreateCommerceSegmentResponse {
+  readonly segment: CommerceSegment;
+}
+
+export interface GetCommerceSegmentResponse {
+  readonly segment: CommerceSegment;
+}
+
+/** PUT /orgs/:orgId/segments/:segmentId — a whole-object replace; the definition is the object. */
+export interface UpdateCommerceSegmentRequest {
+  readonly name: string;
+  readonly description?: string | null;
+  readonly definition: SegmentDefinition;
+}
+
+export interface UpdateCommerceSegmentResponse {
+  readonly segment: CommerceSegment;
+}
+
+export interface DeleteCommerceSegmentResponse {
+  readonly deleted: boolean;
+}
+
+/**
+ * POST /orgs/:orgId/segments/preview — what an UNSAVED definition would reach.
+ *
+ * Takes the definition in the body rather than a saved id, deliberately: the question "how many
+ * people is this rule?" is asked while the rule is still being written, and a preview that required
+ * saving first would make every experiment a permanent object someone has to clean up later.
+ */
+export interface PreviewSegmentRequest {
+  readonly definition: SegmentDefinition;
+  /** How many members to return alongside the counts. The counts always cover the whole audience. */
+  readonly sampleLimit?: number;
+}
+
+export interface PreviewSegmentResponse {
+  readonly preview: AudiencePreview;
+}
+
+/** GET /orgs/:orgId/segments/:segmentId/members — the saved segment's audience, page by page. */
+export interface ListSegmentMembersRequest {
+  readonly limit?: number;
+  readonly offset?: number;
+  /** When true, drop the members marketing cannot reach — the list a broadcast would actually use. */
+  readonly sendableOnly?: boolean;
+}
+
+export interface ListSegmentMembersResponse {
+  readonly members: readonly AudienceMember[];
+}
+
+// --- Templates ---------------------------------------------------------------------------------
+
+/**
+ * GET /orgs/:orgId/templates — the approved message shapes this organization can broadcast with.
+ *
+ * Read from Stewra's mirror rather than from Meta on every request, because the page is opened far
+ * more often than templates change and Meta rate-limits reads per WABA. Each row carries its own
+ * `lastSyncedAt`, so the UI can say "last checked 3 days ago" instead of implying every status is
+ * live — the mirror is never presented as the authority.
+ */
+export interface ListMessageTemplatesRequest {
+  readonly channelAccountId?: string;
+}
+
+export interface ListMessageTemplatesResponse {
+  readonly templates: readonly MessageTemplate[];
+}
+
+/**
+ * POST /orgs/:orgId/templates — submit a new template to Meta for approval.
+ *
+ * Creation is a REQUEST, not a fact: the response comes back `pending` and Meta decides, usually
+ * within minutes but with no guarantee. Nothing can be sent from it until it is `approved`, and the
+ * client is told that in those words rather than being left to infer it from a status enum.
+ *
+ * The body is plain text with `{{1}}`-style positional placeholders, numbered from 1 with no gaps.
+ * Meta rejects gaps, and it rejects a body that begins or ends with a placeholder; both are checked
+ * here first so the client gets a specific message instead of Meta's.
+ */
+export interface CreateMessageTemplateRequest {
+  readonly channelAccountId: string;
+  /** Lowercase letters, digits and underscores — Meta's own rule, enforced before submission. */
+  readonly name: string;
+  readonly language: string;
+  readonly category: TemplateCategory;
+  readonly headerText?: string | null;
+  readonly bodyText: string;
+  readonly footerText?: string | null;
+}
+
+export interface CreateMessageTemplateResponse {
+  readonly template: MessageTemplate;
+}
+
+/**
+ * POST /orgs/:orgId/templates/sync — pull every template's current state from Meta.
+ *
+ * On demand as well as on a schedule, because the schedule is hourly and an operator who has just
+ * been told by Meta that their template is approved should not have to wait for it. Returns what
+ * changed rather than only a count: "3 synced" and "1 of your templates was paused by Meta" are
+ * different sentences, and the second is the one that matters.
+ */
+export interface SyncMessageTemplatesRequest {
+  /**
+   * Which connected account to re-read. Required rather than "all of them": templates belong to a
+   * WABA, Meta rate-limits per WABA, and an operator pressing Refresh on one account's page should
+   * not spend another account's budget.
+   */
+  readonly channelAccountId: string;
+}
+
+export interface SyncMessageTemplatesResponse {
+  readonly synced: number;
+  /** Templates whose status is different from what was stored before this sync. */
+  readonly changed: readonly MessageTemplate[];
+}
+
+/**
+ * DELETE /orgs/:orgId/templates/:templateId — delete at Meta, then here.
+ *
+ * REFUSED while a scheduled broadcast still points at it, naming those broadcasts. A campaign whose
+ * template vanished fails at send time, per recipient, having already reached some of them.
+ */
+export interface DeleteMessageTemplateResponse {
+  readonly deleted: boolean;
+}
+
+// --- Broadcasts --------------------------------------------------------------------------------
+
+/** GET /orgs/:orgId/broadcasts — newest first. */
+export interface ListBroadcastsResponse {
+  readonly broadcasts: readonly CommerceBroadcast[];
+}
+
+/**
+ * POST /orgs/:orgId/broadcasts — schedule a template send to a segment.
+ *
+ * `scheduledFor` is required and has no default. "Send now" is expressible — a timestamp in the past
+ * or present dispatches on the next worker pass — but it has to be SAID. A missing schedule
+ * defaulting to now is the one mistake in this endpoint that cannot be undone, because by the time
+ * anybody notices, the messages have arrived.
+ *
+ * Requires `admin`. A broadcast spends the client's money and their phone number's reputation.
+ */
+export interface CreateBroadcastRequest {
+  readonly name: string;
+  readonly channelAccountId: string;
+  readonly segmentId: string;
+  readonly templateId: string;
+  /** Positional fills. Length must equal the template's `variableCount`, checked before scheduling. */
+  readonly variables: readonly string[];
+  readonly scheduledFor: string;
+}
+
+export interface CreateBroadcastResponse {
+  readonly broadcast: CommerceBroadcast;
+}
+
+export interface GetBroadcastResponse {
+  readonly broadcast: CommerceBroadcast;
+}
+
+/**
+ * POST /orgs/:orgId/broadcasts/preview — what this broadcast would reach and cost, before scheduling.
+ *
+ * Takes the same fields as the create call so the answer describes the campaign about to be
+ * scheduled, not an approximation of it. The audience is resolved live; the forecast counts billable
+ * messages per country but names no price — see {@link BroadcastCostForecast} for why inventing one
+ * would be worse than omitting it.
+ */
+export interface PreviewBroadcastRequest {
+  readonly segmentId: string;
+  readonly templateId: string;
+}
+
+export interface PreviewBroadcastResponse {
+  readonly audience: AudiencePreview;
+  readonly forecast: BroadcastCostForecast;
+}
+
+/**
+ * POST /orgs/:orgId/broadcasts/:broadcastId/cancel — stop it.
+ *
+ * A `scheduled` broadcast is cancelled outright. A `running` one stops at the next batch: the people
+ * already messaged stay messaged, and the response says how many that was. Nothing here can unsend.
+ */
+export interface CancelBroadcastResponse {
+  readonly broadcast: CommerceBroadcast;
+}
+
+/** POST /orgs/:orgId/broadcasts/:broadcastId/resume — put a paused broadcast back on the queue. */
+export interface ResumeBroadcastResponse {
+  readonly broadcast: CommerceBroadcast;
+}
+
+/**
+ * GET /orgs/:orgId/broadcasts/:broadcastId/recipients — who it reached, and who it did not.
+ *
+ * Filterable by status because the interesting page is almost never "everyone": after a campaign the
+ * question is which 40 failed and why.
+ */
+export interface ListBroadcastRecipientsRequest {
+  readonly status?: string;
+  readonly limit?: number;
+  readonly offset?: number;
+}
+
+export interface ListBroadcastRecipientsResponse {
+  readonly recipients: readonly BroadcastRecipient[];
+}
+
+// --- Cost and queue ----------------------------------------------------------------------------
+
+/**
+ * GET /orgs/:orgId/costs — what Meta charged this organization, by category, over a period.
+ *
+ * The billing input. Stewra takes no margin on messages — the client pays Meta's cost plus a flat
+ * platform fee — so this is not a revenue report, it is the pass-through line on their invoice, and
+ * it has to be reconstructable from Meta's own reporting.
+ */
+export interface GetCommerceCostsRequest {
+  /** ISO timestamps. Both required: a period with a guessed boundary is a bill with a guessed total. */
+  readonly from: string;
+  readonly to: string;
+}
+
+export interface GetCommerceCostsResponse {
+  readonly summary: CommerceCostSummary;
+}
+
+/**
+ * GET /orgs/:orgId/jobs — the organization's background work.
+ *
+ * Exposed because a broadcast IS a queue of jobs, and "nothing has happened yet" and "it failed
+ * eleven minutes ago" look identical from the campaign screen without it.
+ */
+export interface ListCommerceJobsRequest {
+  readonly status?: CommerceJobStatus;
+  readonly limit?: number;
+}
+
+export interface ListCommerceJobsResponse {
+  readonly jobs: readonly CommerceJob[];
+  /** Every status present even at zero — the number a queue-depth check reads. */
+  readonly counts: Readonly<Record<CommerceJobStatus, number>>;
+}

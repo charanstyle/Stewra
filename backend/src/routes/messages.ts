@@ -54,6 +54,10 @@ router.post('/:id/confirm-runner-session', requireAuth, verified, (req, res) => 
   void messagesController.confirmRunnerSession(req, res);
 });
 
+router.post('/:id/confirm-commerce-reply', requireAuth, verified, (req, res) => {
+  void messagesController.confirmCommerceReply(req, res);
+});
+
 router.delete('/:id', requireAuth, verified, (req, res) => {
   void messagesController.delete(req, res);
 });

@@ -28,7 +28,7 @@
     "db:migrate": "npm run db:migrate -w backend",
     "package:release": "node scripts/package-release.mjs",
     "test": "npm test -w backend && npm test -w @stewra/bridge && npm test -w @stewra/runner && npm test -w @stewra/provisioner",
-    "boundaries": "depcruise --config .dependency-cruiser.cjs packages/agent-runtime/src",
+    "boundaries": "depcruise --config .dependency-cruiser.cjs packages/agent-runtime/src backend/src",
     "scan:fallbacks": "node scripts/fallback-scan.mjs",
     "tunnel": "bash scripts/tunnel.sh"
   },

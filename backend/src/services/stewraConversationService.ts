@@ -3,6 +3,8 @@ import type { Conversation, ConversationTurn, Message } from '@stewra/shared-typ
 import { agentRuntime } from '../agent-host/agentHost.js';
 import { config } from '../config/unifiedConfig.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
+import { turnIntentRegistry } from '../ports/turnIntent.js';
+import type { TurnIntentOutcome } from '../ports/turnIntent.js';
 import { messageRepository } from '../repositories/messageRepository.js';
 import { emailComposeService } from './emailComposeService.js';
 import { runnerIntentService } from './runnerIntentService.js';
@@ -38,15 +40,18 @@ class StewraConversationService {
     const history = await this.loadHistory(conversation.id, userMessage.id);
     const latestUserText = userMessage.transcript ?? userMessage.content ?? '';
 
-    // Two trusted control-plane "tools" get first refusal on the turn, in priority order, before the
+    // Trusted control-plane "tools" get first refusal on the turn, in priority order, before the
     // advice-only agent. Each may attach a `pending` proposal to the message (confirm-gated: nothing
-    // executes until the user says so) or, for the runner, resolve an in-flight "yes"/"no"/"push it".
+    // executes until the user says so) or resolve an in-flight "yes"/"no"/"change it".
     //
     //   1. Runner: start/confirm/approve a coding-agent session on the user's own machine. Its reply and
     //      any permission/result relay come back on `channel` — the SAME medium the user asked from.
-    //   2. Email: draft an email for the user to review and send.
+    //   2. Registered turn-intent handlers: bounded contexts that claim a turn through `ports/turnIntent`
+    //      without this file being allowed to import them. In practice that is the commerce plane's
+    //      business inbox, registered at the composition root.
+    //   3. Email: draft an email for the user to review and send.
     //
-    // The agent itself never sends or executes — it only produces conversational text when neither tool
+    // The agent itself never sends or executes — it only produces conversational text when no tool
     // claims the turn.
     const runnerOutcome = await runnerIntentService.handle({
       userId,
@@ -55,15 +60,21 @@ class StewraConversationService {
       history,
       latestUserText,
     });
-    const emailProposal = runnerOutcome
+    const intentOutcome = runnerOutcome
       ? null
-      : await emailComposeService.maybePropose(history, latestUserText);
+      : await this.dispatchTurnIntent(userId, conversation.id, history, latestUserText);
+    const emailProposal =
+      runnerOutcome || intentOutcome
+        ? null
+        : await emailComposeService.maybePropose(history, latestUserText);
 
     const reply = runnerOutcome
       ? runnerOutcome.reply
-      : emailProposal
-        ? emailProposal.reply
-        : await agentRuntime.converse(userId, history, latestUserText);
+      : intentOutcome
+        ? intentOutcome.reply
+        : emailProposal
+          ? emailProposal.reply
+          : await agentRuntime.converse(userId, history, latestUserText);
 
     const audioUrl = await this.synthesize(userId, conversation.id, reply);
 
@@ -85,6 +96,7 @@ class StewraConversationService {
           }
         : null,
       proposedRunnerSession: runnerOutcome?.proposal ?? null,
+      proposedCommerceReply: intentOutcome?.proposal ?? null,
     });
 
     await auditWriter.write({
@@ -102,6 +114,43 @@ class StewraConversationService {
     });
 
     return assistantMessage;
+  }
+
+  /**
+   * Offer the turn to whatever bounded contexts registered themselves as turn-intent handlers, and
+   * hand them the two things they cannot fetch for themselves: the newest still-`pending` commerce
+   * proposal in this conversation (so a bare "yes" has something to resolve against on a button-less
+   * channel), and a `settle` capability to record its outcome.
+   *
+   * Both are passed as data and one narrow function rather than as a repository, because a handler
+   * lives in `backend/src/commerce/` and `.dependency-cruiser.cjs` forbids that directory from
+   * importing `repositories/` at all. Inverting the dependency here is what keeps that true.
+   *
+   * Returns null when nothing is registered — which is the case whenever the commerce plane is off.
+   */
+  private async dispatchTurnIntent(
+    userId: string,
+    conversationId: string,
+    history: ConversationTurn[],
+    latestUserText: string,
+  ): Promise<TurnIntentOutcome | null> {
+    if (turnIntentRegistry.size === 0) return null;
+
+    const pendingMessage = await messageRepository.findPendingCommerceProposal(conversationId);
+    const pendingProposal = pendingMessage?.proposedCommerceReply ?? null;
+
+    return turnIntentRegistry.dispatch({
+      userId,
+      conversationId,
+      history,
+      latestUserText,
+      pending:
+        pendingMessage && pendingProposal
+          ? { messageId: pendingMessage.id, proposal: pendingProposal }
+          : null,
+      settle: (messageId, proposal) =>
+        messageRepository.updateProposedCommerceReply(messageId, proposal),
+    });
   }
 
   /**

@@ -1,0 +1,175 @@
+/* Shared by the privacy policy and the terms. Both are long-form documents read by two very
+   different audiences — a customer deciding whether to trust us, and a Meta App Review reviewer
+   checking that the policy actually describes the permissions we asked for — so readability at
+   length matters more than anything decorative. */
+
+.page {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: var(--spacing-8, 2rem) var(--spacing-4, 1rem) var(--spacing-12, 3rem);
+  color: hsl(var(--foreground));
+}
+
+.header {
+  margin-bottom: var(--spacing-8, 2rem);
+  padding-bottom: var(--spacing-6, 1.5rem);
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: var(--spacing-4, 1rem);
+  color: hsl(var(--foreground));
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.title {
+  font-size: clamp(1.7rem, 4vw, 2.3rem);
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0 0 var(--spacing-3, 0.75rem);
+}
+
+.updated {
+  font-size: 0.9rem;
+  color: hsl(var(--muted-foreground));
+  margin: 0;
+}
+
+.lede {
+  font-size: 1.05rem;
+  line-height: 1.65;
+  color: hsl(var(--muted-foreground));
+  margin: var(--spacing-4, 1rem) 0 0;
+}
+
+/* The table of contents. Long documents are unusable without one, and a reviewer looking for a
+   specific disclosure should not have to scroll for it. */
+.toc {
+  margin: 0 0 var(--spacing-8, 2rem);
+  padding: var(--spacing-4, 1rem) var(--spacing-5, 1.25rem);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius, 0.6rem);
+  background: hsl(var(--muted));
+}
+
+.tocList {
+  margin: 0;
+  padding-left: 1.2rem;
+  columns: 2;
+  column-gap: var(--spacing-6, 1.5rem);
+  font-size: 0.93rem;
+  line-height: 1.9;
+}
+
+@media (max-width: 560px) {
+  .tocList {
+    columns: 1;
+  }
+}
+
+.section {
+  margin-bottom: var(--spacing-8, 2rem);
+  /* So an in-page anchor does not land the heading flush against the viewport edge. */
+  scroll-margin-top: var(--spacing-6, 1.5rem);
+}
+
+.heading {
+  font-size: 1.22rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 0 0 var(--spacing-3, 0.75rem);
+}
+
+.subheading {
+  font-size: 1rem;
+  font-weight: 650;
+  margin: var(--spacing-5, 1.25rem) 0 var(--spacing-2, 0.5rem);
+}
+
+.section p,
+.section li {
+  font-size: 0.98rem;
+  line-height: 1.7;
+}
+
+.section p {
+  margin: 0 0 var(--spacing-3, 0.75rem);
+}
+
+.section ul,
+.section ol {
+  margin: 0 0 var(--spacing-3, 0.75rem);
+  padding-left: 1.35rem;
+}
+
+.section li {
+  margin-bottom: 0.4rem;
+}
+
+.section a {
+  color: hsl(var(--primary));
+}
+
+/* Pulled out of the flow because these are the paragraphs someone is most likely to be looking
+   for — how to delete their data, and what a business is agreeing to on behalf of its customers. */
+.callout {
+  margin: 0 0 var(--spacing-4, 1rem);
+  padding: var(--spacing-4, 1rem) var(--spacing-5, 1.25rem);
+  border: 1px solid hsl(var(--border));
+  border-left: 3px solid hsl(var(--primary));
+  border-radius: var(--radius, 0.6rem);
+  background: hsl(var(--muted));
+}
+
+.callout p:last-child {
+  margin-bottom: 0;
+}
+
+.tableWrap {
+  /* Wide tables scroll inside their own box rather than making the page scroll sideways. */
+  overflow-x: auto;
+  margin: 0 0 var(--spacing-4, 1rem);
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius, 0.6rem);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid hsl(var(--border));
+  vertical-align: top;
+}
+
+.table th {
+  font-weight: 650;
+  background: hsl(var(--muted));
+  white-space: nowrap;
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.footer {
+  margin-top: var(--spacing-10, 2.5rem);
+  padding-top: var(--spacing-5, 1.25rem);
+  border-top: 1px solid hsl(var(--border));
+  font-size: 0.9rem;
+  color: hsl(var(--muted-foreground));
+  display: flex;
+  gap: var(--spacing-4, 1rem);
+  flex-wrap: wrap;
+}

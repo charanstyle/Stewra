@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import type {
   CallKind,
+  ConfirmCommerceReplyAction,
   ConfirmEmailAction,
   ConfirmRunnerSessionAction,
   ConversationSummary,
@@ -11,6 +12,7 @@ import type {
 import { AppNav } from '../../components/AppNav/AppNav';
 import { Avatar } from '../../components/Avatar/Avatar';
 import { MessageStatusIndicator } from '../../components/chat/MessageStatusIndicator';
+import { ProposedCommerceReplyCard } from '../../components/chat/ProposedCommerceReplyCard';
 import { ProposedEmailCard } from '../../components/chat/ProposedEmailCard';
 import { ProposedRunnerSessionCard } from '../../components/chat/ProposedRunnerSessionCard';
 import { TypingIndicator } from '../../components/chat/TypingIndicator';
@@ -61,6 +63,8 @@ function MessageBubble({
   onConfirmEmail,
   runnerBusy,
   onConfirmRunner,
+  commerceBusy,
+  onConfirmCommerce,
 }: {
   message: Message;
   mine: boolean;
@@ -75,6 +79,10 @@ function MessageBubble({
   runnerBusy: boolean;
   /** Resolve this message's proposed runner session (start/cancel). */
   onConfirmRunner: (messageId: string, action: ConfirmRunnerSessionAction) => void;
+  /** True while this message's proposed-customer-reply confirm is in flight. */
+  commerceBusy: boolean;
+  /** Resolve this message's proposed reply to a customer (send/cancel). */
+  onConfirmCommerce: (messageId: string, action: ConfirmCommerceReplyAction) => void;
 }): React.JSX.Element {
   const isSystem =
     message.type === 'call_start' || message.type === 'call_end' || message.type === 'system';
@@ -124,6 +132,13 @@ function MessageBubble({
             onConfirm={(action) => onConfirmRunner(message.id, action)}
           />
         )}
+        {message.proposedCommerceReply && (
+          <ProposedCommerceReplyCard
+            proposal={message.proposedCommerceReply}
+            busy={commerceBusy}
+            onConfirm={(action) => onConfirmCommerce(message.id, action)}
+          />
+        )}
         <span className={styles.bubbleTime} data-testid="message-timestamp">
           {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {mine && <MessageStatusIndicator status={message.status} />}
@@ -156,6 +171,8 @@ export default function ConversationPage(): React.JSX.Element {
   const [confirmingEmailId, setConfirmingEmailId] = useState<string | null>(null);
   // Likewise for a proposed runner session's Start/Cancel confirm.
   const [confirmingRunnerId, setConfirmingRunnerId] = useState<string | null>(null);
+  // Likewise for a proposed reply to one of an organization's customers.
+  const [confirmingCommerceId, setConfirmingCommerceId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -236,6 +253,29 @@ export default function ConversationPage(): React.JSX.Element {
         // Leave the proposal `pending` so the user can retry; a transient failure shouldn't lose it.
       } finally {
         setConfirmingRunnerId((current) => (current === messageId ? null : current));
+      }
+    },
+    [appendMessages],
+  );
+
+  /**
+   * Send or dismiss a reply Stewra proposed to one of the organization's customers. Same shape as the
+   * two above, and the same executor a natural-language "yes" runs — the app is the fallback surface
+   * here, not a second implementation.
+   *
+   * A failure deliberately leaves the card actionable rather than clearing it: the message never
+   * reached the customer, and the user has to be able to see that and retry.
+   */
+  const handleConfirmCommerce = useCallback(
+    async (messageId: string, action: ConfirmCommerceReplyAction): Promise<void> => {
+      setConfirmingCommerceId(messageId);
+      try {
+        const res = await api.confirmCommerceReply(messageId, { action });
+        appendMessages([res.message]);
+      } catch {
+        // Leave the proposal `pending` so the user can retry; a transient failure shouldn't lose it.
+      } finally {
+        setConfirmingCommerceId((current) => (current === messageId ? null : current));
       }
     },
     [appendMessages],
@@ -335,6 +375,10 @@ export default function ConversationPage(): React.JSX.Element {
               onConfirmEmail={(messageId, action) => void handleConfirmEmail(messageId, action)}
               runnerBusy={confirmingRunnerId === m.id}
               onConfirmRunner={(messageId, action) => void handleConfirmRunner(messageId, action)}
+              commerceBusy={confirmingCommerceId === m.id}
+              onConfirmCommerce={(messageId, action) =>
+                void handleConfirmCommerce(messageId, action)
+              }
             />
           );
         })}

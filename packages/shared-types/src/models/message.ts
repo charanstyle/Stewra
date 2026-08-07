@@ -110,6 +110,13 @@ export interface Message {
    * the pending proposal is what a follow-up "yes"/"no"/"use my other laptop" turn resolves against.
    */
   readonly proposedRunnerSession: ProposedRunnerSession | null;
+  /**
+   * A reply to one of an organization's CUSTOMERS, awaiting the business user's confirmation (or its
+   * terminal outcome), when this assistant message offered to send one. Null for every ordinary
+   * message. Same confirm-gated loop as the two above, and for the strongest reason of the three: the
+   * recipient is a member of the public who never spoke to Stewra. See {@link ProposedCommerceReply}.
+   */
+  readonly proposedCommerceReply: ProposedCommerceReply | null;
 }
 
 /** A compact last-message projection for conversation-list rows (no reactions/media payload). */
@@ -190,5 +197,37 @@ export interface ProposedRunnerSession {
   /** The started session's id once confirmed (`status='sent'`); null while pending/cancelled/failed. */
   readonly sessionId: UUID | null;
   /** Short code explaining a `failed` start (e.g. `device_offline`, `refused`); null otherwise. */
+  readonly failureReason: string | null;
+}
+
+/**
+ * A reply to a customer that Stewra has drafted from a natural-language instruction and is proposing
+ * to send from an organization's inbox, attached to the assistant message that offered it.
+ *
+ * The confirm gate matters more here than it does for {@link ProposedEmail} or
+ * {@link ProposedRunnerSession}: those act on the user's own account and their own machine, whereas
+ * this puts words in front of somebody else's customer, under a business's name, on a number that
+ * business is accountable for. A misfire is not an inconvenience — it is the client's reputation. So
+ * nothing is sent until an explicit yes, and every id below is resolved against a real row the
+ * asking user is actually a member of, never copied from the model's output.
+ *
+ * `orgName` and `contactName` are carried resolved so the confirmation line reads naturally on a
+ * button-less channel, where "send this to Priya at Acme?" is the entire interface.
+ */
+export interface ProposedCommerceReply {
+  readonly status: ProposedActionStatus;
+  /** The organization the reply goes out from — resolved from a live membership. */
+  readonly orgId: UUID;
+  readonly orgName: string;
+  /** The `commerce_conversations` thread being replied to. */
+  readonly conversationId: UUID;
+  readonly contactName: string;
+  readonly body: string;
+  /** The `commerce_messages` row once sent (`status='sent'`); null while pending/cancelled/failed. */
+  readonly messageId: UUID | null;
+  /**
+   * Why a `failed` send failed — including `service_window_closed`, which is not an error so much as
+   * the 24-hour rule doing its job. Null otherwise.
+   */
   readonly failureReason: string | null;
 }

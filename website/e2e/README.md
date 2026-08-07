@@ -5,6 +5,10 @@ real [`@playwright/test`](https://playwright.dev/) runner. They seed **two authe
 user sessions** at once, so they can exercise flows a single-device test can't — most
 importantly two-party WebRTC calls (User A calls User B, both ends assert `Connected`).
 
+One exception lives in [`commerce/`](#the-commerce-suite--commerce-its-own-config-and-its-own-stack),
+which boots its own local stack because the commerce plane isn't deployed and its connect flow can't
+be run against production.
+
 This is the web counterpart to [`frontend/e2e/`](../../frontend/e2e/) (Maestro, one
 device). Because auth lives in `localStorage["stewra.tokens"]` (per-origin, shared across
 tabs), the two users can't coexist in one browser context — every test gets its own
@@ -92,6 +96,37 @@ test:e2e:report` opens it), `results.json`, traces/videos/screenshots on failure
 | `tests/gaps.spec.ts` | `full.mjs` §9 | By-design product gaps, asserted as real (hard) checks: no call buttons on the Stewra thread, no mic on the human composer. |
 | `tests/today.spec.ts` | `today.mjs` | The proactive `/today` home: greeting, briefing card vs. backend truth, nudge list vs. backend suggestions, expand/draft/snooze/dismiss/chat-about-this, AppNav order, console-error-free navigation. |
 | `tests/runner.spec.ts` | Phase 5 control surface | The in-chat "Run coding agent" card: ask Stewra (in the Stewra thread) to run a coding agent on one of your machines → the intent classifier proposes → the card renders → **Start** dispatches a real session. Auto-discovers an online runner via `GET /runner/devices` and **skips** if none is paired/online — no synthetic runner. |
+
+## The commerce suite — `commerce/`, its own config and its own stack
+
+Everything above drives **production**. The commerce plane can't: it isn't deployed, and connecting a
+channel means completing Meta's Embedded Signup against a real WhatsApp Business Account owned by a
+real business — not something a test may do to production, ever.
+
+So `playwright.commerce.config.ts` boots its own stack instead:
+
+```bash
+npm run test:e2e:commerce
+```
+
+No `.env.e2e` needed — the database and secrets come from `backend/.env.test`, and a missing one
+throws rather than being defaulted into a run that targets the wrong machine. `commerce/stack.mjs`
+starts a real Graph stub process, then the **real backend** (`npx tsx src/index.ts`) pointed at it,
+then the **real website** (`npx vite --strictPort`) pointed at that backend, on OS-assigned ports
+published to the workers via `process.env`. The Meta app secret and webhook verify token are minted
+per run with `randomBytes`, so a spec can sign an inbound webhook for real.
+
+Only Meta is replaced, and only at the network boundary — no application code is mocked. The stub
+(`commerce/graphStub.mjs`) takes instructions at `POST /__stub/state` and records every call, so a
+spec can assert what did and did **not** reach Meta.
+
+The four tests cover: a fresh org's empty state, a `CONNECTED` number (never registered) and its
+disconnect, a `PENDING` number refused without a PIN then registered with one, and a signed inbound
+webhook routing to the right org's inbox with a reply going back out. Full detail, including why the
+webhook assertions must poll, is in [`TESTING.md`](../../TESTING.md).
+
+**Untested seam:** the Embedded Signup dialog itself. `metaEmbeddedSignup.ts` loads Meta's SDK from
+`connect.facebook.net`, unreachable from a test; the specs connect through the real API instead.
 
 ## Safety: destructive / external-OAuth flows are skipped, not omitted
 

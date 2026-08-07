@@ -244,6 +244,16 @@ Each milestone is shippable/testable on its own. Do them in order; don't skip ah
 
 ## 6. The traps to avoid (learned the hard way by others)
 
+> **Scope.** These traps describe the **personal-assistant plane** — one trusting individual, whose
+> assistant must never message anyone unbidden. `backend/src/commerce/` is a second bounded context
+> where businesses message *their own* customers, so "don't send what wasn't asked for" is replaced
+> there by an explicit consent regime: per-contact versioned opt-in, WhatsApp-approved templates,
+> quiet hours, and a suppression list. Read the outbound rules below as this plane's, not the repo's.
+>
+> **"Don't host the gray market" is the exception — it binds both planes.** The commerce plane uses
+> the sanctioned Cloud API and nothing else. Unofficial WhatsApp automation gets *clients'* numbers
+> banned, and at business scale that is a larger blast radius, not a smaller one.
+
 - **Don't lead with autonomy.** OpenClaw already has capability; your edge is *trust*. Shipping
   "it does everything for you" on day one reintroduces exactly the fear that's your opportunity.
   One wrong autonomous action = uninstall. Wrong *advice* = "hmm, not quite." Advise first.

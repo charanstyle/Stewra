@@ -108,3 +108,24 @@ export interface ConfirmRunnerSessionRequest {
 export interface ConfirmRunnerSessionResponse {
   readonly message: Message;
 }
+
+/** Resolve a Stewra-proposed reply to a CUSTOMER: `send` delivers it, `cancel` dismisses it. */
+export type ConfirmCommerceReplyAction = 'send' | 'cancel';
+
+/**
+ * Confirm (or dismiss) the reply Stewra proposed to one of an organization's customers
+ * (POST /messages/:id/confirm-commerce-reply). The button-driven twin of the natural-language
+ * "yes"/"no" loop, running the SAME executor — the app is the fallback surface here, not a second
+ * implementation.
+ *
+ * On `send` the stored message's `proposedCommerceReply.status` transitions to `sent` (carrying the
+ * `commerce_messages` row id) or `failed` (carrying the reason, including a service window that
+ * closed while the card sat unanswered); on `cancel` to `cancelled`. The updated message comes back
+ * so the card re-renders in its terminal state, and is pushed to the room over the chat socket.
+ */
+export interface ConfirmCommerceReplyRequest {
+  readonly action: ConfirmCommerceReplyAction;
+}
+export interface ConfirmCommerceReplyResponse {
+  readonly message: Message;
+}

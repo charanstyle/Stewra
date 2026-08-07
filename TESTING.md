@@ -9,6 +9,7 @@ backed by fast unit suites underneath.
 | --- | --- | --- | --- |
 | Backend / bridge | unit / integration | **Vitest** (real DB, bcrypt, config; no mocks) | `backend/src/tests/`, `bridge/src/tests/` |
 | Website | UI e2e | **@playwright/test** (headless Chromium, two live sessions) | `website/e2e/` |
+| Commerce plane | UI e2e | **@playwright/test** against a **locally booted** real stack | `website/e2e/commerce/` |
 | Mobile (RN) | UI e2e | **Maestro** (real device/emulator) | `frontend/e2e/` |
 
 > **Golden rule (also in agent memory):** to confirm a web or mobile change works
@@ -315,6 +316,83 @@ the run.
 > Fixing it means connecting Gmail for a QA account and running `POST /home/recompute`. Fabricating a
 > `connections` row directly would kick off unbounded background sync, so it is deliberately not done
 > here.
+
+---
+
+## Commerce plane e2e — `website/e2e/commerce/`
+
+The one suite that **does not** target production, and the reason is not convenience:
+
+1. The commerce plane is not deployed. There is nothing at `www.stewra.com` to drive.
+2. Connecting a channel means completing Meta's Embedded Signup against a **real WhatsApp Business
+   Account owned by a real business**. That is not something a test may do to production, ever.
+
+So this suite boots the **real backend** and the **real website** against the **test database**, and
+replaces exactly one thing — Meta itself — at the network boundary.
+
+```bash
+cd website/e2e
+npm run test:e2e:commerce
+```
+
+It needs no `.env.e2e`. Everything comes from `backend/.env.test` (the same file the backend's own
+Vitest suite reads); a missing one throws rather than being defaulted into a run that quietly targets
+the wrong machine.
+
+**What boots, in order** (`commerce/stack.mjs`, driven by `commerce/globalSetup.mjs`):
+
+| Process | How |
+| --- | --- |
+| Graph stub | `commerce/graphStub.mjs` — a **real HTTP server** on a free port |
+| Backend | `npx tsx src/index.ts` with `META_COMMERCE_GRAPH_BASE_URL` pointed at the stub |
+| Website | `npx vite --strictPort` with `VITE_API_BASE_URL` pointed at that backend |
+
+Ports are asked of the OS, not hardcoded, and published to the workers through `process.env`
+(`COMMERCE_E2E_WEB_URL` / `_API_URL` / `_GRAPH_URL` / `_APP_SECRET` / `_EMAIL` / `_PASSWORD`) —
+Playwright forks workers after `globalSetup` resolves, so they inherit them. A spec that read a fixed
+port would pass against whatever else happened to be listening.
+
+**Nothing in the app is mocked.** The backend makes real `fetch` calls over a real socket to the stub;
+the whole connect service, the signature gate, the WABA→org routing and the send path all run exactly
+as they do in production. The stub is a separate process because the backend is one too. Its Meta app
+id/secret and the webhook verify token are minted fresh per run with `randomBytes` — a literal in the
+repo would be a credential-shaped string that outlives the run, and the secret has to be published
+anyway so a spec can sign an inbound webhook **for real**.
+
+The stub exposes a control surface at `POST /__stub/state` (`wabaId`, `phoneStatus`, `pin`,
+`resetCalls`) and reports `calls`, so a spec can assert what did and did **not** reach Meta. `wabaId`
+is per-spec because `channel_accounts` is uniquely indexed on `(platform, external_account_id)` — one
+WABA belongs to one org, so two specs sharing an id would 409 for a reason unrelated to what they test.
+
+The QA user is registered through the **real** `/auth/register`, then `email_verified` is flipped
+directly in the database (asserting exactly one row matched). Every commerce route sits behind the
+verification gate and the verification mail cannot be read here; the account, its password hash and
+its tokens are all real.
+
+**What the four tests assert:**
+
+1. A new organization shows no number, an enabled Connect button, the served
+   `Meta app N · flow N · Graph vN` line, and **no** PIN box.
+2. A `CONNECTED` number shows active, `/register` is **never** called for it, and Disconnect works.
+3. A `PENDING` number is refused `400` without a PIN and **writes nothing**; connecting again with the
+   PIN calls `/register` and succeeds.
+4. A **genuinely HMAC-signed** inbound webhook reaches the inbox by WABA routing, and a reply reaches
+   the stub's `/messages`.
+
+> The webhook is **ack-then-work** — `res.sendStatus(200)` fires before processing, because Meta
+> retries anything slow. Loading the inbox on the 200 alone is therefore a race; the spec polls the
+> conversations endpoint until the preview contains the text, the same technique `waitForMessage`
+> uses in the backend suite. This cost a red run before it was understood.
+
+> **Known noise:** each run logs
+> `Failed to send verification email at registration {"error":"connect ECONNREFUSED 127.0.0.1:1025"}`.
+> There is no local SMTP listener; the stack verifies the user in the database instead, so the run is
+> unaffected. Starting a local MailHog on 1025 silences it.
+
+> **Not covered:** the Embedded Signup dialog itself. `metaEmbeddedSignup.ts` loads Meta's SDK from
+> `connect.facebook.net`, which is unreachable from a test, and intercepting it in the browser would
+> be inventing a substitute for our own code. The specs connect through the real API instead, so the
+> launcher's three outcomes (code / client cancelled / dialog error) are the untested seam.
 
 ---
 

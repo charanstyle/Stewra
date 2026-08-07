@@ -9,6 +9,10 @@ import { assertDbConnection, closeDb } from './database/index.js';
 import { logger } from './utils/logger.js';
 import { initSockets } from './websocket/index.js';
 import { startScheduler } from './scheduler/scheduler.js';
+// The commerce plane's own background work, started here rather than folded into `startScheduler`:
+// that scheduler belongs to the personal-assistant plane, and this file is the composition root
+// where the two contexts are allowed to meet.
+import { startCommerceScheduler } from './commerce/scheduler/commerceScheduler.js';
 import type { AppServer } from './websocket/types.js';
 
 /**
@@ -36,10 +40,14 @@ async function main(): Promise<void> {
 
   // Start the proactive briefing scheduler after the listener is up (no-op unless enabled in config).
   const stopScheduler = startScheduler();
+  // No-op unless META_COMMERCE_ENABLED. Keeps connected clients' WhatsApp credentials alive and
+  // marks the ones that could not be kept, so a channel never stops working without saying why.
+  const stopCommerceScheduler = startCommerceScheduler();
 
   const shutdown = (signal: string): void => {
     logger.info(`Received ${signal}, shutting down gracefully`);
     stopScheduler();
+    stopCommerceScheduler();
     // Close Socket.IO first (drops live connections) before the HTTP server stops accepting.
     io.close(() => {
       server.close(() => {

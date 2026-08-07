@@ -34,7 +34,7 @@ async function request<T>(
 
   const payload: ApiResponse<T> = await response.json();
   if (!payload.success) {
-    throw new ApiError(payload.error.message, payload.error.code);
+    throw new ApiError(payload.error.message, payload.error.code, payload.error.details);
   }
   return payload.data;
 }

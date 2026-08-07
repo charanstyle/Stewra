@@ -39,6 +39,8 @@ import type {
   ReactResponse,
   ConfirmEmailRequest,
   ConfirmEmailResponse,
+  ConfirmCommerceReplyRequest,
+  ConfirmCommerceReplyResponse,
   ConfirmRunnerSessionRequest,
   ConfirmRunnerSessionResponse,
   GetMessageResponse,
@@ -58,6 +60,21 @@ import type {
   GetEmailOverWhatsappResponse,
   SetEmailOverWhatsappRequest,
   SetEmailOverWhatsappResponse,
+  ListOrgsResponse,
+  SetActiveOrgRequest,
+  SetActiveOrgResponse,
+  ListChannelAccountsResponse,
+  ListCommerceConversationsRequest,
+  ListCommerceConversationsResponse,
+  ListCommerceMessagesRequest,
+  ListCommerceMessagesResponse,
+  CreateCommerceMessageRequest,
+  CreateCommerceMessageResponse,
+  ListMessageTemplatesResponse,
+  ListBroadcastsResponse,
+  CancelBroadcastResponse,
+  ResumeBroadcastResponse,
+  ListCommerceJobsResponse,
 } from '@stewra/shared-types';
 import { File, Paths } from 'expo-file-system';
 import { config } from './config';
@@ -307,6 +324,17 @@ export const api = {
   ): Promise<ConfirmRunnerSessionResponse> =>
     request(`/messages/${messageId}/confirm-runner-session`, { method: 'POST', body }),
 
+  /**
+   * Confirm (send) or dismiss (cancel) a reply Stewra proposed to one of the user's business
+   * CUSTOMERS. The app's Send button and a natural-language "yes" in chat both land on this same
+   * confirm-gated executor — Stewra never sends to a customer on its own.
+   */
+  confirmCommerceReply: (
+    messageId: string,
+    body: ConfirmCommerceReplyRequest,
+  ): Promise<ConfirmCommerceReplyResponse> =>
+    request(`/messages/${messageId}/confirm-commerce-reply`, { method: 'POST', body }),
+
   /** Per-participant read acknowledgements for one message (drives the read-receipt detail view). */
   listMessageReceipts: (messageId: string): Promise<ListReadReceiptsResponse> =>
     request(`/messages/${messageId}/receipts`),
@@ -366,4 +394,67 @@ export const api = {
    */
   setEmailOverWhatsapp: (body: SetEmailOverWhatsappRequest): Promise<SetEmailOverWhatsappResponse> =>
     request('/channels/whatsapp-email-approval', { method: 'POST', body }),
+
+  // --- Commerce plane — the mobile FALLBACK surface for a user's business ---
+  //
+  // Texting Stewra is the headline control; these exist for what a chat thread is bad at: the shared
+  // customer inbox and campaign status at a glance. Connecting a channel stays on the website —
+  // Meta's Embedded Signup is a browser dialog.
+
+  listOrgs: (): Promise<ListOrgsResponse> => request('/orgs'),
+
+  /** Which org texting Stewra acts on. Per-user, not per-device — a WhatsApp text has no tab. */
+  setActiveOrg: (body: SetActiveOrgRequest): Promise<SetActiveOrgResponse> =>
+    request('/orgs/active', { method: 'PUT', body }),
+
+  listChannelAccounts: (orgId: string): Promise<ListChannelAccountsResponse> =>
+    request(`/orgs/${orgId}/channels`),
+
+  listCommerceConversations: (
+    orgId: string,
+    params: ListCommerceConversationsRequest = {},
+  ): Promise<ListCommerceConversationsResponse> => {
+    // `append`, not `set`: React Native's URLSearchParams typing predates `set`.
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.append('limit', String(params.limit));
+    if (params.cursor !== undefined) query.append('cursor', params.cursor);
+    const suffix = query.toString();
+    return request(`/orgs/${orgId}/conversations${suffix ? `?${suffix}` : ''}`);
+  },
+
+  listCommerceMessages: (
+    orgId: string,
+    conversationId: string,
+    params: ListCommerceMessagesRequest = {},
+  ): Promise<ListCommerceMessagesResponse> => {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.append('limit', String(params.limit));
+    if (params.cursor !== undefined) query.append('cursor', params.cursor);
+    const suffix = query.toString();
+    return request(
+      `/orgs/${orgId}/conversations/${conversationId}/messages${suffix ? `?${suffix}` : ''}`,
+    );
+  },
+
+  sendCommerceMessage: (
+    orgId: string,
+    conversationId: string,
+    body: CreateCommerceMessageRequest,
+  ): Promise<CreateCommerceMessageResponse> =>
+    request(`/orgs/${orgId}/conversations/${conversationId}/messages`, { method: 'POST', body }),
+
+  listMessageTemplates: (orgId: string): Promise<ListMessageTemplatesResponse> =>
+    request(`/orgs/${orgId}/templates`),
+
+  listBroadcasts: (orgId: string): Promise<ListBroadcastsResponse> =>
+    request(`/orgs/${orgId}/broadcasts`),
+
+  cancelBroadcast: (orgId: string, broadcastId: string): Promise<CancelBroadcastResponse> =>
+    request(`/orgs/${orgId}/broadcasts/${broadcastId}/cancel`, { method: 'POST', body: {} }),
+
+  resumeBroadcast: (orgId: string, broadcastId: string): Promise<ResumeBroadcastResponse> =>
+    request(`/orgs/${orgId}/broadcasts/${broadcastId}/resume`, { method: 'POST', body: {} }),
+
+  listCommerceJobs: (orgId: string): Promise<ListCommerceJobsResponse> =>
+    request(`/orgs/${orgId}/jobs?limit=20`),
 };

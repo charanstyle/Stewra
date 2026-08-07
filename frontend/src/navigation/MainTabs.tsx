@@ -5,8 +5,9 @@ import type { MainTabParamList } from './types';
 import ChatListScreen from '../screens/chat/ChatListScreen';
 import ContactsScreen from '../screens/chat/ContactsScreen';
 import StewraVoiceScreen from '../screens/chat/StewraVoiceScreen';
+import CommerceScreen from '../screens/commerce/CommerceScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
-import { ChatIcon, ContactsIcon, MicIcon, SettingsIcon } from '../components/icons/Icons';
+import { BriefcaseIcon, ChatIcon, ContactsIcon, MicIcon, SettingsIcon } from '../components/icons/Icons';
 import LogoutButton from '../components/LogoutButton';
 import { theme } from '../theme/colors';
 
@@ -62,6 +63,15 @@ export default function MainTabs(): React.JSX.Element {
           title: 'Talk to Stewra',
           tabBarLabel: 'Stewra',
           tabBarIcon: ({ color, size }: TabBarIconArgs) => <MicIcon color={color} size={size} />,
+        }}
+      />
+      <Tab.Screen
+        name="Commerce"
+        component={CommerceScreen}
+        options={{
+          title: 'Commerce',
+          tabBarButtonTestID: 'tab-commerce',
+          tabBarIcon: ({ color, size }: TabBarIconArgs) => <BriefcaseIcon color={color} size={size} />,
         }}
       />
       <Tab.Screen

@@ -268,6 +268,52 @@ const EnvSchema = z.object({
   // How long a link code stays valid. Short by design: it's a possession proof, not a password.
   WHATSAPP_LINK_CODE_TTL_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
 
+  // ── Meta app for the COMMERCE plane (per-tenant WhatsApp via Embedded Signup) ─────────────────────
+  // A DIFFERENT Meta app from the WHATSAPP_* one above, deliberately. That app owns Stewra's own
+  // business number and one system-user token for the whole install; this one owns nothing and sends
+  // nothing — it is the Tech Provider app through which each CLIENT connects their own WhatsApp
+  // Business Account, and every credential it obtains is stored per-organization in the vault.
+  //
+  // They must not share an app id: the permissions differ (whatsapp_business_management,
+  // whatsapp_business_messaging, business_management), the App Review is separate, and a single
+  // revocation would otherwise take down both the assistant and every client at once.
+  META_COMMERCE_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // The Meta app id, sent to the browser to launch the Embedded Signup dialog. Public by nature.
+  META_COMMERCE_APP_ID: z.string().min(1).optional(),
+  // The app secret. Keys the X-Hub-Signature-256 HMAC on /webhooks/meta and signs the server-side
+  // code exchange. Without it the webhook cannot tell Meta from anyone who guessed the URL.
+  META_COMMERCE_APP_SECRET:
+    z.string().min(1).optional(),
+  // The Embedded Signup configuration id — the flow Meta shows the client. Created in the app
+  // dashboard, per-app, and NOT derivable from the app id.
+  META_COMMERCE_CONFIG_ID: z.string().min(1).optional(),
+  // Echoed back during Meta's GET webhook handshake to prove we own the endpoint. Our own random
+  // string, and distinct from WHATSAPP_VERIFY_TOKEN so the two webhooks cannot be cross-verified.
+  META_COMMERCE_VERIFY_TOKEN:
+    z.string().min(1).optional(),
+  // Graph version pinned per deploy, same reasoning as WHATSAPP_GRAPH_VERSION: a visible bump.
+  META_COMMERCE_GRAPH_VERSION: z.string().regex(/^v\d+\.\d+$/).default('v21.0'),
+  // Graph origin. Overridable so the connect flow and the sender can be driven end-to-end against a
+  // local stand-in in tests, same reasoning as WHATSAPP_GRAPH_BASE_URL.
+  META_COMMERCE_GRAPH_BASE_URL: z.string().url().default('https://graph.facebook.com'),
+
+  // ── Commerce job worker (migration 043) ──────────────────────────────────────────────────────────
+  // All three carry values rather than naming a target, so they are defaulted: they describe how
+  // hard the worker polls, not what it acts on. Getting one wrong makes the queue slower or busier;
+  // it cannot make it drain the wrong tenant's work.
+  //
+  // There is deliberately NO `COMMERCE_WORKER_ENABLED`. The worker starts with the rest of the
+  // commerce plane, because a switch that turns off the only consumer while the enqueuers keep
+  // running produces a silently growing backlog — the exact failure this queue replaced.
+  COMMERCE_WORKER_POLL_MS: z.coerce.number().int().min(250).max(60_000).default(5_000),
+  // How many jobs one pass claims. The batch runs sequentially, so this is also the longest a single
+  // pass can take: batch × slowest handler.
+  COMMERCE_WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(5),
+  // How long a claim is held before another worker may take the job. Must comfortably exceed the
+  // slowest handler — too short and a job still running is claimed and run a second time, which is
+  // why handlers are required to be idempotent rather than why this should be set tightly.
+  COMMERCE_WORKER_LEASE_SECONDS: z.coerce.number().int().min(30).max(3_600).default(300),
+
   // ── WhatsApp PERSONAL (experimental companion device, via the user-hosted Stewra Bridge) ──────────
   // A SECOND, separate, opt-in channel. Everything above is Meta's sanctioned Cloud API; everything here
   // is the unofficial path, where the user links their OWN WhatsApp account and CAN be permanently
@@ -440,6 +486,25 @@ if (env.WHATSAPP_ENABLED) {
   }
 }
 
+// Fail loud when the commerce plane's Meta app is enabled but under-configured. Every one of these
+// names a target or authenticates one: without the app secret /webhooks/meta cannot tell Meta from a
+// forged POST carrying another tenant's WABA id; without the config id Embedded Signup opens the wrong
+// flow (or none); without the verify token Meta's handshake fails and no client is ever reachable.
+// Booting a half-configured multi-tenant messaging surface is strictly worse than not booting.
+if (env.META_COMMERCE_ENABLED) {
+  const missing = (
+    [
+      'META_COMMERCE_APP_ID',
+      'META_COMMERCE_APP_SECRET',
+      'META_COMMERCE_CONFIG_ID',
+      'META_COMMERCE_VERIFY_TOKEN',
+    ] as const
+  ).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`META_COMMERCE_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+}
+
 // Fail loud when the experimental companion-device channel is enabled but under-configured. Without a
 // download URL the web UI would offer a consent gate leading nowhere; without a minimum bridge version
 // we would have no way to refuse a build that is getting users banned. Both are worse than not booting.
@@ -560,6 +625,53 @@ const resolvedBaseUrl =
   env.MODEL_PROVIDER === 'grok'
     ? OPENAI_COMPATIBLE_BASE_URLS[env.MODEL_PROVIDER]
     : '');
+
+/**
+ * The commerce plane's Meta app.
+ *
+ * A discriminated union rather than the `?? ''` shape the older sections use, on purpose: an empty
+ * app secret would verify no HMAC and an empty config id would open no signup flow, and both would
+ * do it QUIETLY, at the moment a client is trying to connect their business. Callers must narrow on
+ * `enabled` first, and when they do the credentials are non-optional strings that are really there.
+ */
+export type MetaCommerceConfig =
+  | { readonly enabled: false }
+  | {
+      readonly enabled: true;
+      readonly appId: string;
+      readonly appSecret: string;
+      /** The Embedded Signup configuration id — which flow Meta shows the connecting client. */
+      readonly configId: string;
+      readonly verifyToken: string;
+      readonly graphVersion: string;
+      /** Graph origin, overridable so the connect flow can be driven against a local stand-in. */
+      readonly graphBaseUrl: string;
+    };
+
+function readMetaCommerceConfig(): MetaCommerceConfig {
+  if (!env.META_COMMERCE_ENABLED) return { enabled: false };
+  // The post-parse guard above already refused to boot without these; this re-reads them as a type
+  // narrowing that cannot be satisfied by a placeholder. If it ever throws, the guard has a hole.
+  const { META_COMMERCE_APP_ID, META_COMMERCE_APP_SECRET, META_COMMERCE_CONFIG_ID } = env;
+  const verifyToken = env.META_COMMERCE_VERIFY_TOKEN;
+  if (
+    META_COMMERCE_APP_ID === undefined ||
+    META_COMMERCE_APP_SECRET === undefined ||
+    META_COMMERCE_CONFIG_ID === undefined ||
+    verifyToken === undefined
+  ) {
+    throw new Error('META_COMMERCE_ENABLED=true but its credentials are not all set');
+  }
+  return {
+    enabled: true,
+    appId: META_COMMERCE_APP_ID,
+    appSecret: META_COMMERCE_APP_SECRET,
+    configId: META_COMMERCE_CONFIG_ID,
+    verifyToken,
+    graphVersion: env.META_COMMERCE_GRAPH_VERSION,
+    graphBaseUrl: env.META_COMMERCE_GRAPH_BASE_URL,
+  };
+}
 
 export const config = {
   nodeEnv: env.NODE_ENV,
@@ -739,6 +851,18 @@ export const config = {
      *  / regional Graph endpoint, without a code change. */
     graphBaseUrl: env.WHATSAPP_GRAPH_BASE_URL,
     linkCodeTtlMs: env.WHATSAPP_LINK_CODE_TTL_MINUTES * 60 * 1000,
+  },
+  /**
+   * The commerce plane's Meta app — a DIFFERENT app from `whatsapp` above. That one owns Stewra's own
+   * business number; this one owns nothing and sends nothing, and exists so each client can connect
+   * their own WhatsApp Business Account through Embedded Signup. Narrow on `.enabled` to reach the
+   * credentials; there are no empty-string stand-ins here.
+   */
+  metaCommerce: readMetaCommerceConfig(),
+  commerceWorker: {
+    pollMs: env.COMMERCE_WORKER_POLL_MS,
+    batchSize: env.COMMERCE_WORKER_BATCH_SIZE,
+    leaseSeconds: env.COMMERCE_WORKER_LEASE_SECONDS,
   },
   whatsappPersonal: {
     // The EXPERIMENTAL companion-device channel. Separate namespace from `whatsapp` above on purpose:

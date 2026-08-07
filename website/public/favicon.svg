@@ -1,0 +1,19 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- The Stewra mark. This geometry is duplicated in src/components/StewraMark/StewraMark.tsx and
+       rendered to public/icon-1024.png by scripts/render_icon.py. Change one, change all three.
+       The shapes are deliberately limited to rounded rectangles, a triangle and circles so that PIL
+       can reproduce them exactly — there is no SVG rasteriser on the build machine. -->
+  <defs>
+    <linearGradient id="stewraMark" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6D5BF5" />
+      <stop offset="1" stop-color="#B44BEA" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#stewraMark)" />
+  <!-- Tail first, so the seam where it meets the body is covered by the body. -->
+  <polygon points="23,39 23,50 34,40" fill="#FFFFFF" />
+  <rect x="13" y="14" width="38" height="26" rx="7" fill="#FFFFFF" />
+  <circle cx="24.5" cy="27" r="3.1" fill="#6D5BF5" />
+  <circle cx="32" cy="27" r="3.1" fill="#8B54F0" />
+  <circle cx="39.5" cy="27" r="3.1" fill="#B44BEA" />
+</svg>

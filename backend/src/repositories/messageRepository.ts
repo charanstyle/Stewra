@@ -5,6 +5,7 @@ import type {
   MessageStatus,
   MessageType,
   ProposedActionStatus,
+  ProposedCommerceReply,
   ProposedEmail,
   ProposedRunnerSession,
   ReactionType,
@@ -194,6 +195,46 @@ function parseProposedRunnerSession(
   };
 }
 
+/**
+ * Recover a `ProposedCommerceReply` from a message's `metadata` jsonb bag (stored under the
+ * `proposedCommerceReply` key). Defensive like the two above: a missing or malformed shape yields
+ * null rather than a partial object.
+ *
+ * Being strict here is a tenancy control, not just hygiene. This proposal names an `orgId`, and a
+ * bag that failed to round-trip cleanly must never resolve to "some organization" — a `null` sends
+ * the confirm path down its "there is nothing waiting" branch, which is the safe direction.
+ */
+function parseProposedCommerceReply(
+  metadata: JsonMetadata | null | undefined,
+): ProposedCommerceReply | null {
+  const raw = metadata?.['proposedCommerceReply'];
+  if (!isJsonObject(raw)) {
+    return null;
+  }
+  const { status, orgId, orgName, conversationId, contactName, body, messageId, failureReason } = raw;
+  if (
+    typeof status !== 'string' ||
+    typeof orgId !== 'string' ||
+    typeof orgName !== 'string' ||
+    typeof conversationId !== 'string' ||
+    typeof contactName !== 'string' ||
+    typeof body !== 'string' ||
+    !isProposedActionStatus(status)
+  ) {
+    return null;
+  }
+  return {
+    status,
+    orgId,
+    orgName,
+    conversationId,
+    contactName,
+    body,
+    messageId: typeof messageId === 'string' ? messageId : null,
+    failureReason: typeof failureReason === 'string' ? failureReason : null,
+  };
+}
+
 function toMessage(
   row: MessageRow,
   reactions: ReadonlyArray<MessageReaction>,
@@ -223,6 +264,7 @@ function toMessage(
     reactions,
     proposedEmail: parseProposedEmail(row.metadata),
     proposedRunnerSession: parseProposedRunnerSession(row.metadata),
+    proposedCommerceReply: parseProposedCommerceReply(row.metadata),
   };
 }
 
@@ -290,6 +332,8 @@ export interface NewMessage {
   readonly proposedEmail?: ProposedEmail | null;
   /** A Stewra-proposed runner session to attach to this (assistant) message; same `metadata` bag. */
   readonly proposedRunnerSession?: ProposedRunnerSession | null;
+  /** A Stewra-proposed reply to an org's customer; same `metadata` bag. */
+  readonly proposedCommerceReply?: ProposedCommerceReply | null;
 }
 
 /**
@@ -300,13 +344,16 @@ export interface NewMessage {
 function serializeMetadata(input: {
   readonly proposedEmail?: ProposedEmail | null | undefined;
   readonly proposedRunnerSession?: ProposedRunnerSession | null | undefined;
+  readonly proposedCommerceReply?: ProposedCommerceReply | null | undefined;
 }): string | undefined {
   const bag: {
     proposedEmail?: ProposedEmail;
     proposedRunnerSession?: ProposedRunnerSession;
+    proposedCommerceReply?: ProposedCommerceReply;
   } = {};
   if (input.proposedEmail) bag.proposedEmail = input.proposedEmail;
   if (input.proposedRunnerSession) bag.proposedRunnerSession = input.proposedRunnerSession;
+  if (input.proposedCommerceReply) bag.proposedCommerceReply = input.proposedCommerceReply;
   return Object.keys(bag).length > 0 ? JSON.stringify(bag) : undefined;
 }
 
@@ -334,6 +381,7 @@ export class MessageRepository {
           metadata: serializeMetadata({
             proposedEmail: input.proposedEmail,
             proposedRunnerSession: input.proposedRunnerSession,
+            proposedCommerceReply: input.proposedCommerceReply,
           }),
           reply_to_message_id: input.replyToId ?? null,
         })
@@ -374,6 +422,45 @@ export class MessageRepository {
       .set({ metadata: JSON.stringify({ proposedRunnerSession }) })
       .where('id', '=', messageId)
       .execute();
+  }
+
+  /**
+   * Replace the proposed-commerce-reply payload in a message's `metadata` bag. Mirrors
+   * {@link updateProposedRunnerSession} — same whole-bag overwrite, same reason.
+   */
+  async updateProposedCommerceReply(
+    messageId: string,
+    proposedCommerceReply: ProposedCommerceReply,
+  ): Promise<void> {
+    await db
+      .updateTable('messages')
+      .set({ metadata: JSON.stringify({ proposedCommerceReply }) })
+      .where('id', '=', messageId)
+      .execute();
+  }
+
+  /**
+   * The most recent assistant message in a conversation carrying a still-`pending`
+   * proposedCommerceReply — what a follow-up "yes"/"no"/"say it differently" resolves against on a
+   * button-less channel. Returns undefined when nothing is awaiting confirmation.
+   */
+  async findPendingCommerceProposal(conversationId: string): Promise<Message | undefined> {
+    const rows = await db
+      .selectFrom('messages')
+      .select(MESSAGE_COLUMNS)
+      .where('conversation_id', '=', conversationId)
+      .where('sender_kind', '=', 'assistant')
+      .where('is_deleted', '=', false)
+      .orderBy('created_at', 'desc')
+      .limit(20)
+      .execute();
+    for (const row of rows) {
+      const proposal = parseProposedCommerceReply(row.metadata);
+      if (proposal && proposal.status === 'pending') {
+        return toMessage(row, [], [], '');
+      }
+    }
+    return undefined;
   }
 
   /**

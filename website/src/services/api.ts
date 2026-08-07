@@ -59,6 +59,8 @@ import type {
   ConfirmEmailResponse,
   ConfirmRunnerSessionRequest,
   ConfirmRunnerSessionResponse,
+  ConfirmCommerceReplyRequest,
+  ConfirmCommerceReplyResponse,
   SendVoiceMessageResponse,
   UploadAvatarResponse,
   TurnCredentialsResponse,
@@ -81,6 +83,79 @@ import type {
   GetEmailOverWhatsappResponse,
   SetEmailOverWhatsappRequest,
   SetEmailOverWhatsappResponse,
+  // Commerce plane
+  ListOrgsResponse,
+  CreateOrgRequest,
+  CreateOrgResponse,
+  SetActiveOrgRequest,
+  SetActiveOrgResponse,
+  ListOrgMembersResponse,
+  CreateOrgInviteRequest,
+  CreateOrgInviteResponse,
+  AcceptOrgInviteRequest,
+  AcceptOrgInviteResponse,
+  ListChannelAccountsResponse,
+  CreateChannelAccountRequest,
+  CreateChannelAccountResponse,
+  DeleteChannelAccountResponse,
+  ListCommerceConversationsRequest,
+  ListCommerceConversationsResponse,
+  ListCommerceMessagesRequest,
+  ListCommerceMessagesResponse,
+  CreateCommerceMessageRequest,
+  CreateCommerceMessageResponse,
+  ListCommerceContactsRequest,
+  ListCommerceContactsResponse,
+  GetCommerceContactResponse,
+  UpdateCommerceContactRequest,
+  UpdateCommerceContactResponse,
+  AddContactTagRequest,
+  AddContactTagResponse,
+  RemoveContactTagResponse,
+  ListCommerceTagsResponse,
+  DeleteCommerceTagResponse,
+  ListCommerceSegmentsResponse,
+  CreateCommerceSegmentRequest,
+  CreateCommerceSegmentResponse,
+  UpdateCommerceSegmentRequest,
+  UpdateCommerceSegmentResponse,
+  DeleteCommerceSegmentResponse,
+  PreviewSegmentRequest,
+  PreviewSegmentResponse,
+  ListContactConsentsResponse,
+  RecordContactConsentRequest,
+  RecordContactConsentResponse,
+  ListSuppressionsRequest,
+  ListSuppressionsResponse,
+  CreateSuppressionRequest,
+  CreateSuppressionResponse,
+  DeleteSuppressionResponse,
+  GetMessagingPolicyResponse,
+  UpdateMessagingPolicyRequest,
+  UpdateMessagingPolicyResponse,
+  AttestMessagingPolicyRequest,
+  AttestMessagingPolicyResponse,
+  ListMessageTemplatesRequest,
+  ListMessageTemplatesResponse,
+  CreateMessageTemplateRequest,
+  CreateMessageTemplateResponse,
+  SyncMessageTemplatesRequest,
+  SyncMessageTemplatesResponse,
+  DeleteMessageTemplateResponse,
+  ListBroadcastsResponse,
+  CreateBroadcastRequest,
+  CreateBroadcastResponse,
+  GetBroadcastResponse,
+  PreviewBroadcastRequest,
+  PreviewBroadcastResponse,
+  CancelBroadcastResponse,
+  ResumeBroadcastResponse,
+  ListBroadcastRecipientsRequest,
+  ListBroadcastRecipientsResponse,
+  GetCommerceCostsRequest,
+  GetCommerceCostsResponse,
+  ListCommerceJobsRequest,
+  ListCommerceJobsResponse,
 } from '@stewra/shared-types';
 
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -117,13 +192,22 @@ export function clearTokens(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-/** An error carrying the backend's plain-language message, for display in the UI. */
+/**
+ * An error carrying the backend's plain-language message, for display in the UI.
+ *
+ * `message` is composed from `details` when the backend sent any, because a `ValidationError` there
+ * carries the fixed string "Validation failed" and puts the reason a human needs — "The PIN is six
+ * digits" — in the per-field details. Doing it here rather than at each call site means every
+ * `err.message` in the app is legible; there are a dozen `describeError` helpers that would
+ * otherwise all have to know this convention.
+ */
 export class ApiError extends Error {
   constructor(
-    message: string,
+    serverMessage: string,
     readonly code: string,
+    readonly details: ReadonlyArray<{ readonly field: string; readonly message: string }> = [],
   ) {
-    super(message);
+    super(details.length > 0 ? details.map((d) => d.message).join(' ') : serverMessage);
     this.name = 'ApiError';
   }
 }
@@ -151,7 +235,7 @@ async function request<T>(
 
   const payload: ApiResponse<T> = await response.json();
   if (!payload.success) {
-    throw new ApiError(payload.error.message, payload.error.code);
+    throw new ApiError(payload.error.message, payload.error.code, payload.error.details);
   }
   return payload.data;
 }
@@ -170,7 +254,7 @@ async function requestMultipart<T>(path: string, form: FormData): Promise<T> {
 
   const payload: ApiResponse<T> = await response.json();
   if (!payload.success) {
-    throw new ApiError(payload.error.message, payload.error.code);
+    throw new ApiError(payload.error.message, payload.error.code, payload.error.details);
   }
   return payload.data;
 }
@@ -345,6 +429,17 @@ export const api = {
   ): Promise<ConfirmRunnerSessionResponse> =>
     request(`/messages/${id}/confirm-runner-session`, { method: 'POST', body }),
 
+  /**
+   * Send (`send`) or dismiss (`cancel`) a reply Stewra proposed to one of an organization's customers.
+   * Runs the SAME server-side executor a natural-language "yes" does; the updated message (its
+   * `proposedCommerceReply.status` now terminal) comes back so the in-chat card re-renders.
+   */
+  confirmCommerceReply: (
+    id: string,
+    body: ConfirmCommerceReplyRequest,
+  ): Promise<ConfirmCommerceReplyResponse> =>
+    request(`/messages/${id}/confirm-commerce-reply`, { method: 'POST', body }),
+
   /** Per-participant read acknowledgements for one message (drives the read-receipt detail view). */
   listMessageReceipts: (id: string): Promise<ListReadReceiptsResponse> =>
     request(`/messages/${id}/receipts`),
@@ -435,6 +530,290 @@ export const api = {
     body: SetEmailOverWhatsappRequest,
   ): Promise<SetEmailOverWhatsappResponse> =>
     request('/channels/whatsapp-email-approval', { method: 'POST', body }),
+
+  // --- Commerce plane — organizations, connected channels, and the shared inbox ---
+  //
+  // Everything below `/orgs/:orgId/` is tenant-scoped server-side by `requireOrgMember`. The org id
+  // in these paths is a routing detail, not the authorization: passing someone else's returns 404.
+
+  listOrgs: (): Promise<ListOrgsResponse> => request('/orgs'),
+
+  createOrg: (body: CreateOrgRequest): Promise<CreateOrgResponse> =>
+    request('/orgs', { method: 'POST', body }),
+
+  /** Which org the CONVERSATIONAL surface acts on. Per-user, not per-tab — a WhatsApp text has no tab. */
+  setActiveOrg: (body: SetActiveOrgRequest): Promise<SetActiveOrgResponse> =>
+    request('/orgs/active', { method: 'PUT', body }),
+
+  listOrgMembers: (orgId: string): Promise<ListOrgMembersResponse> =>
+    request(`/orgs/${orgId}/members`),
+
+  createOrgInvite: (orgId: string, body: CreateOrgInviteRequest): Promise<CreateOrgInviteResponse> =>
+    request(`/orgs/${orgId}/invites`, { method: 'POST', body }),
+
+  acceptOrgInvite: (body: AcceptOrgInviteRequest): Promise<AcceptOrgInviteResponse> =>
+    request('/orgs/invites/accept', { method: 'POST', body }),
+
+  listChannelAccounts: (orgId: string): Promise<ListChannelAccountsResponse> =>
+    request(`/orgs/${orgId}/channels`),
+
+  /** Hand the server the one-time code Meta's Embedded Signup returned; it does the rest. */
+  connectWhatsappAccount: (
+    orgId: string,
+    body: CreateChannelAccountRequest,
+  ): Promise<CreateChannelAccountResponse> =>
+    request(`/orgs/${orgId}/channels/whatsapp`, { method: 'POST', body }),
+
+  disconnectChannelAccount: (
+    orgId: string,
+    accountId: string,
+  ): Promise<DeleteChannelAccountResponse> =>
+    request(`/orgs/${orgId}/channels/${accountId}`, { method: 'DELETE' }),
+
+  listCommerceConversations: (
+    orgId: string,
+    params: ListCommerceConversationsRequest = {},
+  ): Promise<ListCommerceConversationsResponse> => {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.cursor !== undefined) query.set('cursor', params.cursor);
+    const suffix = query.toString();
+    return request(`/orgs/${orgId}/conversations${suffix ? `?${suffix}` : ''}`);
+  },
+
+  listCommerceMessages: (
+    orgId: string,
+    conversationId: string,
+    params: ListCommerceMessagesRequest = {},
+  ): Promise<ListCommerceMessagesResponse> => {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.cursor !== undefined) query.set('cursor', params.cursor);
+    const suffix = query.toString();
+    return request(
+      `/orgs/${orgId}/conversations/${conversationId}/messages${suffix ? `?${suffix}` : ''}`,
+    );
+  },
+
+  sendCommerceMessage: (
+    orgId: string,
+    conversationId: string,
+    body: CreateCommerceMessageRequest,
+  ): Promise<CreateCommerceMessageResponse> =>
+    request(`/orgs/${orgId}/conversations/${conversationId}/messages`, { method: 'POST', body }),
+
+  // --- Commerce audience — contacts, tags, segments ---
+
+  listCommerceContacts: (
+    orgId: string,
+    params: ListCommerceContactsRequest = {},
+  ): Promise<ListCommerceContactsResponse> => {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.search !== undefined) query.set('search', params.search);
+    if (params.tag !== undefined) query.set('tag', params.tag);
+    const suffix = query.toString();
+    return request(`/orgs/${orgId}/contacts${suffix ? `?${suffix}` : ''}`);
+  },
+
+  getCommerceContact: (orgId: string, contactId: string): Promise<GetCommerceContactResponse> =>
+    request(`/orgs/${orgId}/contacts/${contactId}`),
+
+  updateCommerceContact: (
+    orgId: string,
+    contactId: string,
+    body: UpdateCommerceContactRequest,
+  ): Promise<UpdateCommerceContactResponse> =>
+    request(`/orgs/${orgId}/contacts/${contactId}`, { method: 'PATCH', body }),
+
+  addContactTag: (
+    orgId: string,
+    contactId: string,
+    body: AddContactTagRequest,
+  ): Promise<AddContactTagResponse> =>
+    request(`/orgs/${orgId}/contacts/${contactId}/tags`, { method: 'POST', body }),
+
+  removeContactTag: (
+    orgId: string,
+    contactId: string,
+    tagId: string,
+  ): Promise<RemoveContactTagResponse> =>
+    request(`/orgs/${orgId}/contacts/${contactId}/tags/${tagId}`, { method: 'DELETE' }),
+
+  listCommerceTags: (orgId: string): Promise<ListCommerceTagsResponse> =>
+    request(`/orgs/${orgId}/tags`),
+
+  deleteCommerceTag: (orgId: string, tagId: string): Promise<DeleteCommerceTagResponse> =>
+    request(`/orgs/${orgId}/tags/${tagId}`, { method: 'DELETE' }),
+
+  listCommerceSegments: (orgId: string): Promise<ListCommerceSegmentsResponse> =>
+    request(`/orgs/${orgId}/segments`),
+
+  createCommerceSegment: (
+    orgId: string,
+    body: CreateCommerceSegmentRequest,
+  ): Promise<CreateCommerceSegmentResponse> =>
+    request(`/orgs/${orgId}/segments`, { method: 'POST', body }),
+
+  updateCommerceSegment: (
+    orgId: string,
+    segmentId: string,
+    body: UpdateCommerceSegmentRequest,
+  ): Promise<UpdateCommerceSegmentResponse> =>
+    request(`/orgs/${orgId}/segments/${segmentId}`, { method: 'PUT', body }),
+
+  deleteCommerceSegment: (
+    orgId: string,
+    segmentId: string,
+  ): Promise<DeleteCommerceSegmentResponse> =>
+    request(`/orgs/${orgId}/segments/${segmentId}`, { method: 'DELETE' }),
+
+  /** What a rule would reach RIGHT NOW — totals, per-reason blocks, and a sample. */
+  previewCommerceSegment: (
+    orgId: string,
+    body: PreviewSegmentRequest,
+  ): Promise<PreviewSegmentResponse> =>
+    request(`/orgs/${orgId}/segments/preview`, { method: 'POST', body }),
+
+  // --- Commerce consent — the permission layer every broadcast passes through ---
+
+  listContactConsents: (
+    orgId: string,
+    contactId: string,
+  ): Promise<ListContactConsentsResponse> =>
+    request(`/orgs/${orgId}/contacts/${contactId}/consents`),
+
+  recordContactConsent: (
+    orgId: string,
+    contactId: string,
+    body: RecordContactConsentRequest,
+  ): Promise<RecordContactConsentResponse> =>
+    request(`/orgs/${orgId}/contacts/${contactId}/consents`, { method: 'POST', body }),
+
+  listSuppressions: (
+    orgId: string,
+    params: ListSuppressionsRequest = {},
+  ): Promise<ListSuppressionsResponse> => {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    const suffix = query.toString();
+    return request(`/orgs/${orgId}/suppressions${suffix ? `?${suffix}` : ''}`);
+  },
+
+  createSuppression: (
+    orgId: string,
+    body: CreateSuppressionRequest,
+  ): Promise<CreateSuppressionResponse> =>
+    request(`/orgs/${orgId}/suppressions`, { method: 'POST', body }),
+
+  deleteSuppression: (
+    orgId: string,
+    platform: string,
+    externalId: string,
+  ): Promise<DeleteSuppressionResponse> =>
+    request(`/orgs/${orgId}/suppressions/${platform}/${encodeURIComponent(externalId)}`, {
+      method: 'DELETE',
+    }),
+
+  getMessagingPolicy: (orgId: string): Promise<GetMessagingPolicyResponse> =>
+    request(`/orgs/${orgId}/messaging-policy`),
+
+  updateMessagingPolicy: (
+    orgId: string,
+    body: UpdateMessagingPolicyRequest,
+  ): Promise<UpdateMessagingPolicyResponse> =>
+    request(`/orgs/${orgId}/messaging-policy`, { method: 'PUT', body }),
+
+  attestMessagingPolicy: (
+    orgId: string,
+    body: AttestMessagingPolicyRequest,
+  ): Promise<AttestMessagingPolicyResponse> =>
+    request(`/orgs/${orgId}/messaging-policy/attestation`, { method: 'POST', body }),
+
+  // --- Commerce campaigns — templates, broadcasts, costs, and the job queue ---
+
+  listMessageTemplates: (
+    orgId: string,
+    params: ListMessageTemplatesRequest = {},
+  ): Promise<ListMessageTemplatesResponse> => {
+    const query = new URLSearchParams();
+    if (params.channelAccountId !== undefined) {
+      query.set('channelAccountId', params.channelAccountId);
+    }
+    const suffix = query.toString();
+    return request(`/orgs/${orgId}/templates${suffix ? `?${suffix}` : ''}`);
+  },
+
+  createMessageTemplate: (
+    orgId: string,
+    body: CreateMessageTemplateRequest,
+  ): Promise<CreateMessageTemplateResponse> =>
+    request(`/orgs/${orgId}/templates`, { method: 'POST', body }),
+
+  /** Re-read one account's templates from Meta, for whoever cannot wait for the hourly sync. */
+  syncMessageTemplates: (
+    orgId: string,
+    body: SyncMessageTemplatesRequest,
+  ): Promise<SyncMessageTemplatesResponse> =>
+    request(`/orgs/${orgId}/templates/sync`, { method: 'POST', body }),
+
+  deleteMessageTemplate: (
+    orgId: string,
+    templateId: string,
+  ): Promise<DeleteMessageTemplateResponse> =>
+    request(`/orgs/${orgId}/templates/${templateId}`, { method: 'DELETE' }),
+
+  listBroadcasts: (orgId: string): Promise<ListBroadcastsResponse> =>
+    request(`/orgs/${orgId}/broadcasts`),
+
+  createBroadcast: (orgId: string, body: CreateBroadcastRequest): Promise<CreateBroadcastResponse> =>
+    request(`/orgs/${orgId}/broadcasts`, { method: 'POST', body }),
+
+  getBroadcast: (orgId: string, broadcastId: string): Promise<GetBroadcastResponse> =>
+    request(`/orgs/${orgId}/broadcasts/${broadcastId}`),
+
+  /** What a campaign would reach and be billed as, before scheduling it. Names no price on purpose. */
+  previewBroadcast: (
+    orgId: string,
+    body: PreviewBroadcastRequest,
+  ): Promise<PreviewBroadcastResponse> =>
+    request(`/orgs/${orgId}/broadcasts/preview`, { method: 'POST', body }),
+
+  cancelBroadcast: (orgId: string, broadcastId: string): Promise<CancelBroadcastResponse> =>
+    request(`/orgs/${orgId}/broadcasts/${broadcastId}/cancel`, { method: 'POST', body: {} }),
+
+  resumeBroadcast: (orgId: string, broadcastId: string): Promise<ResumeBroadcastResponse> =>
+    request(`/orgs/${orgId}/broadcasts/${broadcastId}/resume`, { method: 'POST', body: {} }),
+
+  listBroadcastRecipients: (
+    orgId: string,
+    broadcastId: string,
+    params: ListBroadcastRecipientsRequest = {},
+  ): Promise<ListBroadcastRecipientsResponse> => {
+    const query = new URLSearchParams();
+    if (params.status !== undefined) query.set('status', params.status);
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    const suffix = query.toString();
+    return request(`/orgs/${orgId}/broadcasts/${broadcastId}/recipients${suffix ? `?${suffix}` : ''}`);
+  },
+
+  /** The pass-through line on the invoice: what Meta charged, by category, over a period. */
+  getCommerceCosts: (orgId: string, params: GetCommerceCostsRequest): Promise<GetCommerceCostsResponse> => {
+    const query = new URLSearchParams({ from: params.from, to: params.to });
+    return request(`/orgs/${orgId}/costs?${query.toString()}`);
+  },
+
+  listCommerceJobs: (
+    orgId: string,
+    params: ListCommerceJobsRequest = {},
+  ): Promise<ListCommerceJobsResponse> => {
+    const query = new URLSearchParams();
+    if (params.status !== undefined) query.set('status', params.status);
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    const suffix = query.toString();
+    return request(`/orgs/${orgId}/jobs${suffix ? `?${suffix}` : ''}`);
+  },
 };
 
 /**

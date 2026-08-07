@@ -9,6 +9,8 @@ import {
   type ConfirmEmailResponse,
   type ConfirmRunnerSessionAction,
   type ConfirmRunnerSessionResponse,
+  type ConfirmCommerceReplyAction,
+  type ConfirmCommerceReplyResponse,
   type DeleteMessageResponse,
   type GetMessageResponse,
   type ListMessagesResponse,
@@ -47,6 +49,8 @@ const confirmEmailValues: [ConfirmEmailAction, ...ConfirmEmailAction[]] = ['send
 const confirmEmailSchema = z.object({ action: z.enum(confirmEmailValues) });
 const confirmRunnerValues: [ConfirmRunnerSessionAction, ...ConfirmRunnerSessionAction[]] = ['start', 'cancel'];
 const confirmRunnerSchema = z.object({ action: z.enum(confirmRunnerValues) });
+const confirmCommerceValues: [ConfirmCommerceReplyAction, ...ConfirmCommerceReplyAction[]] = ['send', 'cancel'];
+const confirmCommerceSchema = z.object({ action: z.enum(confirmCommerceValues) });
 // Multipart text fields for POST /messages/voice (the audio itself arrives as the `audio` file part).
 const voiceFieldsSchema = z.object({ conversationId: z.string().uuid() });
 const reactSchema = z.object({
@@ -241,6 +245,27 @@ class MessagesController extends BaseController {
       this.handleSuccess(res, body);
     } catch (error) {
       this.handleError(error, res, 'MessagesController.confirmRunnerSession');
+    }
+  }
+
+  /**
+   * POST /messages/:id/confirm-commerce-reply — send or dismiss the reply Stewra proposed to one of
+   * the organization's customers. The app-side twin of answering "yes" in the thread.
+   */
+  async confirmCommerceReply(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = this.userId(req);
+      const { id } = parse(idParamsSchema, req.params);
+      const { action } = parse(confirmCommerceSchema, req.body);
+      const message = await messageService.confirmCommerceReplyAction(userId, id, action);
+
+      const event: ChatMessageEvent = { message };
+      emitToConversation(message.conversationId, SERVER_EVENTS.CHAT_MESSAGE, event);
+
+      const body: ConfirmCommerceReplyResponse = { message };
+      this.handleSuccess(res, body);
+    } catch (error) {
+      this.handleError(error, res, 'MessagesController.confirmCommerceReply');
     }
   }
 

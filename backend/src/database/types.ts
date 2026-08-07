@@ -8,9 +8,19 @@ import type {
   CallKind,
   CallPushPlatform,
   CallStatus,
+  ChannelAccountStatus,
+  CommerceMessageDirection,
+  CommerceMessageStatus,
+  CommercePlatform,
+  ConsentPurpose,
+  ConsentSource,
+  ConsentState,
   ContactStatus,
   ConversationType,
   InviteStatus,
+  OrgInviteStatus,
+  OrgRole,
+  OrgStatus,
   MessageType,
   MessagingChannel,
   ParticipantRole,
@@ -20,6 +30,14 @@ import type {
   ProcessRuleSource,
   ProcessRuleStatus,
   ProcessTier,
+  SuppressionReason,
+  CommerceJobKind,
+  CommerceJobStatus,
+  MessagePricingCategory,
+  TemplateCategory,
+  TemplateStatus,
+  BroadcastStatus,
+  BroadcastRecipientStatus,
   Rating,
   ReactionType,
   ResourceKind,
@@ -725,6 +743,386 @@ export interface GithubAppInstallationsTable {
   created_at: CreatedAt;
 }
 
+/**
+ * The commerce plane's tenant (migration 038). Every table below this one is scoped by `org_id`, in
+ * the way every table above it is scoped by `user_id`. `created_by` is provenance only — it confers
+ * no rights, so an organization survives its founder leaving.
+ */
+export interface OrganizationsTable {
+  id: Generated<string>;
+  name: string;
+  slug: string;
+  status: Generated<OrgStatus>;
+  created_by: string;
+  created_at: CreatedAt;
+}
+
+/**
+ * The ONLY join between an authenticated user and an organization's data (migration 038). Unique on
+ * (org_id, user_id), because an authorization check that can return two roles is a vulnerability.
+ */
+export interface OrgMembersTable {
+  id: Generated<string>;
+  org_id: string;
+  user_id: string;
+  role: OrgRole;
+  created_at: CreatedAt;
+}
+
+/**
+ * An invitation to join an organization (migration 038). Like the bridge and runner device tokens,
+ * `token_hash` is a SHA-256 and the plaintext exists only in the creation response — this credential
+ * grants access to a business's entire customer list.
+ */
+export interface OrgInvitesTable {
+  id: Generated<string>;
+  org_id: string;
+  email: string;
+  role: OrgRole;
+  status: Generated<OrgInviteStatus>;
+  token_hash: string;
+  invited_by: string;
+  expires_at: ColumnType<Date, Date, never>;
+  accepted_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+}
+
+/**
+ * Platform-reported facts about a connected account that are worth showing but never worth trusting
+ * for routing — routing always goes through `external_account_id`. Every field is optional because
+ * Meta populates them at different points in the connection lifecycle.
+ */
+export interface ChannelAccountMeta {
+  /** The Meta Business (portfolio) id that owns the WABA. */
+  readonly businessId?: string;
+  /** The display name Meta has verified for the number, e.g. "Acme Bakery". */
+  readonly verifiedName?: string;
+  /** Meta's rolling quality rating for the number: GREEN | YELLOW | RED. */
+  readonly qualityRating?: string;
+  /** The messaging tier cap, e.g. TIER_1K — how many unique customers may be started per day. */
+  readonly messagingTier?: string;
+}
+
+/**
+ * A per-organization messaging account (migration 039) — what replaces the deploy-wide `WHATSAPP_*`
+ * env vars for the commerce plane. `credential_ref` is a vault handle, not a credential: a dump of
+ * this table yields no ability to send as anybody.
+ */
+export interface ChannelAccountsTable {
+  id: Generated<string>;
+  org_id: string;
+  platform: CommercePlatform;
+  /** The WABA id for WhatsApp — the key an inbound webhook is routed by. Unique per platform. */
+  external_account_id: string;
+  phone_number_id: ColumnType<string | null, string | null | undefined, string | null>;
+  display_name: Generated<string>;
+  /** → vault_secrets.id. Deliberately not a foreign key; see the migration for why. */
+  credential_ref: string;
+  status: Generated<ChannelAccountStatus>;
+  error_detail: ColumnType<string | null, string | null | undefined, string | null>;
+  /** jsonb: written as a JSON string, read back as a parsed object. */
+  meta: ColumnType<ChannelAccountMeta, string | undefined, string>;
+  /**
+   * When the vaulted credential stops working (migration 041). NULL means Meta reported no expiry
+   * — a real answer, not a missing one, and the sweep skips those rows rather than treating NULL as
+   * "expires now".
+   */
+  credential_expires_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  connected_at: CreatedAt;
+}
+
+/** Seen provider message ids for the commerce plane (migration 039) — the idempotency lock against
+ * Meta's 7-day webhook retries. Separate from `channel_inbound_messages`, whose `channel` is a
+ * MessagingChannel rather than a CommercePlatform. */
+export interface CommerceInboundMessagesTable {
+  id: Generated<string>;
+  platform: CommercePlatform;
+  provider_message_id: string;
+  received_at: CreatedAt;
+}
+
+/**
+ * Which organization a user's CONVERSATIONAL turns act on (migration 039). Its own table rather than
+ * a column on `user_preferences`, which belongs to the personal-assistant plane; commerce does not
+ * write there. A missing row means "not chosen yet" — the command layer asks rather than guessing.
+ */
+export interface CommerceActiveOrgsTable {
+  user_id: string;
+  org_id: string;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/**
+ * A member of the public an organization is talking to (migration 040). Unique per ORG, not
+ * globally: the same person may be a customer of two clients, and those stay separate records.
+ */
+export interface CommerceContactsTable {
+  id: Generated<string>;
+  org_id: string;
+  platform: CommercePlatform;
+  /** Meta's `wa_id` for WhatsApp — E.164 without the '+'. */
+  external_id: string;
+  display_name: ColumnType<string | null, string | null | undefined, string | null>;
+  phone_e164: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * The client's own fields (migration 044). Read as a parsed object, written as a JSON string —
+   * `jsonb` is constrained to an object at the column, so a non-object cannot be stored at all.
+   */
+  attributes: ColumnType<unknown, string | undefined, string>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/**
+ * A hand-applied label (migration 044). Unique per org on the LOWERCASED name — two tags differing
+ * only in case would split an audience in half and report nothing wrong.
+ */
+export interface CommerceTagsTable {
+  id: Generated<string>;
+  org_id: string;
+  name: string;
+  created_at: CreatedAt;
+}
+
+/** Which contacts carry which labels (migration 044). `org_id` denormalized so the tenant filter
+ * never needs a join. */
+export interface CommerceContactTagsTable {
+  contact_id: string;
+  tag_id: string;
+  org_id: string;
+  created_at: CreatedAt;
+}
+
+/**
+ * A saved audience RULE (migration 044) — never a member list. `definition` is a typed tree parsed
+ * and re-validated on every read, so a definition written under an older shape fails loudly when it
+ * is next used rather than quietly selecting the wrong people.
+ */
+export interface CommerceSegmentsTable {
+  id: Generated<string>;
+  org_id: string;
+  name: string;
+  description: ColumnType<string | null, string | null | undefined, string | null>;
+  definition: ColumnType<unknown, string, string>;
+  created_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/**
+ * One thread between an organization and a contact (migration 040). `service_window_expires_at` is
+ * load-bearing: outside the 24-hour window Meta accepts a free-form send and never delivers it.
+ */
+export interface CommerceConversationsTable {
+  id: Generated<string>;
+  org_id: string;
+  channel_account_id: string;
+  contact_id: string;
+  platform: CommercePlatform;
+  last_message_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  service_window_expires_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+}
+
+/**
+ * A message in a commerce thread (migration 040). `org_id` is denormalized from the conversation so
+ * every tenant filter is a single-table predicate — a scope key that needs a join to apply is a
+ * scope key that eventually gets forgotten.
+ */
+export interface CommerceMessagesTable {
+  id: Generated<string>;
+  org_id: string;
+  conversation_id: string;
+  direction: CommerceMessageDirection;
+  platform: CommercePlatform;
+  provider_message_id: ColumnType<string | null, string | null | undefined, string | null>;
+  body: string;
+  status: Generated<CommerceMessageStatus>;
+  failure_reason: ColumnType<string | null, string | null | undefined, string | null>;
+  sent_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Which approved template produced this send (migration 046). Null for free-form replies. */
+  template_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * What Meta CHARGED (migration 046) — reported on the delivery status webhook, never derived here.
+   *
+   * `billable` is three-valued on purpose: NULL means the webhook has not arrived, FALSE means Meta
+   * said the message is free. A two-valued column would bill every in-flight send as free.
+   */
+  pricing_category: ColumnType<MessagePricingCategory | null, string | null | undefined, string | null>;
+  provider_pricing_category: ColumnType<string | null, string | null | undefined, string | null>;
+  pricing_model: ColumnType<string | null, string | null | undefined, string | null>;
+  billable: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
+  provider_conversation_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Writable on insert, unlike `CreatedAt` everywhere else. An inbound message is stamped with the
+   * timestamp Meta reported — the customer's send time — because a webhook retried hours later would
+   * otherwise order the thread by when WE happened to receive it. Omitted on insert it defaults to
+   * now(), which is what outbound sends want.
+   */
+  created_at: ColumnType<Date, Date | undefined, never>;
+}
+
+/**
+ * A WhatsApp message template (migration 045) — a MIRROR of one that lives at Meta.
+ *
+ * `status` is this build's closed union and only `approved` may be sent; `provider_status` is Meta's
+ * raw word, kept because Meta's vocabulary is Meta's to extend and a status we cannot map must read
+ * as "not approved" rather than as the nearest thing we recognize.
+ */
+export interface CommerceTemplatesTable {
+  id: Generated<string>;
+  org_id: string;
+  channel_account_id: string;
+  name: string;
+  language: string;
+  category: ColumnType<TemplateCategory | null, TemplateCategory | null, TemplateCategory | null>;
+  provider_category: ColumnType<string | null, string | null | undefined, string | null>;
+  status: Generated<TemplateStatus>;
+  provider_status: string;
+  provider_template_id: ColumnType<string | null, string | null | undefined, string | null>;
+  header_text: ColumnType<string | null, string | null | undefined, string | null>;
+  body_text: string;
+  footer_text: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Derived from `body_text` at write time. Never accepted from a client. */
+  variable_count: Generated<number>;
+  rejection_reason: ColumnType<string | null, string | null | undefined, string | null>;
+  quality_score: ColumnType<string | null, string | null | undefined, string | null>;
+  last_synced_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/**
+ * A scheduled template send to a segment (migration 046).
+ *
+ * `segment_id` is a reference, not a captured list: the audience is resolved when the dispatch job
+ * runs, so a campaign scheduled for Friday reaches Friday's opt-in list rather than Monday's.
+ */
+export interface CommerceBroadcastsTable {
+  id: Generated<string>;
+  org_id: string;
+  channel_account_id: string;
+  name: string;
+  segment_id: string;
+  template_id: string;
+  /** jsonb array of positional strings; length is checked against the template's `variable_count`. */
+  variables: ColumnType<unknown, string | undefined, string>;
+  status: Generated<BroadcastStatus>;
+  scheduled_for: Date;
+  started_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  completed_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  total_recipients: Generated<number>;
+  sent_count: Generated<number>;
+  failed_count: Generated<number>;
+  skipped_count: Generated<number>;
+  last_error: ColumnType<string | null, string | null | undefined, string | null>;
+  created_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/**
+ * One person a broadcast selected (migration 046), including the ones it will never send to.
+ *
+ * A `skipped` row with its reason is the evidence that the consent gate ran and refused — the thing
+ * that turns "1,240 selected, 890 sent" from a discrepancy into an explanation.
+ */
+export interface CommerceBroadcastRecipientsTable {
+  id: Generated<string>;
+  org_id: string;
+  broadcast_id: string;
+  contact_id: string;
+  /** Snapshotted from the contact at dispatch — the address actually used on the day. */
+  external_id: string;
+  display_name: ColumnType<string | null, string | null | undefined, string | null>;
+  status: Generated<BroadcastRecipientStatus>;
+  reason: ColumnType<string | null, string | null | undefined, string | null>;
+  provider_message_id: ColumnType<string | null, string | null | undefined, string | null>;
+  message_id: ColumnType<string | null, string | null | undefined, string | null>;
+  sent_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+}
+
+/**
+ * One immutable entry in a contact's consent history (migration 042). Trigger-enforced append-only —
+ * an UPDATE or DELETE raises in the database, not in a repository method someone can forget to call.
+ * Opting out inserts a new row; current state is the newest row per `(contact_id, purpose)`.
+ */
+export interface CommerceContactConsentsTable {
+  id: Generated<string>;
+  org_id: string;
+  contact_id: string;
+  platform: CommercePlatform;
+  purpose: ConsentPurpose;
+  state: ConsentState;
+  source: ConsentSource;
+  /** The proof, verbatim: a `wamid`, a form URL, an ad id, an import filename. */
+  evidence: string;
+  recorded_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  recorded_at: CreatedAt;
+}
+
+/**
+ * Addresses an organization may not message at all (migration 042). Keyed on `external_id` rather
+ * than `contact_id` on purpose: a contact row deleted and re-imported gets a new id, and a block
+ * that followed the row would silently lift itself the next time someone uploaded a list.
+ */
+export interface CommerceSuppressionsTable {
+  id: Generated<string>;
+  org_id: string;
+  platform: CommercePlatform;
+  external_id: string;
+  reason: SuppressionReason;
+  detail: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+}
+
+/**
+ * Per-organization quiet hours and lawful-opt-in attestation (migration 042). A MISSING row is the
+ * default state and means no marketing send is permitted — there is no permissive fallback anywhere
+ * in this feature, because "no policy found, so we sent it" is the outcome it exists to prevent.
+ */
+export interface CommerceMessagingPoliciesTable {
+  org_id: string;
+  /** IANA zone. The organization's declared zone, not the recipient's — see the shared-types model. */
+  timezone: string;
+  /** Postgres `time`, read back as `HH:MM:SS`. Local wall-clock bounds of the no-send window. */
+  quiet_hours_start: string;
+  quiet_hours_end: string;
+  attested_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  attested_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  attestation_text: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/**
+ * One unit of durable background work (migration 043).
+ *
+ * `payload` is `unknown` on read rather than a per-kind union: the queue does not know what its
+ * payloads mean, and typing it otherwise would mean the table grows a shape every time a feature
+ * does. Each handler narrows its own payload with a zod schema at the moment it claims the job —
+ * where a malformed payload becomes that job's `failed`, not the worker's crash.
+ */
+export interface CommerceJobsTable {
+  id: Generated<string>;
+  org_id: string;
+  kind: CommerceJobKind;
+  payload: ColumnType<unknown, string, string>;
+  status: Generated<CommerceJobStatus>;
+  run_after: ColumnType<Date, Date | undefined, Date>;
+  attempts: Generated<number>;
+  max_attempts: Generated<number>;
+  last_error: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The worker's lease. `locked_until` in the past means available, whatever `locked_by` holds. */
+  locked_by: ColumnType<string | null, string | null | undefined, string | null>;
+  locked_until: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  dedupe_key: ColumnType<string | null, string | null | undefined, never>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+  finished_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -768,4 +1166,24 @@ export interface Database {
   runner_pair_codes: RunnerPairCodesTable;
   runner_sessions: RunnerSessionsTable;
   github_app_installations: GithubAppInstallationsTable;
+  // ── Commerce plane (migrations 038–040). Scoped by org_id, never by user_id. ──
+  organizations: OrganizationsTable;
+  org_members: OrgMembersTable;
+  org_invites: OrgInvitesTable;
+  channel_accounts: ChannelAccountsTable;
+  commerce_inbound_messages: CommerceInboundMessagesTable;
+  commerce_active_orgs: CommerceActiveOrgsTable;
+  commerce_contacts: CommerceContactsTable;
+  commerce_tags: CommerceTagsTable;
+  commerce_contact_tags: CommerceContactTagsTable;
+  commerce_segments: CommerceSegmentsTable;
+  commerce_conversations: CommerceConversationsTable;
+  commerce_messages: CommerceMessagesTable;
+  commerce_contact_consents: CommerceContactConsentsTable;
+  commerce_suppressions: CommerceSuppressionsTable;
+  commerce_messaging_policies: CommerceMessagingPoliciesTable;
+  commerce_jobs: CommerceJobsTable;
+  commerce_templates: CommerceTemplatesTable;
+  commerce_broadcasts: CommerceBroadcastsTable;
+  commerce_broadcast_recipients: CommerceBroadcastRecipientsTable;
 }
