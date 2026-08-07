@@ -41,8 +41,16 @@ npm run dev:web             # website on :3000 (login + /activity)
 
 ## Append-only audit log
 
-The `audit_log` table is enforced append-only by a DB trigger that rejects UPDATE/DELETE. In
-production, additionally `REVOKE UPDATE, DELETE ON audit_log FROM <app_role>`.
+The `audit_log` table is enforced append-only by a DB trigger, with exactly one exception: migration
+`047_audit_log_erasure` permits clearing `user_id` (and nothing else) so a user can actually be
+deleted. Before it, `ON DELETE SET NULL` was an UPDATE, the trigger refused every UPDATE, and no user
+who had ever logged in could be removed.
+
+In production, `deploy/audit-log-revoke.sql` adds the DB-privilege half. It hands the table to a
+NOLOGIN role so the app role stops owning it — Postgres does not honour `REVOKE` against an owner,
+which is why the line this README carried for months was never actually runnable. Run it **after**
+migrations; it asserts its own result and is safe to re-run. A future migration touching `audit_log`
+will need ownership handed back first — the recipe is in the file's header.
 
 ## Production
 
