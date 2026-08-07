@@ -18,6 +18,7 @@ import type {
   CommerceSegment,
   CommerceTag,
   ConsentPurpose,
+  OptinLink,
   ConsentSource,
   ConsentState,
   ContactConsent,
@@ -686,4 +687,41 @@ export interface ListCommerceJobsResponse {
   readonly jobs: readonly CommerceJob[];
   /** Every status present even at zero — the number a queue-depth check reads. */
   readonly counts: Readonly<Record<CommerceJobStatus, number>>;
+}
+
+/**
+ * POST /orgs/:orgId/optin-links — mint a click-to-WhatsApp link that collects consent.
+ *
+ * There is deliberately no update request. The link's sentence is what customers agreed to, and it
+ * is printed on things we cannot recall — a menu, a poster, a QR sticker on a box. Editing it would
+ * retroactively change the meaning of every opt-in already gathered under it, so the only two verbs
+ * are create and disable.
+ */
+export interface CreateOptinLinkRequest {
+  /** Which connected number the link opens a chat with. */
+  readonly channelAccountId: string;
+  /** The operator's label for it. Unique within the organization. */
+  readonly name: string;
+  readonly purpose: ConsentPurpose;
+  /**
+   * The sentence the customer sends, in their words — "Yes, send me offers and updates".
+   *
+   * The server appends the token; the caller must not, and cannot usefully try. The phrase should
+   * read as an agreement rather than a greeting, because it IS the evidence: "hi" arriving through a
+   * marketing link proves nothing about what the sender meant.
+   */
+  readonly phrase: string;
+}
+
+export interface CreateOptinLinkResponse {
+  readonly link: OptinLink;
+}
+
+export interface ListOptinLinksResponse {
+  readonly links: readonly OptinLink[];
+}
+
+/** POST /orgs/:orgId/optin-links/:linkId/disable — stop honouring it, keep the consents it gathered. */
+export interface DisableOptinLinkResponse {
+  readonly link: OptinLink;
 }

@@ -239,6 +239,11 @@ class MetaEmbeddedSignupService {
         externalAccountId: wabaId,
         phoneNumberId: number.id,
         displayName: number.display_phone_number ?? waba.name ?? wabaId,
+        // The same value as `displayName` in the common case, and deliberately NOT the fallback
+        // chain. Anything that points AT this number — a `wa.me` opt-in link, a printed QR — needs
+        // digits Meta actually gave us; a WABA name that happens to contain some would open a chat
+        // with a stranger. Null is the honest answer when Meta reported no number.
+        displayPhoneNumber: number.display_phone_number ?? null,
         credentialRef,
         credentialExpiresAt: expiresAt,
         meta: accountMeta,

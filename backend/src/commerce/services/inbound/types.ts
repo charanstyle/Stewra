@@ -5,6 +5,33 @@ import type {
 } from '@stewra/shared-types';
 
 /**
+ * Where a message came from, when the platform said.
+ *
+ * Meta attaches this to the FIRST message of a conversation that began at a click-to-WhatsApp ad or
+ * a Facebook post, and to nothing else — a link a business prints on a receipt produces an ordinary
+ * message with no referral at all. So this is attribution for paid entry points specifically, and the
+ * absence of it says nothing about how an ordinary customer arrived.
+ *
+ * Every field is nullable because Meta populates them per source type: a post carries no `headline`,
+ * and an organic entry point carries no `ctwaClid`. Requiring any of them would mean dropping a real
+ * referral for missing a field that source was never going to send.
+ */
+export interface InboundReferral {
+  /** Meta's word for the entry point — `ad`, `post`. Kept verbatim; not mapped onto an enum of ours. */
+  readonly sourceType: string | null;
+  /** The ad or post id. What an operator matches against their campaign manager. */
+  readonly sourceId: string | null;
+  readonly sourceUrl: string | null;
+  /** The ad's headline — the words the customer was actually shown before they wrote to us. */
+  readonly headline: string | null;
+  /**
+   * Meta's click id, minted at the tap. The join key for the Conversions API, so it is carried even
+   * though nothing reads it yet — it exists only on this one message and cannot be recovered later.
+   */
+  readonly ctwaClid: string | null;
+}
+
+/**
  * One inbound message, flattened out of whatever envelope its platform uses.
  *
  * The point of this shape is that everything downstream — dedup, tenant routing, the inbox, and
@@ -32,6 +59,8 @@ export interface NormalizedInboundMessage {
   readonly text: string | null;
   /** What the platform called the message type (`text`, `image`, `audio`, …), for the placeholder. */
   readonly messageType: string;
+  /** The paid entry point this conversation began at, when the platform reported one. */
+  readonly referral: InboundReferral | null;
   readonly sentAt: Date;
 }
 
