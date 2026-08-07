@@ -7,7 +7,10 @@ import type {
   Suppression,
   SuppressionReason,
 } from '@stewra/shared-types';
+import type { InboundReferral } from './inbound/types.js';
+import { findOptinToken } from './optinLinkService.js';
 import { consentRepository } from '../repositories/consentRepository.js';
+import { optinLinkRepository } from '../repositories/optinLinkRepository.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../utils/errors.js';
 import { logger } from '../../utils/logger.js';
 
@@ -86,6 +89,26 @@ function withinQuietHours(nowMinutes: number, startHhMm: string, endHhMm: string
   return start < end
     ? nowMinutes >= start && nowMinutes < end
     : nowMinutes >= start || nowMinutes < end;
+}
+
+/**
+ * One referral rendered as evidence a human can act on, months later, without a code read.
+ *
+ * The message id leads because it is the part that can be verified independently — everything after
+ * it is Meta's account of where the customer came from, and only the parts Meta actually sent are
+ * included. A blank in a proof field is worse than a shorter proof: it reads as a value that was
+ * lost rather than one that never existed.
+ */
+function describeReferral(providerMessageId: string, referral: InboundReferral): string {
+  const parts: string[] = [];
+  parts.push(`${referral.sourceType ?? 'referral'} entry point`);
+  if (referral.sourceId !== null) parts.push(`id ${referral.sourceId}`);
+  if (referral.headline !== null) parts.push(`"${referral.headline}"`);
+  if (referral.sourceUrl !== null) parts.push(referral.sourceUrl);
+  // Carried verbatim: this is the join key for Meta's Conversions API and it exists on this one
+  // message only. Nothing reads it yet, which is exactly why it has to be stored now.
+  if (referral.ctwaClid !== null) parts.push(`ctwa_clid ${referral.ctwaClid}`);
+  return `${providerMessageId} — ${parts.join(', ')}`;
 }
 
 function assertHhMm(field: string, value: string): void {
@@ -242,6 +265,116 @@ class ConsentService {
       state: consent.state,
     });
     return consent;
+  }
+
+  /**
+   * Record what a customer's ENTRY POINT says about their permission, if it says anything.
+   *
+   * Runs on the inbound path immediately after {@link applyInboundKeyword}, and covers the two ways a
+   * message can carry its own provenance. They are genuinely different mechanisms and are weighed
+   * differently:
+   *
+   *   **An opt-in link** puts a token in the prefilled text, and the customer sends the sentence
+   *   attached to it from their own account. That is an affirmative act by the person themselves, in
+   *   words we can show them again later, and Meta holds a copy. It is recorded at whatever purpose
+   *   the link declares — including `marketing`, because "Yes, send me offers [3F9A…]" arriving from
+   *   the number in question is exactly what marketing consent is supposed to look like. The source
+   *   is `inbound_message`, since the message IS the evidence.
+   *
+   *   **A referral** means Meta says this conversation began at an ad or a post. That is weaker, and
+   *   deliberately recorded as `service` no matter how the ad was worded: tapping "Message us" is
+   *   agreeing to a conversation, not subscribing to a campaign, and an integration that quietly
+   *   promoted ad clicks to marketing consent would build exactly the list the consent regime exists
+   *   to prevent. It grants nothing the 24-hour service window would not already give; what it
+   *   preserves is WHERE the contact came from, including the click id that exists on this one
+   *   message and can never be recovered afterwards.
+   *
+   * Returns the consent row it wrote, or null when the message carried no entry point — which is the
+   * outcome for nearly every message.
+   */
+  async applyEntryPoint(params: {
+    orgId: string;
+    contactId: string;
+    platform: CommercePlatform;
+    externalId: string;
+    body: string;
+    providerMessageId: string;
+    referral: InboundReferral | null;
+    /** True when the same message was an opt-out keyword. See below — it wins. */
+    optedOutJustNow: boolean;
+  }): Promise<ContactConsent | null> {
+    // A message that said "STOP" is not also an opt-in, whatever link it arrived through. This can
+    // happen for real: the phrase is fixed when the link is minted, and a customer who edits the
+    // prefilled text down to "stop" before sending has been unambiguous about which half they meant.
+    if (params.optedOutJustNow) return null;
+
+    const token = findOptinToken(params.body);
+    if (token !== null) {
+      const link = await optinLinkRepository.findActiveByToken(token);
+      // A token belonging to a DIFFERENT organization, in a message sent to this one. Meaningless at
+      // best and forged at worst — someone who saw one business's sticker cannot consent on behalf of
+      // another — so it is refused loudly rather than recorded against either party.
+      if (link !== null && link.orgId !== params.orgId) {
+        logger.warn('commerce: opt-in token belongs to another organization — ignoring', {
+          orgId: params.orgId,
+          providerMessageId: params.providerMessageId,
+        });
+        return null;
+      }
+      if (link !== null) {
+        const consent = await consentRepository.recordConsent({
+          orgId: params.orgId,
+          contactId: params.contactId,
+          platform: params.platform,
+          purpose: link.purpose,
+          state: 'opted_in',
+          source: 'inbound_message',
+          evidence: `${params.providerMessageId} — sent via opt-in link "${link.name}"`,
+          recordedByUserId: null,
+          optinLinkId: link.id,
+        });
+
+        // Someone who previously opted out and has now deliberately sent an opt-in sentence has
+        // changed their mind, and the block has to lift or the consent is decorative. Only an
+        // `opt_out` block, though: a `complaint` or a platform-level block is not this customer's to
+        // undo by sending a phrase, and lifting one would put us back in front of somebody who
+        // escalated to get away.
+        if (link.purpose === 'marketing') {
+          const suppression = await consentRepository.isSuppressed(
+            params.orgId,
+            params.platform,
+            params.externalId,
+          );
+          if (suppression?.reason === 'opt_out') {
+            await consentRepository.lift(params.orgId, params.platform, params.externalId);
+          }
+        }
+
+        logger.info('commerce: opt-in recorded from a link', {
+          orgId: params.orgId,
+          contactId: params.contactId,
+          linkId: link.id,
+          purpose: link.purpose,
+        });
+        return consent;
+      }
+    }
+
+    if (params.referral !== null) {
+      return consentRepository.recordConsent({
+        orgId: params.orgId,
+        contactId: params.contactId,
+        platform: params.platform,
+        // `service`, always. See this method's docblock.
+        purpose: 'service',
+        state: 'opted_in',
+        source: 'ad_click',
+        evidence: describeReferral(params.providerMessageId, params.referral),
+        recordedByUserId: null,
+      });
+    }
+
+    return null;
   }
 
   /** Record consent a member gathered elsewhere — a form, an ad, an import, or their own attestation. */

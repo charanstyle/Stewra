@@ -85,6 +85,8 @@ export type {
   ContactImportSkipReason,
   ContactImport,
   ContactImportRow,
+  OptinLinkStatus,
+  OptinLink,
 } from './models/commerce';
 export {
   COMMERCE_PLATFORMS,
@@ -100,6 +102,7 @@ export {
   COMMERCE_JOB_STATUSES,
   CONTACT_IMPORT_STATUSES,
   CONTACT_IMPORT_SKIP_REASONS,
+  OPTIN_LINK_STATUSES,
   SEGMENT_MATCH_MODES,
   AUDIENCE_BLOCK_REASONS,
   MESSAGE_PRICING_CATEGORIES,
@@ -426,6 +429,10 @@ export type {
   CreateContactImportResponse,
   ListContactImportsResponse,
   GetContactImportResponse,
+  CreateOptinLinkRequest,
+  CreateOptinLinkResponse,
+  ListOptinLinksResponse,
+  DisableOptinLinkResponse,
   GetCommerceContactResponse,
   UpdateCommerceContactRequest,
   UpdateCommerceContactResponse,

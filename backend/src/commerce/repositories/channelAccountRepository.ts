@@ -16,6 +16,12 @@ export interface ChannelAccountRow {
   readonly externalAccountId: string;
   readonly phoneNumberId: string | null;
   readonly displayName: string;
+  /**
+   * The number in E.164, for anything that has to POINT at it rather than label it — a `wa.me` link,
+   * a printed QR. Null when Meta reported none. Deliberately separate from {@link displayName}, which
+   * falls back to the WABA name and then to its id and is therefore not safe to parse digits out of.
+   */
+  readonly displayPhoneNumber: string | null;
   readonly credentialRef: string;
   readonly status: ChannelAccountStatus;
   readonly errorDetail: string | null;
@@ -33,6 +39,7 @@ function toRow(row: Selectable<ChannelAccountsTable>): ChannelAccountRow {
     externalAccountId: row.external_account_id,
     phoneNumberId: row.phone_number_id,
     displayName: row.display_name,
+    displayPhoneNumber: row.display_phone_number,
     credentialRef: row.credential_ref,
     status: row.status,
     errorDetail: row.error_detail,
@@ -128,6 +135,8 @@ class ChannelAccountRepository {
     externalAccountId: string;
     phoneNumberId: string | null;
     displayName: string;
+    /** Meta's `display_phone_number`, or null when it reported none. See {@link ChannelAccountRow}. */
+    displayPhoneNumber: string | null;
     credentialRef: string;
     /** What Meta said about the new credential's lifetime. Null means it reported no expiry. */
     credentialExpiresAt: Date | null;
@@ -152,6 +161,7 @@ class ChannelAccountRepository {
       const values = {
         phone_number_id: params.phoneNumberId,
         display_name: params.displayName,
+        display_phone_number: params.displayPhoneNumber,
         credential_ref: params.credentialRef,
         credential_expires_at: params.credentialExpiresAt,
         meta: JSON.stringify(params.meta),

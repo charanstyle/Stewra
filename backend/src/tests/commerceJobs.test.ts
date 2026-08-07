@@ -71,6 +71,7 @@ async function connectedAccount(orgId: string, expiresAt: Date): Promise<string>
     externalAccountId: `waba-${randomUUID().slice(0, 12)}`,
     phoneNumberId: `pn-${randomUUID().slice(0, 12)}`,
     displayName: 'Jobs Test Number',
+    displayPhoneNumber: null,
     credentialRef,
     credentialExpiresAt: expiresAt,
     meta: {},

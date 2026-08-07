@@ -104,6 +104,8 @@ class ConsentRepository {
     source: ConsentSource;
     evidence: string;
     recordedByUserId: string | null;
+    /** The opt-in link that produced this, when one did. See migration 049 for why it is a column. */
+    optinLinkId?: string | null;
   }): Promise<ContactConsent> {
     const row = await db
       .insertInto('commerce_contact_consents')
@@ -116,6 +118,7 @@ class ConsentRepository {
         source: params.source,
         evidence: params.evidence,
         recorded_by_user_id: params.recordedByUserId,
+        optin_link_id: params.optinLinkId ?? null,
       })
       .returningAll()
       .executeTakeFirstOrThrow();

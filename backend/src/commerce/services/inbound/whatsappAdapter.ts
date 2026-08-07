@@ -44,6 +44,20 @@ const entrySchema = z.object({
                 timestamp: z.string().optional(),
                 type: z.string(),
                 text: z.object({ body: z.string() }).optional(),
+                // Present only on the first message of a conversation that started at a
+                // click-to-WhatsApp ad or a Facebook post. Every field optional because Meta
+                // populates them per source type — a post has no headline, an organic entry point
+                // has no click id — and a referral dropped for a missing field it was never going
+                // to carry is attribution lost permanently: it rides on this message alone.
+                referral: z
+                  .object({
+                    source_type: z.string().optional(),
+                    source_id: z.string().optional(),
+                    source_url: z.string().optional(),
+                    headline: z.string().optional(),
+                    ctwa_clid: z.string().optional(),
+                  })
+                  .optional(),
               }),
             )
             .optional(),
@@ -181,6 +195,16 @@ export const whatsappInboundAdapter: InboundAdapter = {
           // "sent a photo" instead of showing a blank message that reads as a bug.
           text: message.type === 'text' ? message.text?.body ?? null : null,
           messageType: message.type,
+          referral:
+            message.referral === undefined
+              ? null
+              : {
+                  sourceType: message.referral.source_type ?? null,
+                  sourceId: message.referral.source_id ?? null,
+                  sourceUrl: message.referral.source_url ?? null,
+                  headline: message.referral.headline ?? null,
+                  ctwaClid: message.referral.ctwa_clid ?? null,
+                },
           sentAt: parseTimestamp(message.timestamp),
         });
       }

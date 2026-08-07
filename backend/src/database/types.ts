@@ -14,6 +14,7 @@ import type {
   CommercePlatform,
   ConsentPurpose,
   ConsentSource,
+  OptinLinkStatus,
   ConsentState,
   ContactStatus,
   ConversationType,
@@ -818,6 +819,12 @@ export interface ChannelAccountsTable {
   external_account_id: string;
   phone_number_id: ColumnType<string | null, string | null | undefined, string | null>;
   display_name: Generated<string>;
+  /**
+   * The number in E.164, for building a `wa.me` link (migration 049). NULL when Meta reported none —
+   * distinct from `display_name`, which falls back to the WABA name and is therefore a label rather
+   * than an address.
+   */
+  display_phone_number: ColumnType<string | null, string | null | undefined, string | null>;
   /** → vault_secrets.id. Deliberately not a foreign key; see the migration for why. */
   credential_ref: string;
   status: Generated<ChannelAccountStatus>;
@@ -1062,6 +1069,8 @@ export interface CommerceContactConsentsTable {
   /** The proof, verbatim: a `wamid`, a form URL, an ad id, an import filename. */
   evidence: string;
   recorded_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Which opt-in link produced this, when one did (migration 049). NULL for every other source. */
+  optin_link_id: ColumnType<string | null, string | null | undefined, string | null>;
   recorded_at: CreatedAt;
 }
 
@@ -1070,6 +1079,27 @@ export interface CommerceContactConsentsTable {
  * than `contact_id` on purpose: a contact row deleted and re-imported gets a new id, and a block
  * that followed the row would silently lift itself the next time someone uploaded a list.
  */
+/**
+ * Click-to-WhatsApp opt-in links (migration 049). `token` is globally unique because the inbound path
+ * matches it against a message body BEFORE it knows which organization was meant.
+ */
+export interface CommerceOptinLinksTable {
+  id: Generated<string>;
+  org_id: string;
+  channel_account_id: string;
+  name: string;
+  /** The number the link opens, as published. Snapshotted at mint time; see the migration. */
+  phone_e164: string;
+  purpose: ConsentPurpose;
+  /** The whole message the customer sends, token included, stored as it will arrive. */
+  prefill_text: string;
+  token: string;
+  status: Generated<OptinLinkStatus>;
+  created_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+  disabled_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+}
+
 export interface CommerceSuppressionsTable {
   id: Generated<string>;
   org_id: string;
@@ -1224,6 +1254,7 @@ export interface Database {
   commerce_conversations: CommerceConversationsTable;
   commerce_messages: CommerceMessagesTable;
   commerce_contact_consents: CommerceContactConsentsTable;
+  commerce_optin_links: CommerceOptinLinksTable;
   commerce_suppressions: CommerceSuppressionsTable;
   commerce_messaging_policies: CommerceMessagingPoliciesTable;
   commerce_jobs: CommerceJobsTable;
