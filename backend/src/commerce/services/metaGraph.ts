@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 import { config } from '../../config/unifiedConfig.js';
 import { ServiceUnavailableError, ValidationError } from '../../utils/errors.js';
 

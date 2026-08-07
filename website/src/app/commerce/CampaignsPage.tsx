@@ -566,7 +566,10 @@ export default function CampaignsPage(): React.JSX.Element {
                     <div className={styles.row}>
                       {bcVariables.map((value, index) => (
                         <input
-                          // eslint-disable-next-line react/no-array-index-key -- positional by definition
+                          // Positional by definition: these inputs ARE {{1}}..{{n}}, so the index is
+                          // the identity, not a stand-in for one. (No react plugin is configured in
+                          // eslint.config.mjs, so a disable directive for react/no-array-index-key
+                          // is itself an error for naming a rule that does not exist.)
                           key={index}
                           className={styles.input}
                           placeholder={`Value for {{${index + 1}}}`}
