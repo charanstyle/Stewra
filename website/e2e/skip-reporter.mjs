@@ -10,7 +10,7 @@
 // So: every skip is named with its reason, they are grouped by reason so a systemic precondition
 // (one runner not paired → several tests out) reads as one line rather than five, and E2E_MAX_SKIPS
 // turns a budget into an assertion.
-import { required } from './env.mjs';
+import { env, required } from './env.mjs';
 
 /** @implements {import('@playwright/test/reporter').Reporter} */
 export default class SkipReporter {
@@ -60,8 +60,9 @@ export default class SkipReporter {
     }
 
     // Optional budget. Unset means "report, don't enforce" — the census alone is the point, and a
-    // default ceiling nobody chose would just get raised the first time it bit.
-    const budget = process.env['E2E_MAX_SKIPS'];
+    // default ceiling nobody chose would just get raised the first time it bit. Read via the shared
+    // loader so the repo-root .env.e2e can pin it (real env still wins, so CI's value overrides).
+    const budget = env['E2E_MAX_SKIPS'];
     if (budget === undefined) {
       return undefined;
     }
