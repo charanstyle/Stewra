@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
+import { billingController } from '../controllers/billingController.js';
 import { broadcastsController } from '../controllers/broadcastsController.js';
 import { operationsController } from '../controllers/operationsController.js';
 import { spendCapsController } from '../controllers/spendCapsController.js';
@@ -134,5 +135,28 @@ router.get('/spend', requireAuth, verified, requireOrgMember('viewer'), (req, re
 router.get('/jobs', requireAuth, verified, requireOrgMember('viewer'), (req, res) => {
   void operationsController.jobs(req, res);
 });
+
+// --- Billing (read-only on this surface) ------------------------------------------------------
+//
+// `admin`, matching `/costs`: what the org is billed is the owner/admin's business, not the
+// inbox's. Plans and subscriptions are WRITTEN only on `/platform/billing` — never here.
+
+router.get('/billing', requireAuth, verified, requireOrgMember('admin'), (req, res) => {
+  void billingController.orgBilling(req, res);
+});
+
+router.get('/invoices', requireAuth, verified, requireOrgMember('admin'), (req, res) => {
+  void billingController.listInvoices(req, res);
+});
+
+router.get(
+  '/invoices/:invoiceId',
+  requireAuth,
+  verified,
+  requireOrgMember('admin'),
+  (req, res) => {
+    void billingController.getInvoice(req, res);
+  },
+);
 
 export default router;

@@ -2,6 +2,8 @@ import * as Sentry from '@sentry/node';
 import { channelTokenService } from '../services/channelTokenService.js';
 import { commerceWorker } from '../jobs/worker.js';
 import { enqueueTemplateSyncs } from '../jobs/templateSyncHandler.js';
+import { enqueueMessageCostBackfills } from '../jobs/messageCostBackfillHandler.js';
+import { enqueueBillingPeriodCloses } from '../jobs/billingPeriodCloseHandler.js';
 import { config } from '../../config/unifiedConfig.js';
 import { logger } from '../../utils/logger.js';
 
@@ -25,8 +27,10 @@ import { logger } from '../../utils/logger.js';
 
 let tokenTimer: NodeJS.Timeout | null = null;
 let templateTimer: NodeJS.Timeout | null = null;
+let billingTimer: NodeJS.Timeout | null = null;
 let sweeping = false;
 let syncing = false;
+let billing = false;
 
 /**
  * How often credentials are checked. Hourly, and deliberately not an env knob.
@@ -89,6 +93,36 @@ async function templateSync(): Promise<void> {
 }
 
 /**
+ * How often billing self-heals and closes. Hourly, and the cadence carries meaning here too: a
+ * billing period is monthly, but the SWEEP must be hourly because it is also the retry loop — an
+ * open period (unpriced messages holding a draft) is re-attempted every hour until the backfill
+ * has priced the stragglers, and "your invoice issues within the hour of the data completing" is
+ * the promise. The two enqueuers run in one tick, backfill first, so a straggler priced on this
+ * pass can close its period on this pass's own close job rather than waiting another hour.
+ */
+const BILLING_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+
+/** Queue the cost backfills, then the period closes. Guarded like the other sweeps. */
+async function billingSweep(): Promise<void> {
+  if (billing) {
+    logger.info('commerce scheduler: previous billing sweep still running, skipping');
+    return;
+  }
+  billing = true;
+  try {
+    await enqueueMessageCostBackfills();
+    await enqueueBillingPeriodCloses();
+  } catch (error) {
+    Sentry.captureException(error);
+    logger.error('commerce scheduler: billing sweep failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    billing = false;
+  }
+}
+
+/**
  * Start the commerce timers. Returns a stop function for graceful shutdown.
  *
  * Tied to `metaCommerce.enabled` and nothing else. There is no credential to renew when the
@@ -124,6 +158,13 @@ export function startCommerceScheduler(): () => void {
   }, TEMPLATE_SYNC_INTERVAL_MS);
   templateTimer.unref();
 
+  logger.info('commerce scheduler: billing sweep enabled');
+  void billingSweep();
+  billingTimer = setInterval(() => {
+    void billingSweep();
+  }, BILLING_SWEEP_INTERVAL_MS);
+  billingTimer.unref();
+
   return () => {
     if (tokenTimer !== null) {
       clearInterval(tokenTimer);
@@ -132,6 +173,10 @@ export function startCommerceScheduler(): () => void {
     if (templateTimer !== null) {
       clearInterval(templateTimer);
       templateTimer = null;
+    }
+    if (billingTimer !== null) {
+      clearInterval(billingTimer);
+      billingTimer = null;
     }
     stopWorker();
   };

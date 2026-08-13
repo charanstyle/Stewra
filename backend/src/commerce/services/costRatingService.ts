@@ -122,6 +122,75 @@ class CostRatingService {
     });
   }
 
+  /**
+   * Retry an `unrated_*` message against today's cards, replacing the row ONLY when the retry
+   * would actually price it.
+   *
+   * The condition is the whole design. An unconditional rewrite would stamp a fresh `priced_at` on
+   * a still-unpriceable row every hourly pass — the discrepancy would migrate from period to
+   * period, each one closing behind it, and "a period with unrated messages stays open" would be
+   * quietly false. A row that stays unpriceable therefore stays put, holding its period open until
+   * the operator loads the missing rate; the moment that rate exists, this prices the message into
+   * the CURRENT period (same late-receipt policy as everything else) and the stuck period closes
+   * on the next sweep.
+   */
+  async reRateMessage(params: {
+    orgId: string;
+    messageId: string;
+    conversationId: string;
+    billable: boolean;
+    pricingCategory: MessagePricingCategory | null;
+    providerConversationId: string | null;
+    billingCurrency: string | null;
+  }): Promise<'re_rated' | 'still_unrated'> {
+    // The same ladder as rateMessage, climbed WITHOUT writing: any rung that fails means the
+    // outcome would be another unrated row, and the existing one is already the truth.
+    if (!params.billable) return 'still_unrated'; // unreachable for unrated rows; belt only.
+    if (params.pricingCategory === null || params.billingCurrency === null) return 'still_unrated';
+    const callingCode = await this.recipientCallingCode(params.orgId, params.conversationId);
+    if (callingCode === null) return 'still_unrated';
+    const rate = await rateCardRepository.resolveRate({
+      currency: params.billingCurrency,
+      at: new Date(),
+      countryCallingCode: callingCode,
+      pricingCategory: params.pricingCategory,
+    });
+    if (rate === null) return 'still_unrated';
+
+    const rated: CostOutcome = {
+      orgId: params.orgId,
+      messageId: params.messageId,
+      state: 'rated',
+      billable: true,
+      currency: params.billingCurrency,
+      pricingCategory: params.pricingCategory,
+      countryCallingCode: callingCode,
+      providerConversationId: params.providerConversationId,
+      rateCardId: rate.rateCardId,
+      unit: rate.unit,
+      rateAmountMicros: rate.amountMicros,
+      amountMicros: rate.amountMicros,
+    };
+    const result = await messageCostRepository.replaceUnratedOutcome(rated);
+    if (result === 'conversation_already_charged') {
+      await this.write({ ...rated, state: 'rated_zero_conversation_dup', amountMicros: 0n });
+      await spendCapService.settleFromRating({
+        orgId: params.orgId,
+        messageId: params.messageId,
+        amountMicros: 0n,
+        currency: params.billingCurrency,
+      });
+      return 're_rated';
+    }
+    await spendCapService.settleFromRating({
+      orgId: params.orgId,
+      messageId: params.messageId,
+      amountMicros: rate.amountMicros,
+      currency: params.billingCurrency,
+    });
+    return 're_rated';
+  }
+
   private async write(outcome: CostOutcome): Promise<void> {
     const result = await messageCostRepository.insertOutcome(outcome);
     if (result === 'conversation_already_charged') {

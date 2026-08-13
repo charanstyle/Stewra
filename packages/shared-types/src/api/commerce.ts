@@ -12,10 +12,15 @@ import type {
   CommerceContact,
   CommerceConversationSummary,
   CommerceMessageRate,
+  CommerceInvoice,
+  CommerceInvoiceLine,
   CommerceMoneySummary,
+  CommercePlan,
+  CommercePlanVersion,
   CommerceRateCard,
   CommerceSpendCap,
   CommerceSpendUsage,
+  CommerceSubscriptionView,
   MessagePricingCategory,
   RateUnit,
   CommerceCostSummary,
@@ -844,4 +849,66 @@ export interface ListSpendCapsResponse {
  */
 export interface GetOrgSpendResponse {
   readonly usage: readonly CommerceSpendUsage[];
+}
+
+/**
+ * PUT /platform/billing/plans — create a plan, or append a new version to an existing one (matched
+ * by name). Install-admin only. A PUT because the name is the identity and the call is "make the
+ * catalog say this"; the versions underneath are append-only, so no earlier subscriber's price
+ * moves.
+ */
+export interface UpsertPlanRequest {
+  readonly name: string;
+  /** The flat monthly platform fee, micros as a decimal string. "0" is a legal fee. */
+  readonly platformFeeMicros: string;
+  /** ISO 4217, uppercase — the currency the fee is invoiced in. */
+  readonly currency: string;
+  /** Why this version exists — the agreement or decision it transcribes. Required. */
+  readonly note: string;
+}
+
+export interface UpsertPlanResponse {
+  readonly plan: CommercePlan;
+  readonly version: CommercePlanVersion;
+}
+
+/** GET /platform/billing/plans — the whole catalog, every version of every plan. */
+export interface ListPlansResponse {
+  readonly plans: readonly {
+    readonly plan: CommercePlan;
+    readonly versions: readonly CommercePlanVersion[];
+  }[];
+}
+
+/**
+ * PUT /platform/billing/subscriptions — put an org on a plan (its LATEST version, frozen from that
+ * moment), or take it off every plan with `planId: null`. Install-admin only: a subscription is
+ * what decides the platform-fee line on the org's invoices.
+ */
+export interface SetSubscriptionRequest {
+  readonly orgId: string;
+  /** The plan to subscribe to, or null to end the current subscription. */
+  readonly planId: string | null;
+  /** Why — "signed order form 2026-08", "churned". Required. */
+  readonly note: string;
+}
+
+export interface SetSubscriptionResponse {
+  readonly subscription: CommerceSubscriptionView | null;
+}
+
+/** GET /orgs/:orgId/billing — the org's own view of what plan it is on, if any. */
+export interface GetOrgBillingResponse {
+  readonly subscription: CommerceSubscriptionView | null;
+}
+
+/** GET /orgs/:orgId/invoices — newest period first, every status. */
+export interface ListInvoicesResponse {
+  readonly invoices: readonly CommerceInvoice[];
+}
+
+/** GET /orgs/:orgId/invoices/:invoiceId — one invoice and its lines. */
+export interface GetInvoiceResponse {
+  readonly invoice: CommerceInvoice;
+  readonly lines: readonly CommerceInvoiceLine[];
 }

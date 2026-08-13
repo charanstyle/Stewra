@@ -132,6 +132,159 @@ class MessageCostRepository {
   hasUnrated(summary: Omit<CommerceMoneySummary, 'complete'>): boolean {
     return UNRATED_REASONS.some((reason) => summary.unratedBillable[reason] > 0);
   }
+
+  /**
+   * Messages whose receipt carried pricing (`billable` is known) but which have NO cost row — the
+   * rater erred mid-flight, or the process died between the receipt and the rating. The backfill
+   * feeds these straight back into `rateMessage`, joined here with everything it needs so the
+   * handler runs one query per batch, not one per message.
+   */
+  async receiptsAwaitingRating(params: {
+    orgId: string;
+    limit: number;
+  }): Promise<
+    {
+      messageId: string;
+      conversationId: string;
+      billable: boolean;
+      pricingCategory: MessagePricingCategory | null;
+      providerConversationId: string | null;
+      billingCurrency: string | null;
+    }[]
+  > {
+    const rows = await db
+      .selectFrom('commerce_messages')
+      .innerJoin(
+        'commerce_conversations',
+        'commerce_conversations.id',
+        'commerce_messages.conversation_id',
+      )
+      .innerJoin(
+        'channel_accounts',
+        'channel_accounts.id',
+        'commerce_conversations.channel_account_id',
+      )
+      .select([
+        'commerce_messages.id as message_id',
+        'commerce_messages.conversation_id as conversation_id',
+        'commerce_messages.billable as billable',
+        'commerce_messages.pricing_category as pricing_category',
+        'commerce_messages.provider_conversation_id as provider_conversation_id',
+        'channel_accounts.billing_currency as billing_currency',
+      ])
+      .where('commerce_messages.org_id', '=', params.orgId)
+      .where('commerce_messages.billable', 'is not', null)
+      .where(({ not, exists, selectFrom }) =>
+        not(
+          exists(
+            selectFrom('commerce_message_costs')
+              .select('commerce_message_costs.id')
+              .whereRef('commerce_message_costs.message_id', '=', 'commerce_messages.id'),
+          ),
+        ),
+      )
+      .orderBy('commerce_messages.created_at')
+      .limit(params.limit)
+      .execute();
+    return rows.map((row) => ({
+      messageId: row.message_id,
+      conversationId: row.conversation_id,
+      // The `is not null` predicate guarantees this; the type still says nullable.
+      billable: row.billable === true,
+      pricingCategory: row.pricing_category,
+      providerConversationId: row.provider_conversation_id,
+      billingCurrency: row.billing_currency,
+    }));
+  }
+
+  /**
+   * Cost rows the rater refused (`unrated_*`), with the same rating inputs re-joined. The backfill
+   * retries these against today's cards; a row that is STILL unpriceable is left exactly where it
+   * is — see `replaceUnratedOutcome` for why the replacement is conditional.
+   */
+  async unratedOutcomes(params: {
+    orgId: string;
+    limit: number;
+  }): Promise<
+    {
+      messageId: string;
+      conversationId: string;
+      billable: boolean;
+      pricingCategory: MessagePricingCategory | null;
+      providerConversationId: string | null;
+      billingCurrency: string | null;
+    }[]
+  > {
+    const rows = await db
+      .selectFrom('commerce_message_costs')
+      .innerJoin('commerce_messages', 'commerce_messages.id', 'commerce_message_costs.message_id')
+      .innerJoin(
+        'commerce_conversations',
+        'commerce_conversations.id',
+        'commerce_messages.conversation_id',
+      )
+      .innerJoin(
+        'channel_accounts',
+        'channel_accounts.id',
+        'commerce_conversations.channel_account_id',
+      )
+      .select([
+        'commerce_messages.id as message_id',
+        'commerce_messages.conversation_id as conversation_id',
+        'commerce_messages.billable as billable',
+        'commerce_messages.pricing_category as pricing_category',
+        'commerce_messages.provider_conversation_id as provider_conversation_id',
+        'channel_accounts.billing_currency as billing_currency',
+      ])
+      .where('commerce_message_costs.org_id', '=', params.orgId)
+      .where('commerce_message_costs.state', 'in', UNRATED_REASONS)
+      .orderBy('commerce_message_costs.priced_at')
+      .limit(params.limit)
+      .execute();
+    return rows.map((row) => ({
+      messageId: row.message_id,
+      conversationId: row.conversation_id,
+      billable: row.billable === true,
+      pricingCategory: row.pricing_category,
+      providerConversationId: row.provider_conversation_id,
+      billingCurrency: row.billing_currency,
+    }));
+  }
+
+  /**
+   * Swap one message's `unrated_*` row for a priced outcome the backfill just computed. The delete
+   * is state-guarded: if a concurrent pass already replaced it, the delete removes nothing and the
+   * insert lands on the message_id index as `already_rated` — never two rows, never a lost amount.
+   */
+  async replaceUnratedOutcome(
+    outcome: CostOutcome,
+  ): Promise<'written' | 'already_rated' | 'conversation_already_charged'> {
+    await db
+      .deleteFrom('commerce_message_costs')
+      .where('message_id', '=', outcome.messageId)
+      .where('state', 'in', UNRATED_REASONS)
+      .execute();
+    return this.insertOutcome(outcome);
+  }
+
+  /** Which orgs have unrated cost rows — retried hourly against whatever cards are live now. */
+  async orgsWithUnratedOutcomes(): Promise<string[]> {
+    const rows = await sql<{ org_id: string }>`
+      SELECT DISTINCT org_id FROM commerce_message_costs WHERE state LIKE 'unrated_%'
+    `.execute(db);
+    return rows.rows.map((row) => row.org_id);
+  }
+
+  /** Which orgs have receipts awaiting rating — the backfill sweep's candidate list. */
+  async orgsWithReceiptsAwaitingRating(): Promise<string[]> {
+    const rows = await sql<{ org_id: string }>`
+      SELECT DISTINCT m.org_id
+      FROM commerce_messages m
+      WHERE m.billable IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM commerce_message_costs c WHERE c.message_id = m.id)
+    `.execute(db);
+    return rows.rows.map((row) => row.org_id);
+  }
 }
 
 export const messageCostRepository = new MessageCostRepository();
