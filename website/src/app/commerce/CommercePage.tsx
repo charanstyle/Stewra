@@ -6,6 +6,7 @@ import type {
   CommerceConversationSummary,
   CommerceMessage,
   EmbeddedSignupConfig,
+  MessageTemplate,
   OrgMembership,
 } from '@stewra/shared-types';
 import { roleMeetsMinimum } from '@stewra/shared-types';
@@ -92,12 +93,28 @@ export default function CommercePage(): React.JSX.Element {
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
 
+  const [templates, setTemplates] = useState<ReadonlyArray<MessageTemplate>>([]);
+  const [templateId, setTemplateId] = useState('');
+  const [templateVars, setTemplateVars] = useState<ReadonlyArray<string>>([]);
+  const [sendingTemplate, setSendingTemplate] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const role = memberships.find((m) => m.org.id === orgId)?.role ?? null;
   const openThread = conversations.find((c) => c.id === openThreadId) ?? null;
   const replyWindow = openThread === null ? null : windowRemaining(openThread.serviceWindowExpiresAt);
+
+  // Only templates that can actually go into THIS thread: approved, and belonging to the same
+  // WhatsApp number the conversation runs on — the server refuses a mismatch, so offering one
+  // here would only manufacture an error.
+  const sendableTemplates =
+    openThread === null
+      ? []
+      : templates.filter(
+          (t) => t.status === 'approved' && t.channelAccountId === openThread.channelAccountId,
+        );
+  const selectedThreadTemplate = sendableTemplates.find((t) => t.id === templateId) ?? null;
 
   const loadOrgs = useCallback(async (): Promise<void> => {
     try {
@@ -119,13 +136,15 @@ export default function CommercePage(): React.JSX.Element {
 
   const loadOrgData = useCallback(async (id: string): Promise<void> => {
     try {
-      const [channelsRes, conversationsRes] = await Promise.all([
+      const [channelsRes, conversationsRes, templatesRes] = await Promise.all([
         api.listChannelAccounts(id),
         api.listCommerceConversations(id, { limit: 30 }),
+        api.listMessageTemplates(id),
       ]);
       setAccounts(channelsRes.accounts);
       setSignup(channelsRes.signup);
       setConversations(conversationsRes.conversations);
+      setTemplates(templatesRes.templates);
     } catch (err) {
       setError(describeError(err));
     }
@@ -226,6 +245,31 @@ export default function CommercePage(): React.JSX.Element {
     },
     [orgId],
   );
+
+  // Keep the variable inputs in lockstep with the chosen template's declared count.
+  useEffect(() => {
+    const count = selectedThreadTemplate?.variableCount ?? 0;
+    setTemplateVars((current) => Array.from({ length: count }, (_, i) => current[i] ?? ''));
+  }, [selectedThreadTemplate?.variableCount]);
+
+  const sendTemplateMessage = useCallback(async (): Promise<void> => {
+    if (orgId === null || openThreadId === null || templateId === '') return;
+    setError(null);
+    setSendingTemplate(true);
+    try {
+      const res = await api.sendConversationTemplate(orgId, openThreadId, {
+        templateId,
+        variables: templateVars,
+      });
+      setMessages((current) => [...current, res.message]);
+      setTemplateId('');
+      setTemplateVars([]);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setSendingTemplate(false);
+    }
+  }, [orgId, openThreadId, templateId, templateVars]);
 
   const sendReply = useCallback(async (): Promise<void> => {
     if (orgId === null || openThreadId === null) return;
@@ -487,7 +531,10 @@ export default function CommercePage(): React.JSX.Element {
                         // nobody received.
                         <p className={styles.muted}>
                           The 24-hour reply window has closed. Only an approved template message can
-                          reach this customer now.
+                          reach this customer now
+                          {sendableTemplates.length === 0
+                            ? ' — and this number has none approved yet. Create one on Campaigns.'
+                            : ' — pick one below.'}
                         </p>
                       ) : (
                         <div className={styles.row}>
@@ -511,6 +558,67 @@ export default function CommercePage(): React.JSX.Element {
                             {sending ? 'Sending…' : 'Send'}
                           </button>
                         </div>
+                      )}
+
+                      {sendableTemplates.length > 0 && (
+                        <>
+                          <div className={styles.row}>
+                            <select
+                              className={styles.select}
+                              value={templateId}
+                              onChange={(e) => setTemplateId(e.target.value)}
+                            >
+                              <option value="">Send a template…</option>
+                              {sendableTemplates.map((template) => (
+                                <option key={template.id} value={template.id}>
+                                  {template.name} ({template.language})
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              className={styles.primary}
+                              disabled={
+                                sendingTemplate ||
+                                templateId === '' ||
+                                templateVars.some((v) => v.trim() === '') ||
+                                role === null ||
+                                !roleMeetsMinimum(role, 'agent')
+                              }
+                              onClick={() => void sendTemplateMessage()}
+                            >
+                              {sendingTemplate ? 'Sending…' : 'Send template'}
+                            </button>
+                          </div>
+                          {selectedThreadTemplate !== null &&
+                            selectedThreadTemplate.variableCount > 0 && (
+                              <div className={styles.row}>
+                                {templateVars.map((value, index) => (
+                                  <input
+                                    // Positional by definition: these inputs ARE {{1}}..{{n}}, so the
+                                    // index is the identity, not a stand-in for one.
+                                    key={index}
+                                    className={styles.input}
+                                    placeholder={`Value for {{${index + 1}}}`}
+                                    value={value}
+                                    onChange={(e) =>
+                                      setTemplateVars((current) =>
+                                        current.map((v, i) => (i === index ? e.target.value : v)),
+                                      )
+                                    }
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          {selectedThreadTemplate !== null && (
+                            <p className={styles.muted}>
+                              {selectedThreadTemplate.category === 'utility' ||
+                              selectedThreadTemplate.category === 'authentication'
+                                ? 'Transactional template — needs no marketing consent.'
+                                : 'Marketing template — this contact must have marketing consent on file.'}
+                            </p>
+                          )}
+                        </>
                       )}
                     </>
                   )}

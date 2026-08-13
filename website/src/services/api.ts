@@ -104,6 +104,8 @@ import type {
   ListCommerceMessagesResponse,
   CreateCommerceMessageRequest,
   CreateCommerceMessageResponse,
+  SendConversationTemplateRequest,
+  SendConversationTemplateResponse,
   ListCommerceContactsRequest,
   ListCommerceContactsResponse,
   CreateCommerceContactRequest,
@@ -611,6 +613,16 @@ export const api = {
     body: CreateCommerceMessageRequest,
   ): Promise<CreateCommerceMessageResponse> =>
     request(`/orgs/${orgId}/conversations/${conversationId}/messages`, { method: 'POST', body }),
+
+  sendConversationTemplate: (
+    orgId: string,
+    conversationId: string,
+    body: SendConversationTemplateRequest,
+  ): Promise<SendConversationTemplateResponse> =>
+    request(`/orgs/${orgId}/conversations/${conversationId}/template-messages`, {
+      method: 'POST',
+      body,
+    }),
 
   // --- Commerce audience — contacts, tags, segments ---
 

@@ -408,6 +408,8 @@ export type {
   ListCommerceMessagesResponse,
   CreateCommerceMessageRequest,
   CreateCommerceMessageResponse,
+  SendConversationTemplateRequest,
+  SendConversationTemplateResponse,
   ListContactConsentsResponse,
   RecordContactConsentRequest,
   RecordContactConsentResponse,
