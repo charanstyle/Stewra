@@ -4,8 +4,11 @@ dist/
 .env
 .env.*
 !.env.example
-# Shared E2E QA credentials for both suites — real creds gitignored, template tracked.
+# Shared E2E QA credentials for both suites. Tracked by explicit owner decision (2026-08-13)
+# so they cannot be lost: they guard only the dedicated QA accounts. Production secrets
+# (E2E_DATABASE_URL etc.) must be passed as env vars, never written to this file.
 !.env.e2e.example
+!.env.e2e
 # Backend test-suite credentials (real Postgres + Redis) — real creds gitignored, template tracked.
 !.env.test.example
 # Production runtime secrets that live beside the deployed app on the host — NEVER commit these.

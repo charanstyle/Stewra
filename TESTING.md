@@ -20,12 +20,12 @@ backed by fast unit suites underneath.
 
 ## One shared credentials file
 
-Both UI suites read a single untracked **`.env.e2e` at the repo root** (template: `.env.e2e.example`).
+Both UI suites read a single **`.env.e2e` at the repo root** (template: `.env.e2e.example`; tracked in git by owner decision 2026-08-13 — QA credentials only, never production secrets).
 Copy it once and fill in the two QA users; real environment variables override the file, so CI can
 inject the same names without a file.
 
 ```bash
-cp .env.e2e.example .env.e2e     # gitignored — never commit real creds
+cp .env.e2e.example .env.e2e     # tracked: QA creds only — production secrets stay in env vars
 # fill: E2E_WEB_URL, E2E_USER_A_EMAIL/PASSWORD, E2E_USER_B_EMAIL/PASSWORD, E2E_CONTACT_NAME
 ```
 
