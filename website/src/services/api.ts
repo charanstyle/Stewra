@@ -138,6 +138,8 @@ import type {
   DeleteCommerceSegmentResponse,
   PreviewSegmentRequest,
   PreviewSegmentResponse,
+  ListSegmentMembersRequest,
+  ListSegmentMembersResponse,
   ListContactConsentsResponse,
   RecordContactConsentRequest,
   RecordContactConsentResponse,
@@ -754,6 +756,20 @@ export const api = {
     segmentId: string,
   ): Promise<DeleteCommerceSegmentResponse> =>
     request(`/orgs/${orgId}/segments/${segmentId}`, { method: 'DELETE' }),
+
+  /** The saved segment's audience, page by page. `sendableOnly` drops who marketing cannot reach. */
+  listSegmentMembers: (
+    orgId: string,
+    segmentId: string,
+    params: ListSegmentMembersRequest = {},
+  ): Promise<ListSegmentMembersResponse> => {
+    const query = new URLSearchParams();
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    if (params.sendableOnly !== undefined) query.set('sendableOnly', String(params.sendableOnly));
+    const suffix = query.toString();
+    return request(`/orgs/${orgId}/segments/${segmentId}/members${suffix ? `?${suffix}` : ''}`);
+  },
 
   /** What a rule would reach RIGHT NOW — totals, per-reason blocks, and a sample. */
   previewCommerceSegment: (

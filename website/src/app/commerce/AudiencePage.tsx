@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { Link } from 'react-router';
 import type {
+  AudienceMember,
   AudiencePreview,
   ChannelAccount,
   CommerceContactWithTags,
@@ -84,6 +85,11 @@ export default function AudiencePage(): React.JSX.Element {
   const [consents, setConsents] = useState<ReadonlyArray<ContactConsent>>([]);
   const [consentEvidence, setConsentEvidence] = useState('');
   const [newTag, setNewTag] = useState('');
+  // The opened contact in full — the list rows carry no attributes, so the panel fetches its own.
+  const [contactDetail, setContactDetail] = useState<CommerceContactWithTags | null>(null);
+  const [editContactName, setEditContactName] = useState('');
+  const [attrKey, setAttrKey] = useState('');
+  const [attrValue, setAttrValue] = useState('');
 
   const [newPhone, setNewPhone] = useState('');
   const [newName, setNewName] = useState('');
@@ -115,6 +121,12 @@ export default function AudiencePage(): React.JSX.Element {
   const [ruleTag, setRuleTag] = useState('');
   const [preview, setPreview] = useState<AudiencePreview | null>(null);
   const [previewedSegmentId, setPreviewedSegmentId] = useState<string | null>(null);
+  const [editSegmentId, setEditSegmentId] = useState<string | null>(null);
+  const [editSegmentName, setEditSegmentName] = useState('');
+  /** '' means "keep the rule the segment already has" — see startEditSegment. */
+  const [editRuleTag, setEditRuleTag] = useState('');
+  const [membersSegmentId, setMembersSegmentId] = useState<string | null>(null);
+  const [segmentMembers, setSegmentMembers] = useState<ReadonlyArray<AudienceMember>>([]);
 
   const [suppressions, setSuppressions] = useState<ReadonlyArray<Suppression>>([]);
   const [suppressNumber, setSuppressNumber] = useState('');
@@ -356,14 +368,84 @@ export default function AudiencePage(): React.JSX.Element {
       setError(null);
       setOpenContactId(contactId);
       setConsents([]);
+      setContactDetail(null);
+      setAttrKey('');
+      setAttrValue('');
       try {
-        const res = await api.listContactConsents(orgId, contactId);
-        setConsents(res.consents);
+        const [consentsRes, detailRes] = await Promise.all([
+          api.listContactConsents(orgId, contactId),
+          api.getCommerceContact(orgId, contactId),
+        ]);
+        setConsents(consentsRes.consents);
+        setContactDetail(detailRes.contact);
+        setEditContactName(detailRes.contact.displayName ?? '');
       } catch (err) {
         setError(describeError(err));
       }
     },
     [orgId, openContactId],
+  );
+
+  /** Put an updated contact everywhere it is already on screen: the detail panel and the list row. */
+  const applyContactUpdate = useCallback((contact: CommerceContactWithTags): void => {
+    setContactDetail(contact);
+    setEditContactName(contact.displayName ?? '');
+    setContacts((current) => current.map((c) => (c.id === contact.id ? contact : c)));
+  }, []);
+
+  const saveContactName = useCallback(
+    async (contactId: string): Promise<void> => {
+      if (orgId === null) return;
+      setError(null);
+      try {
+        const trimmed = editContactName.trim();
+        const res = await api.updateCommerceContact(orgId, contactId, {
+          displayName: trimmed === '' ? null : trimmed,
+        });
+        applyContactUpdate(res.contact);
+        setNotice('Name saved.');
+      } catch (err) {
+        setError(describeError(err));
+      }
+    },
+    [orgId, editContactName, applyContactUpdate],
+  );
+
+  /**
+   * Set one attribute. The PATCH merges — the request carries only the key being written, so two
+   * operators editing different fields of the same contact cannot erase each other's work.
+   */
+  const saveAttribute = useCallback(
+    async (contactId: string): Promise<void> => {
+      if (orgId === null || attrKey.trim() === '') return;
+      setError(null);
+      try {
+        const res = await api.updateCommerceContact(orgId, contactId, {
+          attributes: { [attrKey.trim()]: attrValue },
+        });
+        applyContactUpdate(res.contact);
+        setAttrKey('');
+        setAttrValue('');
+      } catch (err) {
+        setError(describeError(err));
+      }
+    },
+    [orgId, attrKey, attrValue, applyContactUpdate],
+  );
+
+  const removeAttribute = useCallback(
+    async (contactId: string, key: string): Promise<void> => {
+      if (orgId === null) return;
+      setError(null);
+      try {
+        // Null deletes the key — the merge semantics' way of saying "remove", not "set to nothing".
+        const res = await api.updateCommerceContact(orgId, contactId, { attributes: { [key]: null } });
+        applyContactUpdate(res.contact);
+      } catch (err) {
+        setError(describeError(err));
+      }
+    },
+    [orgId, applyContactUpdate],
   );
 
   const recordConsent = useCallback(
@@ -484,6 +566,70 @@ export default function AudiencePage(): React.JSX.Element {
       }
     },
     [orgId],
+  );
+
+  /**
+   * Open the edit form prefilled from the segment. The tag select starts on the current rule only
+   * when the definition is exactly the one shape this page writes (match-all, one has-tag rule);
+   * anything richer — built by import tooling or a future rule editor — prefills to "keep the
+   * current rule", so saving a rename cannot silently flatten a definition this form cannot render.
+   */
+  const startEditSegment = useCallback((segment: CommerceSegment): void => {
+    setEditSegmentId(segment.id);
+    setEditSegmentName(segment.name);
+    const only = segment.definition.rules.length === 1 ? segment.definition.rules[0] : undefined;
+    setEditRuleTag(
+      segment.definition.match === 'all' && only !== undefined && only.type === 'tag' && only.op === 'has'
+        ? only.tag
+        : '',
+    );
+  }, []);
+
+  const saveSegment = useCallback(
+    async (segment: CommerceSegment): Promise<void> => {
+      if (orgId === null || editSegmentName.trim() === '') return;
+      setError(null);
+      try {
+        const definition: SegmentDefinition =
+          editRuleTag === ''
+            ? segment.definition
+            : { match: 'all', rules: [{ type: 'tag', op: 'has', tag: editRuleTag }] };
+        await api.updateCommerceSegment(orgId, segment.id, {
+          name: editSegmentName.trim(),
+          description: segment.description,
+          definition,
+        });
+        setEditSegmentId(null);
+        // The rule may have changed; a preview computed for the old rule must not survive it.
+        if (previewedSegmentId === segment.id) setPreview(null);
+        if (membersSegmentId === segment.id) setMembersSegmentId(null);
+        setNotice('Segment saved. Who it reaches is decided when a campaign dispatches.');
+        await loadAll(orgId);
+      } catch (err) {
+        setError(describeError(err));
+      }
+    },
+    [orgId, editSegmentName, editRuleTag, previewedSegmentId, membersSegmentId, loadAll],
+  );
+
+  const showSegmentMembers = useCallback(
+    async (segmentId: string): Promise<void> => {
+      if (orgId === null) return;
+      if (membersSegmentId === segmentId) {
+        setMembersSegmentId(null);
+        return;
+      }
+      setError(null);
+      setMembersSegmentId(segmentId);
+      setSegmentMembers([]);
+      try {
+        const res = await api.listSegmentMembers(orgId, segmentId, { limit: 50 });
+        setSegmentMembers(res.members);
+      } catch (err) {
+        setError(describeError(err));
+      }
+    },
+    [orgId, membersSegmentId],
   );
 
   const deleteSegment = useCallback(
@@ -978,6 +1124,79 @@ export default function AudiencePage(): React.JSX.Element {
                               );
                             })}
                           </div>
+                          {isAdmin && contactDetail !== null && contactDetail.id === contact.id && (
+                            <div className={styles.row}>
+                              <input
+                                className={styles.input}
+                                placeholder="Name shown in the inbox"
+                                value={editContactName}
+                                onChange={(e) => setEditContactName(e.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className={styles.ghost}
+                                onClick={() => void saveContactName(contact.id)}
+                              >
+                                Save name
+                              </button>
+                            </div>
+                          )}
+                          {/* The client's own fields — exactly what segment rules compare against,
+                              which is why they are editable here and not just visible. */}
+                          {contactDetail !== null && contactDetail.id === contact.id && (
+                            <div className={styles.subsection}>
+                              <h3 className={styles.subTitle}>Attributes</h3>
+                              {Object.entries(contactDetail.attributes).length === 0 ? (
+                                <p className={styles.muted}>
+                                  None yet. Attributes are the fields segments can target — plan,
+                                  city, last order.
+                                </p>
+                              ) : (
+                                <ul className={styles.list}>
+                                  {Object.entries(contactDetail.attributes).map(([key, value]) => (
+                                    <li key={key} className={styles.listRow}>
+                                      <span>
+                                        <code>{key}</code>: {value}
+                                      </span>
+                                      {isAdmin && (
+                                        <button
+                                          type="button"
+                                          className={styles.ghost}
+                                          onClick={() => void removeAttribute(contact.id, key)}
+                                        >
+                                          Remove
+                                        </button>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                              {isAdmin && (
+                                <div className={styles.row}>
+                                  <input
+                                    className={styles.input}
+                                    placeholder="Field, e.g. city"
+                                    value={attrKey}
+                                    onChange={(e) => setAttrKey(e.target.value)}
+                                  />
+                                  <input
+                                    className={styles.input}
+                                    placeholder="Value, e.g. Lisbon"
+                                    value={attrValue}
+                                    onChange={(e) => setAttrValue(e.target.value)}
+                                  />
+                                  <button
+                                    type="button"
+                                    className={styles.ghost}
+                                    disabled={attrKey.trim() === ''}
+                                    onClick={() => void saveAttribute(contact.id)}
+                                  >
+                                    Set
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {consents.length === 0 ? (
                             <p className={styles.muted}>
                               No consent on file. Without a recorded marketing opt-in, campaigns skip
@@ -1033,39 +1252,116 @@ export default function AudiencePage(): React.JSX.Element {
               {segments.length > 0 && (
                 <ul className={styles.list}>
                   {segments.map((segment) => (
-                    <li key={segment.id} className={styles.listRow}>
-                      <span>
-                        {segment.name}
-                        {previewedSegmentId === segment.id && preview !== null && (
-                          <span className={styles.muted}>
-                            {' '}
-                            — {preview.total} selected, {preview.sendable} reachable
-                            {preview.orgBlockedReason !== null &&
-                              ' (all blocked until the sending policy above is completed)'}
-                            {AUDIENCE_BLOCK_REASONS.filter((r) => preview.blocked[r] > 0)
-                              .map((r) => ` · ${preview.blocked[r]} ${BLOCK_REASON_LABELS[r]}`)
-                              .join('')}
-                          </span>
-                        )}
-                      </span>
-                      <span>
-                        <button
-                          type="button"
-                          className={styles.ghost}
-                          onClick={() => void previewSegment(segment)}
-                        >
-                          Preview
-                        </button>
-                        {isAdmin && (
+                    <li key={segment.id}>
+                      <div className={styles.listRow}>
+                        <span>
+                          {segment.name}
+                          {previewedSegmentId === segment.id && preview !== null && (
+                            <span className={styles.muted}>
+                              {' '}
+                              — {preview.total} selected, {preview.sendable} reachable
+                              {preview.orgBlockedReason !== null &&
+                                ' (all blocked until the sending policy above is completed)'}
+                              {AUDIENCE_BLOCK_REASONS.filter((r) => preview.blocked[r] > 0)
+                                .map((r) => ` · ${preview.blocked[r]} ${BLOCK_REASON_LABELS[r]}`)
+                                .join('')}
+                            </span>
+                          )}
+                        </span>
+                        <span>
                           <button
                             type="button"
                             className={styles.ghost}
-                            onClick={() => void deleteSegment(segment.id)}
+                            onClick={() => void previewSegment(segment)}
                           >
-                            Delete
+                            Preview
                           </button>
-                        )}
-                      </span>
+                          <button
+                            type="button"
+                            className={styles.ghost}
+                            onClick={() => void showSegmentMembers(segment.id)}
+                          >
+                            Members
+                          </button>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className={styles.ghost}
+                              onClick={() =>
+                                editSegmentId === segment.id
+                                  ? setEditSegmentId(null)
+                                  : startEditSegment(segment)
+                              }
+                            >
+                              {editSegmentId === segment.id ? 'Close' : 'Edit'}
+                            </button>
+                          )}
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className={styles.ghost}
+                              onClick={() => void deleteSegment(segment.id)}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </span>
+                      </div>
+                      {editSegmentId === segment.id && (
+                        <div className={styles.row}>
+                          <input
+                            className={styles.input}
+                            placeholder="Segment name"
+                            value={editSegmentName}
+                            onChange={(e) => setEditSegmentName(e.target.value)}
+                          />
+                          <select
+                            className={styles.select}
+                            value={editRuleTag}
+                            onChange={(e) => setEditRuleTag(e.target.value)}
+                          >
+                            {/* '' keeps whatever rule the segment already has — the only honest
+                                option when the definition is richer than this one-tag form. */}
+                            <option value="">Keep the current rule</option>
+                            {tags.map((tag) => (
+                              <option key={tag.id} value={tag.name}>
+                                Everyone tagged {tag.name} ({tag.contactCount})
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className={styles.primary}
+                            disabled={editSegmentName.trim() === ''}
+                            onClick={() => void saveSegment(segment)}
+                          >
+                            Save changes
+                          </button>
+                        </div>
+                      )}
+                      {membersSegmentId === segment.id && (
+                        <ul className={styles.list}>
+                          {segmentMembers.length === 0 ? (
+                            <li className={styles.muted}>Nobody matches this rule right now.</li>
+                          ) : (
+                            segmentMembers.map((member) => (
+                              <li key={member.contactId} className={styles.muted}>
+                                {member.displayName ?? member.phoneE164 ?? `+${member.externalId}`}
+                                {member.blockedReason !== null && (
+                                  <span className={clsx(styles.tag, styles.tagWarn)}>
+                                    {BLOCK_REASON_LABELS[member.blockedReason]}
+                                  </span>
+                                )}
+                              </li>
+                            ))
+                          )}
+                          {segmentMembers.length === 50 && (
+                            <li className={styles.muted}>
+                              Showing the first 50 — preview the segment for the full counts.
+                            </li>
+                          )}
+                        </ul>
+                      )}
                     </li>
                   ))}
                 </ul>
