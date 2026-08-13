@@ -14,6 +14,8 @@ import type {
   CommerceMessageRate,
   CommerceMoneySummary,
   CommerceRateCard,
+  CommerceSpendCap,
+  CommerceSpendUsage,
   MessagePricingCategory,
   RateUnit,
   CommerceCostSummary,
@@ -807,4 +809,39 @@ export interface ListRateCardsResponse {
 export interface GetRateCardResponse {
   readonly card: CommerceRateCard;
   readonly rates: readonly CommerceMessageRate[];
+}
+
+/**
+ * PUT /platform/spend-caps — grant or change one org's monthly allowance for one currency.
+ * Install-admin only, same argument as the rate cards: a client must never raise their own spend
+ * limit before paying. A PUT because the (org, currency) slot holds exactly one cap; setting it
+ * again replaces the limit and records the change in the spend ledger.
+ */
+export interface SetSpendCapRequest {
+  readonly orgId: string;
+  /** ISO 4217, uppercase — must match the WABA billing currency reservations are priced in. */
+  readonly currency: string;
+  /** The new monthly allowance, micros as a decimal string. "0" is a deliberate lockout. */
+  readonly limitMicros: string;
+  /** Why — "paid invoice #12", "pilot agreement". Required; an unexplained limit defends nothing. */
+  readonly note: string;
+}
+
+export interface SetSpendCapResponse {
+  readonly cap: CommerceSpendCap;
+}
+
+/** GET /platform/spend-caps?orgId= — an org's caps with the current month's usage beside each. */
+export interface ListSpendCapsResponse {
+  readonly caps: readonly CommerceSpendCap[];
+  readonly usage: readonly CommerceSpendUsage[];
+}
+
+/**
+ * GET /orgs/:orgId/spend — the org-facing, read-only view: what headroom exists this month and how
+ * much of it is held or spent. Readable by members because a paused campaign needs an explanation;
+ * writable by nobody on this surface.
+ */
+export interface GetOrgSpendResponse {
+  readonly usage: readonly CommerceSpendUsage[];
 }

@@ -95,12 +95,23 @@ const { whatsappInboundAdapter } = await import(
   '../commerce/services/inbound/whatsappAdapter.js'
 );
 const { commerceWorker } = await import('../commerce/jobs/worker.js');
+const { rateCardRepository } = await import('../commerce/repositories/rateCardRepository.js');
+const { spendCapRepository } = await import('../commerce/repositories/spendCapRepository.js');
 const { vault } = await import('../control-plane/vault/vault.js');
 const { ConflictError } = await import('../utils/errors.js');
 
 const PASSWORD_HASH = await bcrypt.hash(randomUUID(), 10);
 const createdOrgs: string[] = [];
 const createdUsers: string[] = [];
+const createdCards: string[] = [];
+
+// Since Phase 2.3 the default spend allowance is ZERO, so a campaign that should send needs three
+// real things a production org would have: a billing currency on the WABA, a live rate card that
+// prices country 1 under the template's category, and a granted cap. A never-real currency keeps
+// this suite's card out of every other suite's way (one live card per currency, install-wide).
+const CUR = `Z${'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)]}${'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)]}`;
+/** Micros one marketing message to country 1 costs on this suite's card. */
+const RATE_MICROS = 25_000n;
 const createdSecrets: string[] = [];
 
 /** HH:MM in UTC, `offsetMinutes` from now — for quiet-hours windows placed relative to the test. */
@@ -156,8 +167,18 @@ async function tenant(): Promise<Tenant> {
     displayPhoneNumber: null,
     credentialRef,
     credentialExpiresAt: null,
-    billingCurrency: 'USD',
+    billingCurrency: CUR,
     meta: {},
+  });
+
+  // Room for far more than any fixture sends — the cap's EXISTENCE is what these campaigns need;
+  // its edge is the spend-cap suite's subject, not this one's.
+  await spendCapRepository.setCap({
+    orgId: org.id,
+    currency: CUR,
+    limitMicros: 1_000_000_000n,
+    grantedByUserId: user.id,
+    note: 'broadcasts suite headroom',
   });
 
   // Quiet hours are mandatory before marketing may send; a one-minute window two hours away
@@ -285,6 +306,29 @@ async function recipientsOf(
 beforeAll(async () => {
   // Other suites leave their own jobs behind, and the worker's claim is global by design.
   await db.deleteFrom('commerce_jobs').execute();
+
+  const loader = await db
+    .insertInto('users')
+    .values({
+      email: `commerce-broadcasts-loader-${randomUUID()}@stewra.invalid`,
+      display_name: 'Rate Card Loader',
+      password_hash: PASSWORD_HASH,
+      role: 'user',
+      email_verified: true,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  createdUsers.push(loader.id);
+  const card = await rateCardRepository.loadCard({
+    currency: CUR,
+    effectiveFrom: new Date('2020-01-01T00:00:00Z'),
+    sourceNote: 'broadcasts suite sheet',
+    loadedByUserId: loader.id,
+    rates: [
+      { countryCallingCode: '1', pricingCategory: 'marketing', amountMicros: RATE_MICROS, unit: 'per_message' },
+    ],
+  });
+  createdCards.push(card.id);
 });
 
 beforeEach(() => {
@@ -299,6 +343,16 @@ afterAll(async () => {
   }
   if (createdOrgs.length > 0) {
     await db.deleteFrom('commerce_jobs').where('org_id', 'in', createdOrgs).execute();
+    // The spend ledger is trigger-enforced append-only; fixture cleanup is the one legitimate
+    // moment to lift that, here in the harness, not by weakening the trigger.
+    await db.transaction().execute(async (trx) => {
+      await sql`ALTER TABLE commerce_spend_ledger DISABLE TRIGGER stewra_commerce_spend_ledger_append_only`.execute(trx);
+      await trx.deleteFrom('commerce_spend_ledger').where('org_id', 'in', createdOrgs).execute();
+      await sql`ALTER TABLE commerce_spend_ledger ENABLE TRIGGER stewra_commerce_spend_ledger_append_only`.execute(trx);
+    });
+    await db.deleteFrom('commerce_spend_periods').where('org_id', 'in', createdOrgs).execute();
+    await db.deleteFrom('commerce_spend_caps').where('org_id', 'in', createdOrgs).execute();
+    await db.deleteFrom('commerce_message_costs').where('org_id', 'in', createdOrgs).execute();
     await db
       .deleteFrom('commerce_broadcast_recipients')
       .where('org_id', 'in', createdOrgs)
@@ -330,6 +384,16 @@ afterAll(async () => {
     await db.deleteFrom('channel_accounts').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('org_members').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('organizations').where('id', 'in', createdOrgs).execute();
+  }
+  if (createdCards.length > 0) {
+    await db.transaction().execute(async (trx) => {
+      await sql`ALTER TABLE commerce_message_rates DISABLE TRIGGER trg_commerce_message_rates_append_only`.execute(trx);
+      await sql`ALTER TABLE commerce_rate_cards DISABLE TRIGGER trg_commerce_rate_cards_close_only`.execute(trx);
+      await trx.deleteFrom('commerce_message_rates').where('rate_card_id', 'in', createdCards).execute();
+      await trx.deleteFrom('commerce_rate_cards').where('id', 'in', createdCards).execute();
+      await sql`ALTER TABLE commerce_rate_cards ENABLE TRIGGER trg_commerce_rate_cards_close_only`.execute(trx);
+      await sql`ALTER TABLE commerce_message_rates ENABLE TRIGGER trg_commerce_message_rates_append_only`.execute(trx);
+    });
   }
   if (createdUsers.length > 0) {
     await db.deleteFrom('users').where('id', 'in', createdUsers).execute();

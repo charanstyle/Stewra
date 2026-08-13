@@ -4,7 +4,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import bcrypt from 'bcryptjs';
 import { sql } from 'kysely';
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 // Type-only, so they are erased and do NOT load these modules before the environment below is set.
 import type { db as dbType, closeDb as closeDbType } from '../database/index.js';
 
@@ -88,12 +88,21 @@ const { consentService } = await import('../commerce/services/consentService.js'
 const { WhatsappSendRefusedError } = await import(
   '../commerce/services/senders/whatsappCloudSender.js'
 );
+const { rateCardRepository } = await import('../commerce/repositories/rateCardRepository.js');
+const { spendCapRepository } = await import('../commerce/repositories/spendCapRepository.js');
 const { vault } = await import('../control-plane/vault/vault.js');
 const { NotFoundError, ValidationError } = await import('../utils/errors.js');
 
 const PASSWORD_HASH = await bcrypt.hash(randomUUID(), 10);
 const createdOrgs: string[] = [];
 const createdUsers: string[] = [];
+const createdCards: string[] = [];
+
+// Since Phase 2.3 a template send needs priceable money behind it: a billing currency, a live rate
+// for the recipient's country under the template's category (an uncategorized template prices as
+// marketing — the strict reading), and granted headroom. A never-real currency keeps this suite's
+// card out of every other suite's way.
+const CUR = `Z${'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)]}${'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)]}`;
 const createdSecrets: string[] = [];
 
 /** HH:MM in UTC, `offsetMinutes` from now — for quiet-hours windows placed relative to the test. */
@@ -178,8 +187,17 @@ async function tenant(): Promise<Tenant> {
     displayPhoneNumber: null,
     credentialRef,
     credentialExpiresAt: null,
-    billingCurrency: 'USD',
+    billingCurrency: CUR,
     meta: {},
+  });
+
+  // Far more room than any fixture spends — the cap's edge is the spend-cap suite's subject.
+  await spendCapRepository.setCap({
+    orgId: org.id,
+    currency: CUR,
+    limitMicros: 1_000_000_000n,
+    grantedByUserId: user.id,
+    note: 'inbox template suite headroom',
   });
 
   await consentService.setQuietHours({
@@ -284,6 +302,32 @@ async function messageRows(
     .execute();
 }
 
+beforeAll(async () => {
+  const loader = await db
+    .insertInto('users')
+    .values({
+      email: `commerce-inboxtpl-loader-${randomUUID()}@stewra.invalid`,
+      display_name: 'Rate Card Loader',
+      password_hash: PASSWORD_HASH,
+      role: 'user',
+      email_verified: true,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  createdUsers.push(loader.id);
+  const card = await rateCardRepository.loadCard({
+    currency: CUR,
+    effectiveFrom: new Date('2020-01-01T00:00:00Z'),
+    sourceNote: 'inbox template suite sheet',
+    loadedByUserId: loader.id,
+    rates: [
+      { countryCallingCode: '1', pricingCategory: 'marketing', amountMicros: 25_000n, unit: 'per_message' },
+      { countryCallingCode: '1', pricingCategory: 'utility', amountMicros: 4_000n, unit: 'per_message' },
+    ],
+  });
+  createdCards.push(card.id);
+});
+
 beforeEach(() => {
   refuseNumbers = new Set();
   acceptedSends.length = 0;
@@ -295,6 +339,16 @@ afterAll(async () => {
     await vault.delete(ref);
   }
   if (createdOrgs.length > 0) {
+    // The spend ledger is trigger-enforced append-only; fixture cleanup is the one legitimate
+    // moment to lift that, here in the harness, not by weakening the trigger.
+    await db.transaction().execute(async (trx) => {
+      await sql`ALTER TABLE commerce_spend_ledger DISABLE TRIGGER stewra_commerce_spend_ledger_append_only`.execute(trx);
+      await trx.deleteFrom('commerce_spend_ledger').where('org_id', 'in', createdOrgs).execute();
+      await sql`ALTER TABLE commerce_spend_ledger ENABLE TRIGGER stewra_commerce_spend_ledger_append_only`.execute(trx);
+    });
+    await db.deleteFrom('commerce_spend_periods').where('org_id', 'in', createdOrgs).execute();
+    await db.deleteFrom('commerce_spend_caps').where('org_id', 'in', createdOrgs).execute();
+    await db.deleteFrom('commerce_message_costs').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('commerce_messages').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('commerce_conversations').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('commerce_templates').where('org_id', 'in', createdOrgs).execute();
@@ -318,6 +372,16 @@ afterAll(async () => {
     await db.deleteFrom('channel_accounts').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('org_members').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('organizations').where('id', 'in', createdOrgs).execute();
+  }
+  if (createdCards.length > 0) {
+    await db.transaction().execute(async (trx) => {
+      await sql`ALTER TABLE commerce_message_rates DISABLE TRIGGER trg_commerce_message_rates_append_only`.execute(trx);
+      await sql`ALTER TABLE commerce_rate_cards DISABLE TRIGGER trg_commerce_rate_cards_close_only`.execute(trx);
+      await trx.deleteFrom('commerce_message_rates').where('rate_card_id', 'in', createdCards).execute();
+      await trx.deleteFrom('commerce_rate_cards').where('id', 'in', createdCards).execute();
+      await sql`ALTER TABLE commerce_rate_cards ENABLE TRIGGER trg_commerce_rate_cards_close_only`.execute(trx);
+      await sql`ALTER TABLE commerce_message_rates ENABLE TRIGGER trg_commerce_message_rates_append_only`.execute(trx);
+    });
   }
   if (createdUsers.length > 0) {
     await db.deleteFrom('users').where('id', 'in', createdUsers).execute();

@@ -6,6 +6,7 @@ import { channelAccountRepository } from '../repositories/channelAccountReposito
 import { jobRepository } from '../repositories/jobRepository.js';
 import { segmentRepository } from '../repositories/segmentRepository.js';
 import { audienceService } from '../services/audienceService.js';
+import { spendCapService } from '../services/spendCapService.js';
 import { templateService } from '../services/templateService.js';
 import { logger } from '../../utils/logger.js';
 import { NotFoundError, ValidationError } from '../../utils/errors.js';
@@ -80,6 +81,29 @@ class BroadcastDispatchHandler implements JobHandler {
         return { kind: 'failed', reason };
       }
       throw error;
+    }
+
+    // The cap gate, BEFORE the audience is materialized — 40k ledger rows must not be built for a
+    // campaign that cannot pay for its first batch. Paused with NO retry enqueued, deliberately
+    // unlike quiet hours: a night ends on its own, a cap clears only when someone grants headroom,
+    // and resume re-checks this exact predicate.
+    if (!(await spendCapService.hasHeadroom(job.orgId, account.billingCurrency))) {
+      const reason =
+        account.billingCurrency === null
+          ? 'This WhatsApp account never reported its billing currency, so its sends cannot be priced against a spend cap.'
+          : `No ${account.billingCurrency} spend headroom this month. Raise the spend cap, then resume.`;
+      await broadcastRepository.transition({
+        orgId: job.orgId,
+        broadcastId,
+        from: ['scheduled', 'running'],
+        to: 'paused',
+        lastError: reason,
+      });
+      logger.info('commerce: broadcast paused at dispatch by spend cap', {
+        orgId: job.orgId,
+        broadcastId,
+      });
+      return { kind: 'done' };
     }
 
     const segment = await audienceService.getSegment(job.orgId, broadcast.segmentId);

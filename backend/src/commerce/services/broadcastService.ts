@@ -11,6 +11,7 @@ import { jobRepository } from '../repositories/jobRepository.js';
 import { segmentRepository } from '../repositories/segmentRepository.js';
 import { audienceService } from './audienceService.js';
 import { countryCallingCode } from './callingCodes.js';
+import { spendCapService } from './spendCapService.js';
 import { templateService } from './templateService.js';
 import { config } from '../../config/unifiedConfig.js';
 import {
@@ -100,6 +101,12 @@ class BroadcastService {
         },
       ]);
     }
+
+    // Every template send is billable, and the default allowance is zero: a broadcast scheduled
+    // with no headroom this month would only march to the dispatch job and pause there, so the
+    // refusal happens now, at the person who can do something about it. Advisory only — the send
+    // handler reserves the real money per recipient; this cannot pass anything that one refuses.
+    await spendCapService.assertHeadroom(params.orgId, account.billingCurrency);
 
     // Existence checks double as tenancy checks — both lookups are org-scoped.
     await audienceService.getSegment(params.orgId, params.segmentId);
@@ -202,6 +209,15 @@ class BroadcastService {
     // moving a broadcast to `running` and then failing to enqueue would leave it in a state whose
     // name says work is happening while the queue holds nothing.
     this.assertDispatchable();
+
+    // A cap pause ends by raising the cap, not by asking again. Without this, resume would put the
+    // broadcast back on the queue only for the send handler to reserve nothing and pause it again —
+    // an error message that says "try later" about a state that never changes by waiting.
+    const current = await this.get(orgId, broadcastId);
+    const account = await channelAccountRepository.findForOrg(orgId, current.channelAccountId);
+    if (account !== null) {
+      await spendCapService.assertHeadroom(orgId, account.billingCurrency);
+    }
 
     const resumed = await broadcastRepository.transition({
       orgId,
