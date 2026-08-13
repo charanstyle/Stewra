@@ -29,4 +29,14 @@ router.put('/subscriptions', requireAuth, gate, (req, res) => {
   void billingController.setSubscription(req, res);
 });
 
+// Settlement, both kinds: an operator attesting an offline payment, and a charge through the
+// configured provider. Named actions as POSTs — each one creates an attempt row.
+router.post('/invoices/:invoiceId/mark-paid', requireAuth, gate, (req, res) => {
+  void billingController.markInvoicePaid(req, res);
+});
+
+router.post('/invoices/:invoiceId/charge', requireAuth, gate, (req, res) => {
+  void billingController.chargeInvoice(req, res);
+});
+
 export default router;

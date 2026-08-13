@@ -88,6 +88,9 @@ export type {
   CommerceInvoiceLineKind,
   CommerceInvoice,
   CommerceInvoiceLine,
+  CommercePaymentProvider,
+  CommercePaymentAttemptStatus,
+  CommercePaymentAttempt,
   TemplateCategory,
   TemplateStatus,
   MessageTemplate,
@@ -127,6 +130,8 @@ export {
   SPEND_LEDGER_KINDS,
   COMMERCE_INVOICE_STATUSES,
   COMMERCE_INVOICE_LINE_KINDS,
+  COMMERCE_PAYMENT_PROVIDERS,
+  COMMERCE_PAYMENT_ATTEMPT_STATUSES,
   TEMPLATE_CATEGORIES,
   TEMPLATE_STATUSES,
   BROADCAST_STATUSES,
@@ -513,6 +518,9 @@ export type {
   GetOrgBillingResponse,
   ListInvoicesResponse,
   GetInvoiceResponse,
+  MarkInvoicePaidRequest,
+  MarkInvoicePaidResponse,
+  ChargeInvoiceResponse,
 } from './api/commerce';
 
 // Realtime (Socket.IO) contract

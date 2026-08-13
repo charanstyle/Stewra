@@ -57,6 +57,7 @@ import * as m051 from './migrations/051_commerce_message_costs.js';
 import * as m052 from './migrations/052_commerce_spend_caps.js';
 import * as m053 from './migrations/053_commerce_plans.js';
 import * as m054 from './migrations/054_commerce_invoices.js';
+import * as m055 from './migrations/055_commerce_billing_customers.js';
 import { logger } from '../utils/logger.js';
 
 interface Migration {
@@ -120,6 +121,7 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '052_commerce_spend_caps', up: m052.up },
   { name: '053_commerce_plans', up: m053.up },
   { name: '054_commerce_invoices', up: m054.up },
+  { name: '055_commerce_billing_customers', up: m055.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

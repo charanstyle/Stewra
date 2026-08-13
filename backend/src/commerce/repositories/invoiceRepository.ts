@@ -190,6 +190,36 @@ class InvoiceRepository {
     return { invoice: toInvoice(row), lines: lines.map(toLine) };
   }
 
+  /**
+   * The operator's view of one invoice, unscoped by org — the install-admin gate is the scope.
+   * Never reachable from an /orgs route.
+   */
+  async findById(invoiceId: string): Promise<CommerceInvoice | null> {
+    const row = await db
+      .selectFrom('commerce_invoices')
+      .selectAll()
+      .where('id', '=', invoiceId)
+      .executeTakeFirst();
+    return row === undefined ? null : toInvoice(row);
+  }
+
+  /**
+   *`issued → paid`, and nothing else: the database trigger permits exactly this transition with
+   * every other column byte-identical, so the update is status-only by necessity, not politeness.
+   * Returns the invoice as it now stands, or null when it does not exist.
+   */
+  async markPaid(invoiceId: string): Promise<CommerceInvoice | null> {
+    const row = await db
+      .updateTable('commerce_invoices')
+      .set({ status: 'paid', updated_at: new Date() })
+      .where('id', '=', invoiceId)
+      .where('status', '=', 'issued')
+      .returningAll()
+      .executeTakeFirst();
+    if (row !== undefined) return toInvoice(row);
+    return this.findById(invoiceId);
+  }
+
   /** Stamp the (org, month) marker with this close attempt's outcome. */
   async markPeriod(params: {
     orgId: string;

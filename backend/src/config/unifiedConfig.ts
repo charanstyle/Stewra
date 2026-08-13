@@ -320,6 +320,21 @@ const EnvSchema = z.object({
   // why handlers are required to be idempotent rather than why this should be set tightly.
   COMMERCE_WORKER_LEASE_SECONDS: z.coerce.number().int().min(30).max(3_600).default(300),
 
+  // ── Commerce billing provider (migration 054's payment_attempts get written through this) ───────
+  // How invoices are COLLECTED. `manual` is the default and needs nothing: the operator records
+  // offline settlements by hand, and the system moves no money. Choosing `stripe` is what makes the
+  // two secrets below required — enforced by the post-parse guard, so a Stripe deploy with a
+  // missing credential fails at boot, not at the first charge.
+  COMMERCE_BILLING_PROVIDER: z.enum(['manual', 'stripe']).default('manual'),
+  // The secret API key ('sk_…'). Never the publishable key: this one creates charges.
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  // Signs the Stripe-Signature header on /webhooks/payments ('whsec_…'). Without it an event
+  // cannot be told apart from anyone who guessed the URL.
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  // API origin. Overridable so the charge path can be driven end-to-end against a local stand-in
+  // in tests, same reasoning as META_COMMERCE_GRAPH_BASE_URL.
+  STRIPE_API_BASE_URL: z.string().url().default('https://api.stripe.com'),
+
   // ── WhatsApp PERSONAL (experimental companion device, via the user-hosted Stewra Bridge) ──────────
   // A SECOND, separate, opt-in channel. Everything above is Meta's sanctioned Cloud API; everything here
   // is the unofficial path, where the user links their OWN WhatsApp account and CAN be permanently
@@ -511,6 +526,17 @@ if (env.META_COMMERCE_ENABLED) {
   }
 }
 
+// Fail loud when a real payment provider is chosen but under-configured. Without the secret key no
+// charge can be created; without the webhook secret /webhooks/payments cannot tell Stripe from a
+// forged "it's paid" POST. A billing deploy that discovers this at the first charge has already
+// issued invoices it cannot collect — strictly worse than not booting.
+if (env.COMMERCE_BILLING_PROVIDER === 'stripe') {
+  const missing = (['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] as const).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`COMMERCE_BILLING_PROVIDER=stripe requires: ${missing.join(', ')}`);
+  }
+}
+
 // Fail loud when the experimental companion-device channel is enabled but under-configured. Without a
 // download URL the web UI would offer a consent gate leading nowhere; without a minimum bridge version
 // we would have no way to refuse a build that is getting users banned. Both are worse than not booting.
@@ -676,6 +702,36 @@ function readMetaCommerceConfig(): MetaCommerceConfig {
     verifyToken,
     graphVersion: env.META_COMMERCE_GRAPH_VERSION,
     graphBaseUrl: env.META_COMMERCE_GRAPH_BASE_URL,
+  };
+}
+
+/**
+ * How invoices are collected — a discriminated union for the same reason MetaCommerceConfig is:
+ * callers narrow on `provider` first, and in the `stripe` branch every credential is a real,
+ * non-optional string. There is no way to hold a half-configured Stripe.
+ */
+export type CommerceBillingConfig =
+  | { readonly provider: 'manual' }
+  | {
+      readonly provider: 'stripe';
+      readonly secretKey: string;
+      readonly webhookSecret: string;
+      readonly apiBaseUrl: string;
+    };
+
+function readCommerceBillingConfig(): CommerceBillingConfig {
+  if (env.COMMERCE_BILLING_PROVIDER !== 'stripe') return { provider: 'manual' };
+  // The post-parse guard above already refused to boot without these; this re-reads them as a type
+  // narrowing that cannot be satisfied by a placeholder. If it ever throws, the guard has a hole.
+  const { STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET } = env;
+  if (STRIPE_SECRET_KEY === undefined || STRIPE_WEBHOOK_SECRET === undefined) {
+    throw new Error('COMMERCE_BILLING_PROVIDER=stripe but its credentials are not all set');
+  }
+  return {
+    provider: 'stripe',
+    secretKey: STRIPE_SECRET_KEY,
+    webhookSecret: STRIPE_WEBHOOK_SECRET,
+    apiBaseUrl: env.STRIPE_API_BASE_URL,
   };
 }
 
@@ -870,6 +926,8 @@ export const config = {
    * credentials; there are no empty-string stand-ins here.
    */
   metaCommerce: readMetaCommerceConfig(),
+  /** How invoices are collected. `manual` records money; only `stripe` moves it. */
+  commerceBilling: readCommerceBillingConfig(),
   commerceWorker: {
     pollMs: env.COMMERCE_WORKER_POLL_MS,
     batchSize: env.COMMERCE_WORKER_BATCH_SIZE,

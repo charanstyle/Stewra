@@ -15,6 +15,7 @@ import type {
   CommerceInvoice,
   CommerceInvoiceLine,
   CommerceMoneySummary,
+  CommercePaymentAttempt,
   CommercePlan,
   CommercePlanVersion,
   CommerceRateCard,
@@ -907,8 +908,33 @@ export interface ListInvoicesResponse {
   readonly invoices: readonly CommerceInvoice[];
 }
 
-/** GET /orgs/:orgId/invoices/:invoiceId — one invoice and its lines. */
+/** GET /orgs/:orgId/invoices/:invoiceId — one invoice, its lines, and every collection attempt. */
 export interface GetInvoiceResponse {
   readonly invoice: CommerceInvoice;
   readonly lines: readonly CommerceInvoiceLine[];
+  readonly attempts: readonly CommercePaymentAttempt[];
+}
+
+/**
+ * POST /platform/billing/invoices/:invoiceId/mark-paid — record an offline settlement against an
+ * issued invoice. Install-admin only: "the money arrived" is the operator's attestation, and the
+ * required note is where they say how they know (a bank statement line, a transfer reference).
+ * Works regardless of which provider is configured — a client may always pay by wire.
+ */
+export interface MarkInvoicePaidRequest {
+  readonly note: string;
+}
+
+export interface MarkInvoicePaidResponse {
+  readonly invoice: CommerceInvoice;
+}
+
+/**
+ * POST /platform/billing/invoices/:invoiceId/charge — collect an issued invoice through the
+ * configured provider. Install-admin only in this phase; refused outright under the `manual`
+ * provider (there is nothing to charge through) and when the org has no stored payment method.
+ */
+export interface ChargeInvoiceResponse {
+  readonly attempt: CommercePaymentAttempt;
+  readonly invoice: CommerceInvoice;
 }

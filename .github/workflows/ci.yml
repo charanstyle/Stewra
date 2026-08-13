@@ -84,7 +84,7 @@ jobs:
           VAULT_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
           WEB_APP_URL=http://127.0.0.1:3000
           # The operator account the commerceRates suite registers and authenticates as.
-          INSTALL_ADMIN_EMAILS=install-admin@stewra.test,spend-cap-admin@stewra.test,billing-admin@stewra.test
+          INSTALL_ADMIN_EMAILS=install-admin@stewra.test,spend-cap-admin@stewra.test,billing-admin@stewra.test,payments-admin@stewra.test,manual-billing-admin@stewra.test
           GOOGLE_CLIENT_ID=test.apps.googleusercontent.com
           GOOGLE_CLIENT_SECRET=ci-throwaway-google-secret
           GOOGLE_REDIRECT_URI=http://127.0.0.1:3001/api/connections/google/callback
