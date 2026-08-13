@@ -39,6 +39,8 @@ Convention: kebab-case `<screen-or-area>-<element>`.
 | `settings-connect-google` | `src/components/settings/ConnectionsCard.tsx` | The "Connect a Google account" button (opens the consent alert, then the browser) |
 | `settings-pause-switch` | `src/screens/settings/SettingsScreen.tsx` | The global "Pause Stewra" kill switch |
 | `settings-activity-link` | `src/screens/settings/SettingsScreen.tsx` | The Settings row that pushes the Activity screen |
+| `today-onboarding` | `src/components/today/OnboardingCard.tsx` | The cold-start card on Today (shown while the user has no connections, or none of the value computed yet) |
+| `onboarding-connect-google` | `src/components/today/OnboardingCard.tsx` | The onboarding "Connect Google Calendar" button (consent alert, then browser) |
 
 ## Conventions for flows
 

@@ -2,13 +2,14 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import type { Briefing, Suggestion } from '@stewra/shared-types';
+import type { Briefing, Connection, Suggestion } from '@stewra/shared-types';
 import type { MainTabParamList } from '../../navigation/types';
 import { api, ApiError } from '../../services/api';
 import { theme } from '../../theme/colors';
 import { BriefingCard } from '../../components/today/BriefingCard';
 import { NudgeCard } from '../../components/today/NudgeCard';
 import { InsightGlance } from '../../components/today/InsightGlance';
+import { OnboardingCard } from '../../components/today/OnboardingCard';
 
 type Props = BottomTabScreenProps<MainTabParamList, 'Today'>;
 
@@ -33,18 +34,21 @@ function greeting(): string {
 export default function TodayScreen({ navigation }: Props): React.JSX.Element {
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [suggestions, setSuggestions] = useState<ReadonlyArray<Suggestion>>([]);
+  const [connections, setConnections] = useState<ReadonlyArray<Connection>>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [recomputing, setRecomputing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
-    const [briefingRes, suggestionsRes] = await Promise.all([
+    const [briefingRes, suggestionsRes, connectionsRes] = await Promise.all([
       api.getBriefing(),
       api.listSuggestions(),
+      api.listConnections(),
     ]);
     setBriefing(briefingRes.briefing);
     setSuggestions(suggestionsRes.suggestions);
+    setConnections(connectionsRes.connections);
   }, []);
 
   useEffect(() => {
@@ -133,29 +137,37 @@ export default function TodayScreen({ navigation }: Props): React.JSX.Element {
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <BriefingCard briefing={briefing} />
-
-        {suggestions.length > 0 ? (
-          <View style={styles.nudges}>
-            <Text style={styles.sectionTitle}>Needs your attention</Text>
-            {suggestions.map((suggestion) => (
-              <NudgeCard
-                key={suggestion.id}
-                suggestion={suggestion}
-                onResolved={handleResolved}
-                onChatOpened={handleChatOpened}
-              />
-            ))}
-          </View>
+        {connections.length === 0 || briefing === null ? (
+          /* Cold start (build-plan M5): one clear first step — or, once connected, the first
+             briefing on demand instead of a wait for the next background tick. */
+          <OnboardingCard
+            hasConnection={connections.length > 0}
+            onBuildFirstBriefing={recompute}
+            building={recomputing}
+          />
         ) : (
-          <Text style={styles.emptyText}>
-            {briefing === null
-              ? 'Nothing here yet — connect a source and Stewra will start briefing you.'
-              : "You're all caught up."}
-          </Text>
-        )}
+          <>
+            <BriefingCard briefing={briefing} />
 
-        <InsightGlance />
+            {suggestions.length > 0 ? (
+              <View style={styles.nudges}>
+                <Text style={styles.sectionTitle}>Needs your attention</Text>
+                {suggestions.map((suggestion) => (
+                  <NudgeCard
+                    key={suggestion.id}
+                    suggestion={suggestion}
+                    onResolved={handleResolved}
+                    onChatOpened={handleChatOpened}
+                  />
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.emptyText}>You&apos;re all caught up.</Text>
+            )}
+
+            <InsightGlance />
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
