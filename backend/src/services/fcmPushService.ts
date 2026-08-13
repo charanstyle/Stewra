@@ -1,10 +1,14 @@
 import { JWT } from 'google-auth-library';
-import type { CallKind, EmailApprovalPushData } from '@stewra/shared-types';
+import type { CallKind, EmailApprovalPushData, SuggestionPushData } from '@stewra/shared-types';
 import {
   EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
   EMAIL_APPROVAL_CATEGORY,
   EMAIL_APPROVAL_PUSH_BODY,
   EMAIL_APPROVAL_PUSH_TITLE,
+  SUGGESTION_ANDROID_CHANNEL_ID,
+  SUGGESTION_CATEGORY,
+  SUGGESTION_PUSH_BODY,
+  SUGGESTION_PUSH_TITLE,
 } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
 import { logger } from '../utils/logger.js';
@@ -35,6 +39,22 @@ export function buildEmailApprovalData(payload: { messageId: string }): Record<s
     body: JSON.stringify(data),
     categoryId: EMAIL_APPROVAL_CATEGORY,
     channelId: EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
+  };
+}
+
+/**
+ * Build the FCM `data` map for a DATA-ONLY proactive-nudge push. Same data-only contract as the
+ * approval push (expo-notifications rebuilds the notification from `title`/`message`/`channelId` and
+ * parses `body` into `content.data`), minus `categoryId` — the nudge has no action buttons; tapping
+ * it opens Today. Its own channel so the user can silence nudges without silencing approvals.
+ */
+export function buildSuggestionData(payload: { suggestionId: string }): Record<string, string> {
+  const data: SuggestionPushData = { type: SUGGESTION_CATEGORY, suggestionId: payload.suggestionId };
+  return {
+    title: SUGGESTION_PUSH_TITLE,
+    message: SUGGESTION_PUSH_BODY,
+    body: JSON.stringify(data),
+    channelId: SUGGESTION_ANDROID_CHANNEL_ID,
   };
 }
 
@@ -239,6 +259,25 @@ class FcmPushService {
       fcmTokens.map(async (fcmToken) => ({
         fcmToken,
         outcome: await this.postDataMessage(auth, fcmToken, data, 'email-approval'),
+      })),
+    );
+    return outcomes.filter((entry) => entry.outcome === 'unregistered').map((entry) => entry.fcmToken);
+  }
+
+  /**
+   * Send the DATA-ONLY proactive-nudge push to each Android FCM device token, returning permanently
+   * gone tokens for pruning. Best-effort: never throws into the recompute that triggered it.
+   */
+  async sendSuggestion(fcmTokens: string[], payload: { suggestionId: string }): Promise<string[]> {
+    const auth = await this.auth();
+    if (auth === null || fcmTokens.length === 0) {
+      return [];
+    }
+    const data = buildSuggestionData(payload);
+    const outcomes = await Promise.all(
+      fcmTokens.map(async (fcmToken) => ({
+        fcmToken,
+        outcome: await this.postDataMessage(auth, fcmToken, data, 'suggestion'),
       })),
     );
     return outcomes.filter((entry) => entry.outcome === 'unregistered').map((entry) => entry.fcmToken);

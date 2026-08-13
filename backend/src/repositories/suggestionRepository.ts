@@ -5,6 +5,7 @@ import type {
   SuggestionSourceRef,
   SuggestionStatus,
 } from '@stewra/shared-types';
+import { sql } from 'kysely';
 import { db } from '../database/index.js';
 
 /** Input to create/refresh a nudge, keyed by a stable `dedupKey` (e.g. "needs_reply:<threadId>"). */
@@ -35,9 +36,17 @@ interface SuggestionDbRow {
  * guard on conflict — never clobbers one the user already acted on (dismissed/snoozed/done).
  */
 export class SuggestionRepository {
-  /** Create or refresh a nudge; a user-acted row (not 'open') is left untouched. */
-  async upsertByDedup(userId: string, input: UpsertSuggestionInput): Promise<void> {
-    await db
+  /**
+   * Create or refresh a nudge; a user-acted row (not 'open') is left untouched. Returns the row's id
+   * and whether it was newly CREATED — Postgres's `xmax = 0` is true only for a freshly inserted row —
+   * so a caller can tell "the user has never been told about this" from "refreshed in place". When the
+   * conflict target is a user-acted row the update is suppressed and nothing returns: `undefined`.
+   */
+  async upsertByDedup(
+    userId: string,
+    input: UpsertSuggestionInput,
+  ): Promise<{ id: string; created: boolean } | undefined> {
+    const row = await db
       .insertInto('suggestions')
       .values({
         user_id: userId,
@@ -61,7 +70,9 @@ export class SuggestionRepository {
           })
           .where('suggestions.status', '=', 'open'),
       )
-      .execute();
+      .returning(['id', sql<boolean>`(xmax = 0)`.as('created')])
+      .executeTakeFirst();
+    return row === undefined ? undefined : { id: row.id, created: row.created };
   }
 
   /**

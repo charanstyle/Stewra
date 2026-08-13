@@ -9,6 +9,7 @@ import type { CallKind } from '@stewra/shared-types';
  * screen.
  */
 export interface MainTabParamList {
+  Today: undefined;
   Chats: undefined;
   Contacts: undefined;
   StewraVoice: undefined;
@@ -32,8 +33,14 @@ export interface RootStackParamList {
   VerifyEmail: undefined;
   ForgotPassword: undefined;
   ResetPassword: { readonly email: string };
-  MainTabs: undefined;
+  /** Optionally lands on a specific tab — how a nudge push opens Today from anywhere (or cold). */
+  MainTabs: { readonly screen: 'Today' } | undefined;
   Conversation: { readonly conversationId: string; readonly title: string };
+  /**
+   * The plain-language activity feed — every audited action, rendered as "what has Stewra done?".
+   * Pushed over the tabs from Settings; mirrors the website's ActivityPage feed.
+   */
+  Activity: undefined;
   /**
    * The biometric gate for approving an email Stewra drafted, reached by tapping Approve on the
    * approval notification. Carries only the message id — the draft is fetched over the authenticated

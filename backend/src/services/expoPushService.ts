@@ -5,6 +5,10 @@ import {
   EMAIL_APPROVAL_CATEGORY,
   EMAIL_APPROVAL_PUSH_BODY,
   EMAIL_APPROVAL_PUSH_TITLE,
+  SUGGESTION_ANDROID_CHANNEL_ID,
+  SUGGESTION_CATEGORY,
+  SUGGESTION_PUSH_BODY,
+  SUGGESTION_PUSH_TITLE,
 } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
 import { logger } from '../utils/logger.js';
@@ -15,6 +19,12 @@ const CHUNK_SIZE = 100;
 /** Payload for the approve-to-send email prompt. Only an id travels — never the email contents. */
 export interface EmailApprovalPush {
   readonly messageId: string;
+}
+
+/** Payload for a proactive nudge push. Only an id travels — never the nudge title (it names real
+ * emails/events and must not sit on a lock screen). */
+export interface SuggestionPush {
+  readonly suggestionId: string;
 }
 
 /**
@@ -43,6 +53,30 @@ export function buildEmailApprovalMessage(
     },
     categoryId: EMAIL_APPROVAL_CATEGORY,
     channelId: EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
+    priority: 'high',
+  };
+}
+
+/**
+ * Shape a proactive-nudge notification for one iOS device. Pure, like the approval builder. No
+ * `categoryId` — the nudge has no action buttons; tapping it opens Today, where the real options
+ * (snooze/dismiss/done/draft) live behind the app's authentication. Copy is the shared generic
+ * strings: specifics never sit on a lock screen.
+ */
+export function buildSuggestionMessage(
+  expoToken: string,
+  payload: SuggestionPush,
+): ExpoPushMessage {
+  return {
+    to: expoToken,
+    sound: 'default',
+    title: SUGGESTION_PUSH_TITLE,
+    body: SUGGESTION_PUSH_BODY,
+    data: {
+      type: SUGGESTION_CATEGORY,
+      suggestionId: payload.suggestionId,
+    },
+    channelId: SUGGESTION_ANDROID_CHANNEL_ID,
     priority: 'high',
   };
 }
@@ -86,6 +120,23 @@ class ExpoPushService {
    * draft from `data.messageId`.
    */
   async sendEmailApproval(expoTokens: string[], payload: EmailApprovalPush): Promise<string[]> {
+    return this.deliver(expoTokens, (token) => buildEmailApprovalMessage(token, payload));
+  }
+
+  /**
+   * Push a proactive nudge notification to the given Expo push tokens (iOS), returning dead tokens
+   * for pruning. Generic copy, id-only data — the app opens Today and fetches the real nudge over
+   * its authenticated session.
+   */
+  async sendSuggestion(expoTokens: string[], payload: SuggestionPush): Promise<string[]> {
+    return this.deliver(expoTokens, (token) => buildSuggestionMessage(token, payload));
+  }
+
+  /** Send one built message per token in ≤100-message batches, returning `DeviceNotRegistered` tokens. */
+  private async deliver(
+    expoTokens: string[],
+    toMessage: (token: string) => ExpoPushMessage,
+  ): Promise<string[]> {
     const expo = this.client();
     const tokens = expoTokens.filter((token) => Expo.isExpoPushToken(token));
     if (expo === null || tokens.length === 0) {
@@ -94,7 +145,7 @@ class ExpoPushService {
 
     const dead: string[] = [];
     for (const group of this.paginate(tokens)) {
-      const messages = group.map((token) => buildEmailApprovalMessage(token, payload));
+      const messages = group.map((token) => toMessage(token));
       let tickets: ExpoPushTicket[];
       try {
         tickets = await expo.sendPushNotificationsAsync(messages);

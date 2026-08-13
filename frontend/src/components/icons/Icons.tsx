@@ -214,6 +214,16 @@ export function CheckCheckIcon(props: IconProps): React.JSX.Element {
   );
 }
 
+/** Sparkle — the Today tab: Stewra's proactive briefing + nudges (mirrors the web's SparkleIcon). */
+export function SparkleIcon(props: IconProps): React.JSX.Element {
+  const { size, color } = resolve(props);
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3.5 3.5M14.5 14.5 18 18M18 6l-3.5 3.5M9.5 14.5 6 18" />
+    </Svg>
+  );
+}
+
 /** Briefcase — the Commerce tab: the user's business, as distinct from their personal chats. */
 export function BriefcaseIcon(props: IconProps): React.JSX.Element {
   const { size, color } = resolve(props);

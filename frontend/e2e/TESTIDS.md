@@ -29,6 +29,16 @@ Convention: kebab-case `<screen-or-area>-<element>`.
 | `runner-session-cancel` | `src/components/chat/ProposedRunnerSessionCard.tsx` | Cancel (or "Dismiss" after a failed start) button |
 | `runner-session-busy` | `src/components/chat/ProposedRunnerSessionCard.tsx` | The `ActivityIndicator` shown while a confirm request for this proposal is in flight (both buttons removed) |
 | `runner-session-status` | `src/components/chat/ProposedRunnerSessionCard.tsx` | The collapsed terminal-status line for a resolved (`sent`/`cancelled`) proposal, e.g. "Started on <machine>" |
+| `tab-today` | `src/navigation/MainTabs.tsx` | Bottom-tab button for the Today tab (via `tabBarButtonTestID`) |
+| `today-briefing` | `src/components/today/BriefingCard.tsx` | The briefing summary card at the top of Today (absent until a briefing exists) |
+| `today-nudge` | `src/components/today/NudgeCard.tsx` | One proactive nudge card in the "Needs your attention" stack (repeats; not positional) |
+| `today-insight` | `src/components/today/InsightGlance.tsx` | The generated insight summary box (absent until a glance is requested) |
+| `today-recompute` | `src/screens/today/TodayScreen.tsx` | The "Refresh" button that runs the server-side sync + briefing rebuild |
+| `activity-row` | `src/screens/settings/ActivityScreen.tsx` | One activity-feed entry (repeats; not positional) |
+| `settings-connection-row` | `src/components/settings/ConnectionsCard.tsx` | One connected-source row in Settings → Connections (repeats) |
+| `settings-connect-google` | `src/components/settings/ConnectionsCard.tsx` | The "Connect a Google account" button (opens the consent alert, then the browser) |
+| `settings-pause-switch` | `src/screens/settings/SettingsScreen.tsx` | The global "Pause Stewra" kill switch |
+| `settings-activity-link` | `src/screens/settings/SettingsScreen.tsx` | The Settings row that pushes the Activity screen |
 
 ## Conventions for flows
 

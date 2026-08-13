@@ -7,6 +7,7 @@ import {
   EMAIL_APPROVAL_ACTION_DENY,
   EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
   EMAIL_APPROVAL_CATEGORY,
+  SUGGESTION_ANDROID_CHANNEL_ID,
 } from '@stewra/shared-types';
 import { api } from './api';
 import { ensureNotificationPermission } from './notifications';
@@ -60,6 +61,24 @@ async function registerEmailApprovalChannel(): Promise<void> {
     name: 'Email approvals',
     description: 'Asks you to approve an email Stewra drafted from WhatsApp.',
     importance: Notifications.AndroidImportance.HIGH,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+  });
+}
+
+/**
+ * The Android channel proactive nudge pushes land on. Its OWN channel so the user can silence
+ * nudges in OS settings without also silencing approve-to-send prompts — the two interruptions have
+ * very different stakes. PRIVATE lock-screen visibility like the approval channel; the copy is
+ * already generic (the nudge title names real emails/events and never rides in the push).
+ */
+async function registerSuggestionChannel(): Promise<void> {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+  await Notifications.setNotificationChannelAsync(SUGGESTION_ANDROID_CHANNEL_ID, {
+    name: 'Stewra nudges',
+    description: 'Tells you when Stewra noticed something that may need your attention.',
+    importance: Notifications.AndroidImportance.DEFAULT,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
   });
 }
@@ -130,6 +149,7 @@ export async function registerForApprovalPush(): Promise<boolean> {
 
   try {
     await registerEmailApprovalChannel();
+    await registerSuggestionChannel();
     await registerEmailApprovalCategory();
     if (Platform.OS === 'android') {
       // The RAW FCM device token — what a data-only FCM v1 send addresses. `data` is the FCM

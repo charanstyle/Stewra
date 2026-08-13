@@ -3,8 +3,16 @@ import {
   EMAIL_APPROVAL_CATEGORY,
   EMAIL_APPROVAL_PUSH_BODY,
   EMAIL_APPROVAL_PUSH_TITLE,
+  SUGGESTION_ANDROID_CHANNEL_ID,
+  SUGGESTION_CATEGORY,
+  SUGGESTION_PUSH_BODY,
+  SUGGESTION_PUSH_TITLE,
 } from '@stewra/shared-types';
-import { buildEmailApprovalData, fcmPushService } from '../services/fcmPushService.js';
+import {
+  buildEmailApprovalData,
+  buildSuggestionData,
+  fcmPushService,
+} from '../services/fcmPushService.js';
 
 /**
  * The Android approval prompt is delivered as a raw FCM v1 DATA-ONLY message. When the app is
@@ -41,6 +49,36 @@ describe('buildEmailApprovalData — the Android data-only contract', () => {
 
   it('leaks no email address into the payload (lock-screen safe)', () => {
     expect(JSON.stringify(data)).not.toContain('@');
+  });
+});
+
+/**
+ * The nudge push rides the same data-only contract, with two deliberate differences pinned here: NO
+ * `categoryId` (the nudge has no action buttons — the decision surface is the Today screen), and its
+ * OWN channel (so the user can silence proactive nudges without silencing approve-to-send prompts).
+ * The copy is the shared generic strings — a nudge title names a real email subject or calendar
+ * event, and none of that may sit on a lock screen.
+ */
+describe('buildSuggestionData — the Android nudge-push contract', () => {
+  const data = buildSuggestionData({ suggestionId: 'sug-7' });
+
+  it('sets the generic title/message — never the nudge title', () => {
+    expect(data['title']).toBe(SUGGESTION_PUSH_TITLE);
+    expect(data['message']).toBe(SUGGESTION_PUSH_BODY);
+  });
+
+  it('has NO categoryId — a nudge push carries no action buttons', () => {
+    expect(data['categoryId']).toBeUndefined();
+  });
+
+  it('lands on its own channel, separate from the approval channel', () => {
+    expect(data['channelId']).toBe(SUGGESTION_ANDROID_CHANNEL_ID);
+    expect(data['channelId']).not.toBe(EMAIL_APPROVAL_ANDROID_CHANNEL_ID);
+  });
+
+  it('puts content.data in `body` as a JSON-object string (type + suggestionId only)', () => {
+    const parsed: unknown = JSON.parse(data['body'] ?? '');
+    expect(parsed).toEqual({ type: SUGGESTION_CATEGORY, suggestionId: 'sug-7' });
   });
 });
 

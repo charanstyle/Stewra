@@ -2,12 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { UserPreferences } from '@stewra/shared-types';
+import type { MainTabParamList } from '../../navigation/types';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../services/api';
 import { theme } from '../../theme/colors';
 import { TinyAvatar } from '../../components/chat/TinyAvatar';
 import { EmailOverWhatsappToggle } from '../../components/settings/EmailOverWhatsappToggle';
+import { ConnectionsCard } from '../../components/settings/ConnectionsCard';
 
 /** Derive an upload filename + MIME from a picked asset, falling back to JPEG when the picker omits them. */
 function fileMetaFor(asset: ImagePicker.ImagePickerAsset): { fileName: string; mimeType: string } {
@@ -24,7 +27,9 @@ function fileMetaFor(asset: ImagePicker.ImagePickerAsset): { fileName: string; m
  * photo from their library (expo-image-picker → POST /users/me/avatar), and exposes the read-receipt
  * sharing toggle (mirrors the web).
  */
-export default function SettingsScreen(): React.JSX.Element {
+export default function SettingsScreen({
+  navigation,
+}: BottomTabScreenProps<MainTabParamList, 'Settings'>): React.JSX.Element {
   const { user, applyUser } = useAuth();
   const [prefs, setPrefs] = useState<UserPreferences | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +78,18 @@ export default function SettingsScreen(): React.JSX.Element {
     }
   };
 
+  const togglePause = async (next: boolean): Promise<void> => {
+    if (prefs === null) return;
+    setPrefs({ ...prefs, pauseAll: next });
+    try {
+      const res = await api.updatePreferences({ pauseAll: next });
+      setPrefs(res.preferences);
+    } catch {
+      setPrefs({ ...prefs, pauseAll: !next });
+      setError('Could not update the pause setting');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -118,6 +135,35 @@ export default function SettingsScreen(): React.JSX.Element {
             />
           </View>
         </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Stewra</Text>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleText}>
+              <Text style={styles.toggleLabel}>Pause Stewra</Text>
+              <Text style={styles.toggleHint}>
+                Stops everything: no data is read, nothing runs in the background, until you resume.
+              </Text>
+            </View>
+            <Switch
+              value={prefs?.pauseAll ?? false}
+              disabled={prefs === null}
+              onValueChange={(next) => void togglePause(next)}
+              trackColor={{ true: theme.colors.primary, false: theme.colors.border }}
+              testID="settings-pause-switch"
+            />
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => navigation.navigate('Activity')}
+            style={({ pressed }) => [styles.linkRow, pressed && styles.linkRowPressed]}
+            testID="settings-activity-link"
+          >
+            <Text style={styles.linkText}>Activity — everything Stewra has done</Text>
+          </Pressable>
+        </View>
+
+        <ConnectionsCard />
 
         {/* Renders nothing unless the server reports the capability available (kill-switch on). */}
         <EmailOverWhatsappToggle />
@@ -205,5 +251,19 @@ const styles = StyleSheet.create({
   error: {
     color: theme.colors.danger,
     fontSize: 13,
+  },
+  linkRow: {
+    marginTop: theme.spacing.sm,
+    paddingTop: theme.spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+  },
+  linkRowPressed: {
+    opacity: 0.7,
+  },
+  linkText: {
+    color: theme.colors.primary,
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
