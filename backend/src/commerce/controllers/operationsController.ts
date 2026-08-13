@@ -2,12 +2,14 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type {
   CommerceCostSummary,
+  CommerceMoneySummary,
   GetCommerceCostsResponse,
   ListCommerceJobsResponse,
 } from '@stewra/shared-types';
 import { COMMERCE_JOB_STATUSES } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { commerceInboxRepository } from '../repositories/commerceInboxRepository.js';
+import { messageCostRepository } from '../repositories/messageCostRepository.js';
 import { jobRepository } from '../repositories/jobRepository.js';
 import { orgContext } from '../middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
@@ -48,7 +50,10 @@ class OperationsController extends BaseController {
         ]);
       }
 
-      const counts = await commerceInboxRepository.costSummary({ orgId, from, to });
+      const [counts, moneyTotals] = await Promise.all([
+        commerceInboxRepository.costSummary({ orgId, from, to }),
+        messageCostRepository.moneySummary({ orgId, from, to }),
+      ]);
       const summary: CommerceCostSummary = {
         orgId,
         from: from.toISOString(),
@@ -58,7 +63,15 @@ class OperationsController extends BaseController {
         freeMessages: counts.freeMessages,
         unpricedMessages: counts.unpricedMessages,
       };
-      const body: GetCommerceCostsResponse = { summary };
+      // `complete` folds in BOTH gaps: messages the rater refused (unrated) and messages no
+      // receipt has priced yet (unpriced). A period is closeable only when this is true — Phase
+      // 2.4 keeps an invoice for an incomplete period in draft.
+      const money: CommerceMoneySummary = {
+        ...moneyTotals,
+        complete:
+          !messageCostRepository.hasUnrated(moneyTotals) && counts.unpricedMessages === 0,
+      };
+      const body: GetCommerceCostsResponse = { summary, money };
       this.handleSuccess(res, body);
     } catch (error) {
       this.handleError(error, res, 'OperationsController.costs');

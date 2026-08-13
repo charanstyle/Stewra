@@ -74,6 +74,7 @@ async function connectedAccount(orgId: string, expiresAt: Date): Promise<string>
     displayPhoneNumber: null,
     credentialRef,
     credentialExpiresAt: expiresAt,
+    billingCurrency: 'USD',
     meta: {},
   });
   return account.id;

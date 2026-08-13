@@ -225,6 +225,20 @@ class MetaEmbeddedSignupService {
     );
 
     const credentialRef = await vault.put(businessToken);
+    // The WABA's billing currency selects the rate card its messages are billed from (migration
+    // 051). Normalized to the uppercase ISO shape the column checks; anything else — including
+    // Meta reporting nothing — is stored honestly as null, and those messages surface on the cost
+    // report under `unrated_no_currency` instead of being billed under a guessed currency.
+    const reportedCurrency = waba.currency?.trim().toUpperCase() ?? null;
+    const billingCurrency =
+      reportedCurrency !== null && /^[A-Z]{3}$/.test(reportedCurrency) ? reportedCurrency : null;
+    if (billingCurrency === null) {
+      logger.warn('meta commerce: WABA reported no usable billing currency', {
+        orgId: params.orgId,
+        wabaId,
+        reported: waba.currency ?? null,
+      });
+    }
     const accountMeta: ChannelAccountMeta = {
       ...(waba.name === undefined ? {} : { businessId: waba.id }),
       ...(number.verified_name === undefined ? {} : { verifiedName: number.verified_name }),
@@ -238,6 +252,7 @@ class MetaEmbeddedSignupService {
         platform: 'whatsapp_cloud',
         externalAccountId: wabaId,
         phoneNumberId: number.id,
+        billingCurrency,
         displayName: number.display_phone_number ?? waba.name ?? wabaId,
         // The same value as `displayName` in the common case, and deliberately NOT the fallback
         // chain. Anything that points AT this number — a `wa.me` opt-in link, a printed QR — needs

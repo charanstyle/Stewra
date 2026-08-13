@@ -350,6 +350,72 @@ export interface CommerceMessage {
 }
 
 /**
+ * The rating outcome for one delivered message — money in real currency, kept BESIDE the honest
+ * counts of {@link CommerceCostSummary}, never folded into them.
+ *
+ * Three priced states and four refusals. The refusals are the design: a message whose price cannot
+ * be established from Meta's receipt plus the operator-loaded rate card stays visibly unrated with
+ * a NULL amount, rather than becoming a guessed line on an invoice or quietly shrinking a total.
+ */
+export const MESSAGE_COST_STATES = [
+  /** Billable, and the live rate card priced it. */
+  'rated',
+  /** Meta explicitly said not billable. Amount zero. */
+  'free',
+  /**
+   * Conversation-priced (service messages remain CBP until 2026-10-01), and another message in the
+   * same provider conversation already carries the charge. Amount zero, rate still snapshotted.
+   */
+  'rated_zero_conversation_dup',
+  /** Billable under a category this build cannot map — Meta's raw word is on the message row. */
+  'unrated_no_category',
+  /** The sending account's WABA never reported a billing currency. */
+  'unrated_no_currency',
+  /** The recipient's number matches no assigned calling code — its country is unknowable. */
+  'unrated_no_country',
+  /** The live card lists no price for this (country, category). There is no fallback rate. */
+  'unrated_no_rate',
+] as const;
+
+export type MessageCostState = (typeof MESSAGE_COST_STATES)[number];
+
+/**
+ * The money half of `GET /orgs/:orgId/costs` — ADDITIVE beside {@link CommerceCostSummary}, which
+ * keeps returning its four honest counts untouched.
+ *
+ * `byCurrency` is a map, not a single total: an org whose WABA currency changed mid-period has two
+ * real totals and no honest single one. All micros are decimal strings (bigint > 2^53).
+ */
+export interface CommerceMoneySummary {
+  readonly byCurrency: Readonly<
+    Record<
+      string,
+      {
+        /** Sum of rated amounts, in micros of this currency. */
+        readonly ratedMicros: string;
+        readonly ratedMessages: number;
+        /** Conversation-priced messages whose charge sits on another message's row. */
+        readonly conversationDupMessages: number;
+      }
+    >
+  >;
+  /** Explicitly-free messages (Meta said `billable: false`). */
+  readonly freeMessages: number;
+  /** Billable messages the rater could not price, by reason. Every non-zero is a bill discrepancy. */
+  readonly unratedBillable: Readonly<Record<MessageCostUnratedReason, number>>;
+  /**
+   * True only when nothing in the period is unrated AND nothing is unpriced (no receipt yet).
+   * An invoice built while this is false is a guess; Phase 2.4 keeps such invoices in `draft`.
+   */
+  readonly complete: boolean;
+}
+
+export type MessageCostUnratedReason = Extract<
+  MessageCostState,
+  'unrated_no_category' | 'unrated_no_currency' | 'unrated_no_country' | 'unrated_no_rate'
+>;
+
+/**
  * What one loaded price buys. `per_message` is Meta's model since 2025-07-01; `per_conversation`
  * survives because service messages stay conversation-priced until 2026-10-01, and the rater has to
  * know whether the second message in a conversation costs the amount again or nothing.

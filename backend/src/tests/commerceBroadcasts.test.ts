@@ -156,6 +156,7 @@ async function tenant(): Promise<Tenant> {
     displayPhoneNumber: null,
     credentialRef,
     credentialExpiresAt: null,
+    billingCurrency: 'USD',
     meta: {},
   });
 

@@ -5,6 +5,7 @@ import type {
   NormalizedTemplateEvent,
 } from './inbound/types.js';
 import { consentService } from './consentService.js';
+import { costRatingService } from './costRatingService.js';
 import { templateService } from './templateService.js';
 import { channelAccountRepository } from '../repositories/channelAccountRepository.js';
 import { commerceInboxRepository } from '../repositories/commerceInboxRepository.js';
@@ -167,11 +168,28 @@ class CommerceInboundService {
       billable: receipt.billable,
       providerConversationId: receipt.providerConversationId,
     });
-    if (!matched) {
+    if (matched === null) {
       logger.debug('commerce webhook: receipt matched no message of ours', {
         orgId: account.orgId,
         providerMessageId: receipt.providerMessageId,
         status: receipt.status,
+      });
+      return;
+    }
+
+    // Rate the moment `billable` is known — from the MERGED row, not this receipt's fragment, so
+    // a status-only retry after a priced receipt still rates the message it re-announces. Errors
+    // propagate: the webhook fan-out logs and captures them, the message simply stays unpriced
+    // (visible as `unpricedMessages` / `complete: false`), and 2.4's backfill job re-rates.
+    if (matched.billable !== null) {
+      await costRatingService.rateMessage({
+        orgId: account.orgId,
+        messageId: matched.messageId,
+        conversationId: matched.conversationId,
+        billable: matched.billable,
+        pricingCategory: matched.pricingCategory,
+        providerConversationId: matched.providerConversationId,
+        billingCurrency: account.billingCurrency,
       });
     }
   }

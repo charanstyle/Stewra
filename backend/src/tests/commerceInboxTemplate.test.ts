@@ -178,6 +178,7 @@ async function tenant(): Promise<Tenant> {
     displayPhoneNumber: null,
     credentialRef,
     credentialExpiresAt: null,
+    billingCurrency: 'USD',
     meta: {},
   });
 
@@ -525,6 +526,7 @@ describe('sending a template into a conversation', () => {
       displayPhoneNumber: null,
       credentialRef,
       credentialExpiresAt: null,
+      billingCurrency: 'USD',
       meta: {},
     });
     const otherTemplateId = await mirrorTemplate({

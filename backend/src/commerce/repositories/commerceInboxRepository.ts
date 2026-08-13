@@ -286,9 +286,11 @@ class CommerceInboxRepository {
    *     block at all. COALESCE keeps whatever a previous receipt established rather than blanking
    *     it, which would turn a priced message back into an unpriced one and lose it from the bill.
    *
-   * Returns false when no message matched — a receipt for something we never sent, which is a real
+   * Returns null when no message matched — a receipt for something we never sent, which is a real
    * possibility (another tool sending on the same number) and is logged rather than treated as an
-   * error.
+   * error. On a match it returns the message's POST-update pricing facts (the COALESCE-merged
+   * truth, not this one receipt's fragment), which is exactly what the cost rater consumes — a
+   * receipt that carried no pricing while an earlier one did must still rate from the merged row.
    */
   async applyDeliveryStatus(params: {
     orgId: string;
@@ -300,7 +302,13 @@ class CommerceInboxRepository {
     pricingModel: string | null;
     billable: boolean | null;
     providerConversationId: string | null;
-  }): Promise<boolean> {
+  }): Promise<{
+    messageId: string;
+    conversationId: string;
+    pricingCategory: MessagePricingCategory | null;
+    billable: boolean | null;
+    providerConversationId: string | null;
+  } | null> {
     const result = await db
       .updateTable('commerce_messages')
       .set((eb) => ({
@@ -342,8 +350,22 @@ class CommerceInboxRepository {
       }))
       .where('org_id', '=', params.orgId)
       .where('provider_message_id', '=', params.providerMessageId)
+      .returning([
+        'id',
+        'conversation_id',
+        'pricing_category',
+        'billable',
+        'provider_conversation_id',
+      ])
       .executeTakeFirst();
-    return Number(result.numUpdatedRows) > 0;
+    if (result === undefined) return null;
+    return {
+      messageId: result.id,
+      conversationId: result.conversation_id,
+      pricingCategory: result.pricing_category,
+      billable: result.billable,
+      providerConversationId: result.provider_conversation_id,
+    };
   }
 
   /**
