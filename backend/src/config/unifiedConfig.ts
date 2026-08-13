@@ -277,6 +277,12 @@ const EnvSchema = z.object({
   // They must not share an app id: the permissions differ (whatsapp_business_management,
   // whatsapp_business_messaging, business_management), the App Review is separate, and a single
   // revocation would otherwise take down both the assistant and every client at once.
+  // Who operates THIS INSTALL — comma-separated account emails. Gates the platform-operator
+  // surfaces (rate cards), which sit outside every org: they set the prices organizations are
+  // billed at, and no org role may ever reach them. Empty (the default) means NOBODY passes the
+  // gate — the fail-closed direction: an install that has not named its operators cannot load
+  // prices, rather than an install that forgot the var letting anyone who guesses the route in.
+  INSTALL_ADMIN_EMAILS: z.string().default(''),
   META_COMMERCE_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   // The Meta app id, sent to the browser to launch the Embedded Signup dialog. Public by nature.
   META_COMMERCE_APP_ID: z.string().min(1).optional(),
@@ -695,6 +701,11 @@ export const config = {
   web: {
     appUrl: env.WEB_APP_URL,
   },
+  // Lowercased once here so the middleware's comparison cannot be defeated by letter case. An
+  // empty list is a valid state meaning "no one" — see the env comment.
+  installAdmins: env.INSTALL_ADMIN_EMAILS.split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0),
   google: {
     clientId: env.GOOGLE_CLIENT_ID,
     clientSecret: env.GOOGLE_CLIENT_SECRET,

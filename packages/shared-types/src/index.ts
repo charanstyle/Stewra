@@ -72,6 +72,9 @@ export type {
   AudiencePreview,
   MessagePricingCategory,
   MessageCostAttribution,
+  RateUnit,
+  CommerceRateCard,
+  CommerceMessageRate,
   TemplateCategory,
   TemplateStatus,
   MessageTemplate,
@@ -106,6 +109,7 @@ export {
   SEGMENT_MATCH_MODES,
   AUDIENCE_BLOCK_REASONS,
   MESSAGE_PRICING_CATEGORIES,
+  RATE_UNITS,
   TEMPLATE_CATEGORIES,
   TEMPLATE_STATUSES,
   BROADCAST_STATUSES,
@@ -475,6 +479,11 @@ export type {
   GetCommerceCostsResponse,
   ListCommerceJobsRequest,
   ListCommerceJobsResponse,
+  LoadRateCardRequest,
+  LoadRateCardRate,
+  LoadRateCardResponse,
+  ListRateCardsResponse,
+  GetRateCardResponse,
 } from './api/commerce';
 
 // Realtime (Socket.IO) contract

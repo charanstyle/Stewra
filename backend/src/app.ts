@@ -26,6 +26,7 @@ import runnerRoutes from './routes/runner.js';
 import githubAppRoutes from './routes/githubApp.js';
 import whatsappWebhookRoutes from './routes/whatsappWebhook.js';
 import orgRoutes from './commerce/routes/organizations.js';
+import rateCardRoutes from './commerce/routes/rateCards.js';
 import metaWebhookRoutes from './commerce/routes/metaWebhook.js';
 import { commerceIntentService } from './commerce/services/commerceIntentService.js';
 import { commerceProposalExecutorRegistry, turnIntentRegistry } from './ports/turnIntent.js';
@@ -97,6 +98,9 @@ export function createApp(): Express {
   // Commerce plane — a separate bounded context (backend/src/commerce/), scoped by org_id rather
   // than user_id. Nothing under here shares tables with the personal-assistant routes above.
   app.use('/orgs', orgRoutes);
+  // Platform-operator surface (migration 050): the price list every org is billed from. Gated by
+  // requireInstallAdmin, never by org role — a client must not edit the price they pay.
+  app.use('/platform/rate-cards', rateCardRoutes);
   app.use('/conversations', conversationsRoutes);
   app.use('/messages', messagesRoutes);
   app.use('/users', usersRoutes);

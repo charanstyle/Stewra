@@ -11,6 +11,10 @@ import type {
   CommerceBroadcast,
   CommerceContact,
   CommerceConversationSummary,
+  CommerceMessageRate,
+  CommerceRateCard,
+  MessagePricingCategory,
+  RateUnit,
   CommerceCostSummary,
   CommerceJob,
   CommerceJobStatus,
@@ -750,4 +754,47 @@ export interface ListOptinLinksResponse {
 /** POST /orgs/:orgId/optin-links/:linkId/disable — stop honouring it, keep the consents it gathered. */
 export interface DisableOptinLinkResponse {
   readonly link: OptinLink;
+}
+
+/**
+ * The platform-operator rate-card surface — `/platform/rate-cards`, NOT under `/orgs/:orgId`.
+ *
+ * The one deliberate exception to the comment at the top of this file: these routes sit behind the
+ * install-admin gate rather than `requireOrgMember`, because they set the prices organizations are
+ * billed at, and a client must never edit the price they pay. No org role, including owner, grants
+ * any access here.
+ */
+
+/** POST /platform/rate-cards — load one transcription of Meta's price sheet for one currency. */
+export interface LoadRateCardRequest {
+  /** ISO 4217, uppercase — the WABA billing currency this card prices. */
+  readonly currency: string;
+  /** ISO timestamp the prices take effect; must be strictly after the live card's, if one exists. */
+  readonly effectiveFrom: string;
+  /** Which Meta document was transcribed (URL or filename plus its published date). Required. */
+  readonly sourceNote: string;
+  readonly rates: readonly LoadRateCardRate[];
+}
+
+export interface LoadRateCardRate {
+  readonly countryCallingCode: string;
+  readonly pricingCategory: MessagePricingCategory;
+  /** Micros as a decimal string — the value is a bigint and JSON numbers round above 2^53. */
+  readonly amountMicros: string;
+  readonly unit: RateUnit;
+}
+
+export interface LoadRateCardResponse {
+  readonly card: CommerceRateCard;
+}
+
+/** GET /platform/rate-cards — every card ever loaded, including closed eras. */
+export interface ListRateCardsResponse {
+  readonly cards: readonly CommerceRateCard[];
+}
+
+/** GET /platform/rate-cards/:cardId — one card and its full price list. */
+export interface GetRateCardResponse {
+  readonly card: CommerceRateCard;
+  readonly rates: readonly CommerceMessageRate[];
 }

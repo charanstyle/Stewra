@@ -350,6 +350,54 @@ export interface CommerceMessage {
 }
 
 /**
+ * What one loaded price buys. `per_message` is Meta's model since 2025-07-01; `per_conversation`
+ * survives because service messages stay conversation-priced until 2026-10-01, and the rater has to
+ * know whether the second message in a conversation costs the amount again or nothing.
+ */
+export const RATE_UNITS = ['per_message', 'per_conversation'] as const;
+
+export type RateUnit = (typeof RATE_UNITS)[number];
+
+/**
+ * One operator load of Meta's published price sheet, for one currency.
+ *
+ * Platform-operator data, not tenant data: it has no `orgId`, every organization is billed from the
+ * same card, and no org member can read or write it. Immutable once loaded — a card is superseded
+ * by loading its successor, which closes this one by stamping `effectiveTo`. Prices are
+ * pass-through: these are Meta's numbers transcribed, never marked up.
+ */
+export interface CommerceRateCard {
+  readonly id: UUID;
+  /** ISO 4217, uppercase. The WABA's billing currency; one card prices exactly one. */
+  readonly currency: string;
+  readonly effectiveFrom: ISODateString;
+  /** Null while this is the live card for its currency. */
+  readonly effectiveTo: ISODateString | null;
+  /** Which Meta document these numbers were transcribed from — the answer to a disputed invoice. */
+  readonly sourceNote: string;
+  readonly loadedByUserId: UUID | null;
+  /** How many prices the card carries. */
+  readonly rateCount: number;
+  readonly createdAt: ISODateString;
+}
+
+/**
+ * One price on a rate card: recipient country (as its E.164 calling code) × Meta's pricing
+ * category → an amount.
+ *
+ * `amountMicros` is a decimal string of MICROS (1_000_000 = 1 unit of the card's currency), because
+ * the true value is a bigint and JSON numbers round above 2^53. There is no fallback rate: a
+ * (country, category) absent from the card yields an unrated message, counted and visible, never a
+ * guessed amount.
+ */
+export interface CommerceMessageRate {
+  readonly countryCallingCode: string;
+  readonly pricingCategory: MessagePricingCategory;
+  readonly amountMicros: string;
+  readonly unit: RateUnit;
+}
+
+/**
  * A hand-applied label on a contact. The name is what people type, so identity ignores its case —
  * "VIP" and "vip" as two separate tags splits an audience in half and reports nothing wrong.
  */
