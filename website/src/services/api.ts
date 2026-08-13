@@ -498,6 +498,10 @@ export const api = {
 
   getBriefing: (): Promise<GetBriefingResponse> => request('/home/briefing'),
 
+  /** Manual refresh: sync mail + bank data, rebuild the briefing. Refused (409) while paused. */
+  recomputeToday: (): Promise<GetBriefingResponse> =>
+    request('/home/recompute', { method: 'POST', body: {} }),
+
   listSuggestions: (): Promise<ListSuggestionsResponse> => request('/home/suggestions'),
 
   snoozeSuggestion: (
