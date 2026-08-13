@@ -285,7 +285,10 @@ no reason and no total. Eight of them were Today tests skipping on a run that ha
 configured and could have provisioned what they needed.
 
 `E2E_MAX_SKIPS=<n>` turns the census into an assertion: over budget fails the run. Unset means report
-only — a default ceiling nobody chose would just get raised the first time it bit.
+only — a default ceiling nobody chose would just get raised the first time it bit. The main suite's
+budget is pinned in the tracked `.env.e2e` (`E2E_MAX_SKIPS=6` — the sign-up, runner-session and
+re-consent-banner tests across the two browser profiles, each conditional by design); a real
+environment variable still wins, which is how CI holds the commerce suite to `0`.
 
 > The reporter fails the run by returning `{ status: 'failed' }` from `onEnd()`. Setting
 > `process.exitCode` there is silently discarded — Playwright computes the exit code from the
@@ -311,11 +314,12 @@ When the account has no email thread at all, seeding raises `NoSeedableThreadErr
 tests skip with that as their named, counted reason. Any *other* seeding failure propagates and reds
 the run.
 
-> **Known gap:** both QA accounts (`qa-e2e+q2a@`, `qa-e2e+q2b@`) currently have zero connections,
-> email_threads, email_messages and suggestions, so the 8 Today action tests have never actually run.
-> Fixing it means connecting Gmail for a QA account and running `POST /home/recompute`. Fabricating a
-> `connections` row directly would kick off unbounded background sync, so it is deliberately not done
-> here.
+> **Closed gap (2026-08-13):** the original QA pair had zero connections, so the 8 Today action
+> tests had never run. The current pair (`qa-e2e+q3a@`, `qa-e2e+q3b@`) fixed that the intended way:
+> user A has the dedicated QA Google account (`E2E_QA_GMAIL` in `.env.e2e`) connected on production
+> and `POST /home/recompute` produced a real briefing, so the Today tests now execute — 94/100 with
+> only the six budgeted conditional skips. Fabricating a `connections` row directly would kick off
+> unbounded background sync, so it is still deliberately not done here.
 
 ---
 
