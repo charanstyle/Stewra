@@ -173,3 +173,30 @@ jobs:
           curl -sf -o /dev/null "$E2E_SMOKE_TARGET/" \
             || { echo "vite preview never came up on $E2E_SMOKE_TARGET"; exit 1; }
           npm run test:smoke:preview
+
+      # The commerce e2e is fully self-hosting: its global setup boots a stand-in Graph server, a
+      # real backend (against the same test database migrated above, with Meta env it generates per
+      # run), and a real `vite` dev server — then drives the whole tenant flow through a browser. It
+      # needs nothing this job has not already provided: backend/.env.test, the migrated database,
+      # the workspace install (tsx, vite), and the Playwright chromium from the smoke-gate install.
+      #
+      # E2E_MAX_SKIPS=0 on purpose: a suite that provisions everything it needs has no legitimate
+      # reason to skip, so here the census is an assertion — a skip is a regression, not a footnote.
+      - name: Commerce e2e (real backend + website, Graph stub)
+        working-directory: website/e2e
+        env:
+          E2E_MAX_SKIPS: '0'
+        run: npm run test:e2e:commerce
+
+      # Playwright traces/screenshots for any failed commerce spec — useless in the log, invaluable
+      # when a spec fails only in CI.
+      - name: Upload commerce e2e artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: commerce-e2e-artifacts
+          path: |
+            website/e2e/.artifacts/commerce-report
+            website/e2e/.artifacts/commerce-results
+          retention-days: 7
+          if-no-files-found: ignore
