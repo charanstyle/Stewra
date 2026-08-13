@@ -211,6 +211,24 @@ async function statusOf(invoiceId: string): Promise<string> {
   return row.status;
 }
 
+/**
+ * The webhook controller is deliberately ACK-then-work: the 200 is on the wire BEFORE `applyEvent`
+ * touches the database. So "the genuine delivery pays the invoice" is eventually true, not
+ * synchronously true after the request resolves — asserting `statusOf` immediately races the apply
+ * and loses on a slow runner (it did, in CI). Poll briefly; on timeout return whatever is stored so
+ * the assertion still fails with the real status in the message.
+ */
+async function waitForStatus(invoiceId: string, expected: string): Promise<string> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const status = await statusOf(invoiceId);
+    if (status === expected || Date.now() > deadline) {
+      return status;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 let operatorId = '';
 
 beforeAll(async () => {
@@ -382,7 +400,7 @@ describe('charging', () => {
       .set('stripe-signature', signedHeader(payload))
       .send(payload);
     expect(genuine.status).toBe(200);
-    expect(await statusOf(invoiceId)).toBe('paid');
+    expect(await waitForStatus(invoiceId, 'paid')).toBe('paid');
     expect((await attemptsOf(invoiceId)).map((a) => a.status)).toEqual(['succeeded']);
 
     // Stripe retries webhooks for days; the replay finds nothing pending and changes nothing.
