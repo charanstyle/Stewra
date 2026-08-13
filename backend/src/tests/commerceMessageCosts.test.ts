@@ -191,6 +191,15 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   if (createdOrgs.length > 0) {
+    // Rated messages now book their unreserved actuals onto the spend tables (Phase 2.3); the
+    // ledger is trigger-enforced append-only, lifted only here in the harness for fixture cleanup.
+    await db.transaction().execute(async (trx) => {
+      await sql`ALTER TABLE commerce_spend_ledger DISABLE TRIGGER stewra_commerce_spend_ledger_append_only`.execute(trx);
+      await trx.deleteFrom('commerce_spend_ledger').where('org_id', 'in', createdOrgs).execute();
+      await sql`ALTER TABLE commerce_spend_ledger ENABLE TRIGGER stewra_commerce_spend_ledger_append_only`.execute(trx);
+    });
+    await db.deleteFrom('commerce_spend_periods').where('org_id', 'in', createdOrgs).execute();
+    await db.deleteFrom('commerce_spend_caps').where('org_id', 'in', createdOrgs).execute();
     // Cost rows first (they FK both messages and rate cards), then the message chain, then orgs.
     await db.deleteFrom('commerce_message_costs').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('commerce_messages').where('org_id', 'in', createdOrgs).execute();

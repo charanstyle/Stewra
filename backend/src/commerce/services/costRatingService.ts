@@ -5,6 +5,7 @@ import { messageCostRepository } from '../repositories/messageCostRepository.js'
 import type { CostOutcome } from '../repositories/messageCostRepository.js';
 import { rateCardRepository } from '../repositories/rateCardRepository.js';
 import { countryCallingCode } from './callingCodes.js';
+import { spendCapService } from './spendCapService.js';
 
 /**
  * Turn a delivery receipt's pricing facts into one cost row — the moment a message's price is
@@ -48,6 +49,12 @@ class CostRatingService {
     // Meta said free. Zero, in whatever currency we know (or none) — no rate lookup involved.
     if (!params.billable) {
       await this.write({ ...base, state: 'free', amountMicros: 0n });
+      await spendCapService.settleFromRating({
+        orgId: params.orgId,
+        messageId: params.messageId,
+        amountMicros: 0n,
+        currency: params.billingCurrency,
+      });
       return;
     }
 
@@ -95,7 +102,24 @@ class CostRatingService {
       // this one records the same provenance at zero, so the conversation's message count and its
       // single charge are both visible.
       await this.write({ ...rated, state: 'rated_zero_conversation_dup', amountMicros: 0n });
+      await spendCapService.settleFromRating({
+        orgId: params.orgId,
+        messageId: params.messageId,
+        amountMicros: 0n,
+        currency: params.billingCurrency,
+      });
+      return;
     }
+    // The receipt priced it — the spend cap's reservation settles at what Meta actually charged.
+    // Idempotent (the ledger allows one closing entry per message), so a replayed webhook that
+    // reached the already_rated no-op above cannot credit a period twice. The unrated states above
+    // deliberately never settle: money that cannot be priced must not free headroom.
+    await spendCapService.settleFromRating({
+      orgId: params.orgId,
+      messageId: params.messageId,
+      amountMicros: rate.amountMicros,
+      currency: params.billingCurrency,
+    });
   }
 
   private async write(outcome: CostOutcome): Promise<void> {

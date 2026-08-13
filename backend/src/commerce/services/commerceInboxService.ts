@@ -5,7 +5,9 @@ import type {
 import { channelAccountService } from './channelAccountService.js';
 import { consentService } from './consentService.js';
 import { buildSender } from './senders/index.js';
+import { WhatsappSendRefusedError } from './senders/whatsappCloudSender.js';
 import { renderTemplateBody } from './templateBody.js';
+import { spendCapService } from './spendCapService.js';
 import { templateService } from './templateService.js';
 import { channelAccountRepository } from '../repositories/channelAccountRepository.js';
 import { commerceInboxRepository } from '../repositories/commerceInboxRepository.js';
@@ -262,6 +264,29 @@ class CommerceInboxService {
       purpose,
     });
 
+    // A template through the inbox is the same billable send a broadcast makes, so it faces the
+    // same cap: price this exact send, or refuse. Sending a campaign one recipient at a time must
+    // not be cheaper — in money terms now, not just permission terms — than sending the campaign.
+    if (account.billingCurrency === null) {
+      throw new ForbiddenError(
+        'This WhatsApp account never reported its billing currency, so template sends through it ' +
+          'cannot be priced against the spend cap. Reconnect the account.',
+        'SPEND_CAP',
+      );
+    }
+    const estimateMicros = await spendCapService.estimateSendMicros({
+      billingCurrency: account.billingCurrency,
+      recipientExternalId: to,
+      pricingCategory: template.category ?? 'marketing',
+    });
+    if (estimateMicros === null) {
+      throw new ForbiddenError(
+        `No ${account.billingCurrency} rate is loaded for this contact's country and the ` +
+          "template's category, so this send cannot be priced against the spend cap.",
+        'SPEND_CAP',
+      );
+    }
+
     // Same order as a reply: the row exists BEFORE the send, so a failure leaves evidence.
     const queued = await commerceInboxRepository.recordOutbound({
       orgId: params.orgId,
@@ -271,6 +296,30 @@ class CommerceInboxService {
       sentByUserId: params.sentByUserId,
       templateId: template.id,
     });
+
+    // No reservation, no send. Between the message row (which gives the reservation its
+    // message_id) and the transport, so a refusal here has provably sent nothing.
+    const reserved = await spendCapService.reserve({
+      orgId: params.orgId,
+      currency: account.billingCurrency,
+      amountMicros: estimateMicros,
+      messageId: queued.id,
+      broadcastId: null,
+    });
+    if (reserved === 'insufficient') {
+      const reason = 'Not sent: the spend cap left no headroom for this message.';
+      await commerceInboxRepository.settleOutbound({
+        orgId: params.orgId,
+        messageId: queued.id,
+        status: 'failed',
+        failureReason: reason,
+      });
+      throw new ForbiddenError(
+        `The ${account.billingCurrency} spend cap is exhausted for this month. Paid messages are ` +
+          'not allowed until it is raised.',
+        'SPEND_CAP',
+      );
+    }
 
     try {
       const sender = buildSender(await channelAccountService.resolve(account));
@@ -287,6 +336,13 @@ class CommerceInboxService {
         providerMessageId,
       });
     } catch (error) {
+      // Meta answering "no" is the one outcome that certainly spent nothing — its reservation is
+      // released. Any other error leaves the outcome unknown and the reservation deliberately HELD:
+      // the message may have been delivered, and headroom must keep honoring that until a receipt
+      // (or the backfill job) settles the truth.
+      if (error instanceof WhatsappSendRefusedError) {
+        await spendCapService.releaseForRefusedSend(queued.id, error.message);
+      }
       const reason = error instanceof Error ? error.message : String(error);
       await commerceInboxRepository.settleOutbound({
         orgId: params.orgId,

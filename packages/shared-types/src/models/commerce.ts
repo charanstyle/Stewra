@@ -464,6 +464,72 @@ export interface CommerceMessageRate {
 }
 
 /**
+ * One entry in the spend evidence trail. `cap_set` records a grant (amount = the new limit);
+ * `reserve` holds estimated money immediately before a send; exactly one of `release` (Meta refused
+ * the send — the spend certainly did not happen) or `settle` (a receipt priced it; amount = the
+ * actual charge, possibly zero) closes a reservation. A reservation whose send outcome is unknown
+ * stays open on purpose — the money may have been spent, and headroom must keep honoring that.
+ * `actual_unreserved` books a charge that never had a reservation — a conversation the customer
+ * opened, a send predating the cap — so the period's actuals stay complete without pretending a
+ * hold existed.
+ */
+export const SPEND_LEDGER_KINDS = [
+  'cap_set',
+  'reserve',
+  'release',
+  'settle',
+  'actual_unreserved',
+] as const;
+
+export type SpendLedgerKind = (typeof SPEND_LEDGER_KINDS)[number];
+
+/**
+ * The billable-spend allowance for one (org, currency).
+ *
+ * **Absence is the default, and the default is zero.** A new organization may use the platform's
+ * own resources freely, but third-party charges — Meta's message prices — are not allowed until
+ * headroom is granted: by an install operator today, by a payment once Phase 2.5 lands. Free and
+ * service-window messages never consult this; the cap governs money, not messaging.
+ *
+ * Granted only through the install-admin surface. An org can read its cap and usage, never raise
+ * it — a client raising their own spend limit before paying is the exposure this closes.
+ */
+export interface CommerceSpendCap {
+  readonly id: UUID;
+  readonly orgId: UUID;
+  /** ISO 4217, matching the WABA billing currency the reservations are priced in. */
+  readonly currency: string;
+  /** The monthly allowance, micros as a decimal string. Zero is a real, deliberate value. */
+  readonly limitMicros: string;
+  readonly grantedByUserId: UUID | null;
+  /** Why this org has this headroom — "paid invoice #12", "pilot agreement". */
+  readonly note: string;
+  readonly createdAt: ISODateString;
+  readonly updatedAt: ISODateString;
+}
+
+/**
+ * One (org, currency) month of cap accounting, UTC calendar months.
+ *
+ * `reservedMicros` is money promised to in-flight sends whose receipts have not landed;
+ * `actualMicros` is what Meta's receipts actually priced. Enforcement is
+ * `reserved + actual + delta <= limit` in a single UPDATE, so `actualMicros` may legitimately end
+ * above the limit (a conversation-priced receipt can exceed its per-message reservation) — the
+ * overshoot is shown, not hidden. All micros are decimal strings.
+ */
+export interface CommerceSpendUsage {
+  readonly currency: string;
+  /** First day of the month, UTC, as an ISO date (YYYY-MM-DD). */
+  readonly periodStart: string;
+  readonly reservedMicros: string;
+  readonly actualMicros: string;
+  /** The granted limit, or null when no cap row exists — which means zero headroom, not unlimited. */
+  readonly limitMicros: string | null;
+  /** max(0, limit - reserved - actual), or "0" when no cap exists. What a new send may reserve. */
+  readonly headroomMicros: string;
+}
+
+/**
  * A hand-applied label on a contact. The name is what people type, so identity ignores its case —
  * "VIP" and "vip" as two separate tags splits an audience in half and reports nothing wrong.
  */

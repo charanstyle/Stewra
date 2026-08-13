@@ -78,6 +78,9 @@ export type {
   MessageCostState,
   MessageCostUnratedReason,
   CommerceMoneySummary,
+  SpendLedgerKind,
+  CommerceSpendCap,
+  CommerceSpendUsage,
   TemplateCategory,
   TemplateStatus,
   MessageTemplate,
@@ -114,6 +117,7 @@ export {
   MESSAGE_PRICING_CATEGORIES,
   RATE_UNITS,
   MESSAGE_COST_STATES,
+  SPEND_LEDGER_KINDS,
   TEMPLATE_CATEGORIES,
   TEMPLATE_STATUSES,
   BROADCAST_STATUSES,
@@ -488,6 +492,10 @@ export type {
   LoadRateCardResponse,
   ListRateCardsResponse,
   GetRateCardResponse,
+  SetSpendCapRequest,
+  SetSpendCapResponse,
+  ListSpendCapsResponse,
+  GetOrgSpendResponse,
 } from './api/commerce';
 
 // Realtime (Socket.IO) contract

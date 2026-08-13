@@ -37,6 +37,7 @@ import type {
   ContactImportStatus,
   CommerceJobStatus,
   MessageCostState,
+  SpendLedgerKind,
   MessagePricingCategory,
   RateUnit,
   TemplateCategory,
@@ -1260,6 +1261,53 @@ export interface CommerceMessageCostsTable {
   priced_at: CreatedAt;
 }
 
+/**
+ * The granted spend limit for one (org, currency) — migration 052. **No row means zero billable
+ * spend allowed**: headroom exists only where someone with install-operator authority granted it.
+ * `limit_micros` comes back from pg as a string; convert with BigInt().
+ */
+export interface CommerceSpendCapsTable {
+  id: Generated<string>;
+  org_id: string;
+  currency: string;
+  limit_micros: string;
+  granted_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  note: string;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/**
+ * One month's reservation/actual counters for one (org, currency) — migration 052. The cap is
+ * enforced by a single UPDATE against this row; both counters are pg bigints returned as strings.
+ */
+export interface CommerceSpendPeriodsTable {
+  id: Generated<string>;
+  org_id: string;
+  currency: string;
+  /** First day of the month, UTC, as a date. */
+  period_start: ColumnType<Date, string, never>;
+  reserved_micros: ColumnType<string, string | undefined, string>;
+  actual_micros: ColumnType<string, string | undefined, string>;
+}
+
+/**
+ * One spend event (migration 052): a cap grant, a pre-send reservation, or its closing release/
+ * settle. Append-only by trigger; the period counters are the enforcement, this is the evidence.
+ */
+export interface CommerceSpendLedgerTable {
+  id: Generated<string>;
+  org_id: string;
+  currency: string;
+  period_start: ColumnType<Date, string, never>;
+  kind: SpendLedgerKind;
+  amount_micros: ColumnType<string, string, never>;
+  message_id: ColumnType<string | null, string | null | undefined, never>;
+  broadcast_id: ColumnType<string | null, string | null | undefined, never>;
+  note: ColumnType<string | null, string | null | undefined, never>;
+  created_at: CreatedAt;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -1331,4 +1379,9 @@ export interface Database {
   commerce_rate_cards: CommerceRateCardsTable;
   commerce_message_rates: CommerceMessageRatesTable;
   commerce_message_costs: CommerceMessageCostsTable;
+  // ── Spend caps (migration 052): org-scoped counters and evidence, but the cap itself is granted
+  //    only through the install-admin surface — an org can read its cap, never raise it. ──
+  commerce_spend_caps: CommerceSpendCapsTable;
+  commerce_spend_periods: CommerceSpendPeriodsTable;
+  commerce_spend_ledger: CommerceSpendLedgerTable;
 }

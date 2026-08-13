@@ -7,6 +7,7 @@ import { commerceInboxRepository } from '../repositories/commerceInboxRepository
 import { jobRepository } from '../repositories/jobRepository.js';
 import { channelAccountService } from '../services/channelAccountService.js';
 import { consentService } from '../services/consentService.js';
+import { spendCapService } from '../services/spendCapService.js';
 import { buildSender } from '../services/senders/index.js';
 import { WhatsappSendRefusedError } from '../services/senders/whatsappCloudSender.js';
 import { renderTemplateBody } from '../services/templateBody.js';
@@ -75,10 +76,23 @@ class BroadcastSendHandler implements JobHandler {
       return { kind: 'done' };
     }
 
-    // A paused broadcast reached by a send job resumes. The only automatic pause is quiet hours, and
-    // this job arriving is the retry cadence firing; if it is still quiet, the per-recipient consent
-    // gate below pauses it right back. A member's cancel is a different status and ends above.
+    // A paused broadcast reached by a send job resumes — quiet hours' retry cadence firing; if it
+    // is still quiet, the per-recipient consent gate below pauses it right back. A member's cancel
+    // is a different status and ends above. The one pause a job must NOT undo is the spend cap's:
+    // a quiet-hours retry landing on a capped broadcast would un-pause it, reserve nothing, and
+    // pause it again — or worse, race a half-raised cap. Headroom is re-checked first, and a
+    // capped broadcast stays parked until `resume` (which checks the same predicate) is called.
     if (broadcast.status === 'paused') {
+      const account0 = await channelAccountRepository.findForOrg(
+        job.orgId,
+        broadcast.channelAccountId,
+      );
+      if (
+        account0 === null ||
+        !(await spendCapService.hasHeadroom(job.orgId, account0.billingCurrency))
+      ) {
+        return { kind: 'done' };
+      }
       const resumed = await broadcastRepository.transition({
         orgId: job.orgId,
         broadcastId,
@@ -117,6 +131,19 @@ class BroadcastSendHandler implements JobHandler {
       }
       throw error;
     }
+
+    // Sends through a WABA with no reported billing currency cannot be priced, and unpriceable
+    // spend is not allowed — the same zero-by-default rule the reservation below enforces, caught
+    // before a batch is claimed for it.
+    if (account.billingCurrency === null) {
+      await this.pauseForCap(
+        job.orgId,
+        broadcastId,
+        'This WhatsApp account never reported its billing currency, so its sends cannot be priced against a spend cap.',
+      );
+      return { kind: 'done' };
+    }
+    const billingCurrency = account.billingCurrency;
 
     const claimed = await broadcastRepository.claimPending(broadcastId, BATCH_SIZE);
     if (claimed.length === 0) {
@@ -200,6 +227,29 @@ class BroadcastSendHandler implements JobHandler {
         throw error;
       }
 
+      // Price this exact send before making it — the same (currency, country, category) lookup the
+      // rater will repeat when the receipt lands. A recipient whose price cannot be named is
+      // skipped, not waved through: under a zero-by-default cap, spend of unknowable size is spend
+      // that was not granted. The skip's reason lands in the ledger like the consent skips do.
+      const estimate = await spendCapService.estimateSendMicros({
+        billingCurrency,
+        recipientExternalId: recipient.externalId,
+        pricingCategory: template.category ?? 'marketing',
+      });
+      if (estimate === null) {
+        await broadcastRepository.settleRecipient({
+          recipientId: recipient.id,
+          status: 'skipped',
+          reason:
+            `No ${billingCurrency} rate is loaded for this recipient's country and the template's ` +
+            'category, so this send cannot be priced against the spend cap.',
+          providerMessageId: null,
+          messageId: null,
+          sentAt: null,
+        });
+        continue;
+      }
+
       const outcome = await this.sendToRecipient({
         orgId: job.orgId,
         broadcast: { id: broadcastId, createdByUserId: broadcast.createdByUserId },
@@ -209,13 +259,28 @@ class BroadcastSendHandler implements JobHandler {
         renderedBody,
         recipient,
         sender,
+        billingCurrency,
+        estimateMicros: estimate,
       });
-      if (outcome !== null) {
+      if (outcome.kind === 'cap_exhausted') {
+        // The reservation found no headroom left. Like quiet hours, everyone not yet attempted goes
+        // back to `pending` — including this recipient, whose send was refused before any attempt —
+        // but UNLIKE quiet hours, NO retry is enqueued: a night ends on its own, a cap clears only
+        // when someone grants headroom, and `resume` re-checks it.
+        await broadcastRepository.releaseClaims(claimed.slice(i).map((r) => r.id));
+        await this.pauseForCap(
+          job.orgId,
+          broadcastId,
+          `The ${billingCurrency} spend cap is exhausted for this month. Raise it, then resume.`,
+        );
+        return { kind: 'done' };
+      }
+      if (outcome.kind === 'unknown') {
         // Unknown-outcome transport failure. Nothing says Meta is reachable for the rest of the
         // batch either, so stop here and let the queue's backoff decide when to try the NEXT batch —
-        // this recipient stays `sending`, per the asymmetry above.
+        // this recipient stays `sending` and their reservation stays HELD, per the asymmetry above.
         await broadcastRepository.refreshCounts(broadcastId);
-        return { kind: 'retry', reason: outcome };
+        return { kind: 'retry', reason: outcome.reason };
       }
     }
 
@@ -229,12 +294,14 @@ class BroadcastSendHandler implements JobHandler {
   }
 
   /**
-   * One recipient: record the message, send it, settle both.
+   * One recipient: record the message, reserve its money, send it, settle both.
    *
-   * Returns null on a settled outcome (sent, or Meta refused), and the error text when the outcome
-   * is UNKNOWN — the request errored without Meta answering, so the message may or may not exist.
-   * The recipient is left in `sending` with the reason noted, and the message row stays `queued`:
-   * both say honestly that nobody knows, instead of a `failed` that might have been delivered.
+   * `{kind: 'settled'}` covers sent AND Meta-refused — both are decided. `{kind: 'unknown'}` is a
+   * request that errored without Meta answering, so the message may or may not exist: the recipient
+   * stays `sending`, the message stays `queued`, and the reservation stays HELD — all three say
+   * honestly that nobody knows. `{kind: 'cap_exhausted'}` means the reservation was refused before
+   * any attempt; the message row is settled `failed` as evidence, and the recipient is safe to
+   * release because nothing was ever sent.
    */
   private async sendToRecipient(params: {
     orgId: string;
@@ -245,7 +312,11 @@ class BroadcastSendHandler implements JobHandler {
     renderedBody: string;
     recipient: BroadcastRecipient;
     sender: ReturnType<typeof buildSender>;
-  }): Promise<string | null> {
+    billingCurrency: string;
+    estimateMicros: bigint;
+  }): Promise<
+    { kind: 'settled' } | { kind: 'cap_exhausted' } | { kind: 'unknown'; reason: string }
+  > {
     const conversationId = await commerceInboxRepository.upsertConversation({
       orgId: params.orgId,
       channelAccountId: params.account.id,
@@ -264,6 +335,26 @@ class BroadcastSendHandler implements JobHandler {
       sentByUserId: params.broadcast.createdByUserId,
       templateId: params.template.id,
     });
+
+    // No reservation, no send — this single statement is the cap. It sits between the message row
+    // and the transport on purpose: the row gives the reservation its message_id, and a refusal
+    // here has provably sent nothing yet.
+    const reserved = await spendCapService.reserve({
+      orgId: params.orgId,
+      currency: params.billingCurrency,
+      amountMicros: params.estimateMicros,
+      messageId: message.id,
+      broadcastId: params.broadcast.id,
+    });
+    if (reserved === 'insufficient') {
+      await commerceInboxRepository.settleOutbound({
+        orgId: params.orgId,
+        messageId: message.id,
+        status: 'failed',
+        failureReason: 'Not sent: the spend cap left no headroom for this message.',
+      });
+      return { kind: 'cap_exhausted' };
+    }
 
     try {
       const providerMessageId = await params.sender.sendTemplate({
@@ -286,11 +377,14 @@ class BroadcastSendHandler implements JobHandler {
         messageId: message.id,
         sentAt: new Date(),
       });
-      return null;
+      return { kind: 'settled' };
     } catch (error) {
       if (error instanceof WhatsappSendRefusedError) {
         // Meta answered no, so no message reached this person — a certain, per-recipient failure
         // (bad number, policy refusal). Recorded and stepped past; the rest of the batch is fine.
+        // The refusal is the one case the reservation asymmetry releases: the spend certainly
+        // did not happen.
+        await spendCapService.releaseForRefusedSend(message.id, error.message);
         await commerceInboxRepository.settleOutbound({
           orgId: params.orgId,
           messageId: message.id,
@@ -305,7 +399,7 @@ class BroadcastSendHandler implements JobHandler {
           messageId: message.id,
           sentAt: null,
         });
-        return null;
+        return { kind: 'settled' };
       }
 
       const reason = error instanceof Error ? error.message : String(error);
@@ -316,8 +410,22 @@ class BroadcastSendHandler implements JobHandler {
         recipientId: params.recipient.id,
         error: reason,
       });
-      return reason;
+      // The reservation is deliberately NOT released — the money may have been spent.
+      return { kind: 'unknown', reason };
     }
+  }
+
+  /** Park the broadcast for the cap. Nothing is enqueued: only granted headroom un-parks it. */
+  private async pauseForCap(orgId: string, broadcastId: string, reason: string): Promise<void> {
+    await broadcastRepository.transition({
+      orgId,
+      broadcastId,
+      from: ['running'],
+      to: 'paused',
+      lastError: reason,
+    });
+    await broadcastRepository.refreshCounts(broadcastId);
+    logger.info('commerce: broadcast paused by spend cap', { orgId, broadcastId });
   }
 
   private async markFailed(orgId: string, broadcastId: string, reason: string): Promise<void> {

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { broadcastsController } from '../controllers/broadcastsController.js';
 import { operationsController } from '../controllers/operationsController.js';
+import { spendCapsController } from '../controllers/spendCapsController.js';
 import { templatesController } from '../controllers/templatesController.js';
 import { requireOrgMember } from '../middleware/requireOrgMember.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
@@ -122,6 +123,12 @@ router.get(
 // `admin`: this is the billing input, not campaign telemetry.
 router.get('/costs', requireAuth, verified, requireOrgMember('admin'), (req, res) => {
   void operationsController.costs(req, res);
+});
+
+// `viewer`: read-only. The cap itself is granted on the platform surface, never here — but the
+// person watching a campaign the cap paused deserves the explanation without asking an admin.
+router.get('/spend', requireAuth, verified, requireOrgMember('viewer'), (req, res) => {
+  void spendCapsController.orgSpend(req, res);
 });
 
 router.get('/jobs', requireAuth, verified, requireOrgMember('viewer'), (req, res) => {
