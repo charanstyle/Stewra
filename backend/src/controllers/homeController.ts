@@ -11,7 +11,7 @@ import type {
 } from '@stewra/shared-types';
 import { BaseController } from './baseController.js';
 import { parse } from '../utils/validate.js';
-import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { ConflictError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { briefingRepository } from '../repositories/briefingRepository.js';
 import { suggestionRepository } from '../repositories/suggestionRepository.js';
 import { suggestionService } from '../services/suggestionService.js';
@@ -19,6 +19,7 @@ import { draftService } from '../services/draftService.js';
 import { briefingService } from '../services/briefingService.js';
 import { gmailSyncService } from '../services/gmailSyncService.js';
 import { transactionSyncService } from '../services/transactionSyncService.js';
+import { preferencesService } from '../services/preferencesService.js';
 import { conversationService } from '../services/conversationService.js';
 import { messageService } from '../services/messageService.js';
 
@@ -168,6 +169,12 @@ class HomeController extends BaseController {
   async recompute(req: Request, res: Response): Promise<void> {
     try {
       const userId = this.userId(req);
+      // The global kill switch: refuse loudly rather than quietly working while "paused". The user
+      // asked Stewra to stop everything; a refresh that still fetched mail and bank data would make
+      // that promise false the first time it was tested.
+      if (await preferencesService.pauseAll(userId)) {
+        throw new ConflictError('Stewra is paused — resume it in Settings to refresh your briefing');
+      }
       await gmailSyncService.syncForUser(userId);
       await transactionSyncService.syncForUser(userId);
       const briefing = await briefingService.computeAndStore(userId);

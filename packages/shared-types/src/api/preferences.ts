@@ -15,6 +15,8 @@ export interface UpdatePreferencesRequest {
   readonly learnFromSentMail?: boolean;
   /** Share read receipts in human chats (symmetric: off also hides others' receipts). Defaults on. */
   readonly readReceiptsEnabled?: boolean;
+  /** The global kill switch — true pauses all data reads and background work until turned off. */
+  readonly pauseAll?: boolean;
 }
 
 export interface UpdatePreferencesResponse {

@@ -23,6 +23,19 @@ export const KIND_TO_PROVIDER: Readonly<Record<ResourceKind, string>> = {
  */
 export class PolicyEngine {
   async canRead(userId: string, kind: ResourceKind): Promise<PolicyDecision> {
+    // The global kill switch outranks every connection: while the user has paused Stewra, no data
+    // read is permitted at all — checked here, at the single choke point every brokered read passes
+    // through, so pausing is instant and cannot be forgotten by a caller. Read directly (not via the
+    // preferences service) to keep the policy engine deterministic and dependency-light.
+    const paused = await db
+      .selectFrom('user_preferences')
+      .select('pause_all')
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (paused?.pause_all === true) {
+      return { allowed: false, reason: 'Stewra is paused — resume it in Settings to allow reads' };
+    }
+
     const provider = KIND_TO_PROVIDER[kind];
     const connection = await db
       .selectFrom('connections')

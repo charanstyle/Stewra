@@ -72,6 +72,11 @@ export type AuditAction =
   // permanently banned account. It is its own action, not a `connect`, precisely because what is being
   // recorded is the acceptance of a consequence rather than the attaching of a source.
   | 'consent'
+  // `pause`/`resume` record the global kill switch being flipped. Its own pair of actions, not a
+  // preference-shaped footnote, because "Stewra stopped/started looking at anything" is exactly the
+  // kind of event the activity feed exists to make visible.
+  | 'pause'
+  | 'resume'
   | 'auth.register'
   | 'auth.login'
   | 'auth.refresh'

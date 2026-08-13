@@ -30,4 +30,13 @@ export interface UserPreferences {
    * the generic preferences update.
    */
   readonly sendEmailOverWhatsapp: boolean;
+  /**
+   * The global kill switch: "stop everything, now". While `true`, every brokered data read is denied
+   * (calendar, mail, money, memory — the agent can see nothing), scheduled background work skips the
+   * user entirely (no Gmail sync, no bank sync, no briefing), and a manual refresh is refused with a
+   * clear "paused" answer rather than quietly working. Explicitly user-initiated conversation still
+   * works — the user can always talk to Stewra, including to resume. Defaults to `false`; pausing and
+   * resuming are both audited so the activity feed shows exactly when Stewra was stopped and started.
+   */
+  readonly pauseAll: boolean;
 }

@@ -22,6 +22,8 @@ const updateSchema = z.object({
   learnFromSentMail: z.boolean().optional(),
   // Share read receipts in human chats (symmetric: off also hides others' receipts).
   readReceiptsEnabled: z.boolean().optional(),
+  // The global kill switch — true pauses all data reads and background work until turned off.
+  pauseAll: z.boolean().optional(),
 });
 
 class PreferencesController extends BaseController {
