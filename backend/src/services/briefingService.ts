@@ -31,7 +31,8 @@ import { logger } from '../utils/logger.js';
  * plane and are summarised by this trusted orchestrator, NOT inside the agent runtime — the
  * broker/minimized-facts contract is untouched, so `npm run boundaries` stays green.
  *
- * The CALENDAR half is different and goes through the broker (`calendarFactsFor`). Not because the
+ * The CALENDAR and MONEY halves are different and go through the broker (`calendarFactsFor`,
+ * `moneyFactsFor`). Not because the
  * boundary demands it of trusted code, but because the broker's path is simply the better one: it
  * already spans every connected Google account, audits the read into the activity feed, and turns a
  * revoked grant into a "please reconnect" instead of silence. Reading it here by hand was a second,
@@ -57,6 +58,7 @@ class BriefingService {
     const recent = await emailMessageRepository.recent(userId, config.briefing.contextMessages);
     const unreadCount = recent.filter((m) => m.labelIds.includes('UNREAD')).length;
     const calendarFacts = await this.calendarFactsFor(userId);
+    const moneyFacts = await this.moneyFactsFor(userId);
     const styleRules = await processMemoryService.recall(userId, 'email');
 
     const { summary, sections } = await this.generateBriefingProse({
@@ -65,6 +67,7 @@ class BriefingService {
       recentSubjects: recent.slice(0, 10).map((m) => m.subject).filter((s) => s.length > 0),
       awaitingSubjects: awaitingThreads.map((t) => t.subject),
       calendarFacts,
+      moneyFacts,
       styleRules,
     });
 
@@ -166,6 +169,27 @@ class BriefingService {
     }
   }
 
+  /**
+   * Money facts for the briefing, read THROUGH the broker for exactly the reasons the calendar is
+   * (see `calendarFactsFor`): the read is policy-checked, audited into the activity feed, and spans
+   * every connected bank. Empty on denial or failure — money, like the calendar, is optional to a
+   * briefing that is mostly about mail.
+   */
+  private async moneyFactsFor(userId: string): Promise<ReadonlyArray<string>> {
+    try {
+      const result = await broker.request({
+        userId,
+        kind: 'money',
+        purpose: 'your daily briefing',
+        params: {},
+      });
+      return result.allowed ? result.facts : [];
+    } catch (error) {
+      Sentry.captureException(error);
+      return [];
+    }
+  }
+
   /** Ask the model for the briefing prose; degrade to a deterministic summary if it can't be parsed. */
   private async generateBriefingProse(context: {
     unreadCount: number;
@@ -173,6 +197,7 @@ class BriefingService {
     recentSubjects: ReadonlyArray<string>;
     awaitingSubjects: ReadonlyArray<string>;
     calendarFacts: ReadonlyArray<string>;
+    moneyFacts: ReadonlyArray<string>;
     styleRules: ReadonlyArray<string>;
   }): Promise<{ summary: string; sections: ReadonlyArray<BriefingSection> }> {
     const factLines: string[] = [
@@ -183,13 +208,19 @@ class BriefingService {
             .join(', ')}.`
         : 'No threads are waiting on your reply.',
       ...context.calendarFacts.map((f) => `Calendar: ${f}`),
+      ...context.moneyFacts.map((f) => `Money: ${f}`),
       ...context.recentSubjects.map((s) => `Recent subject: ${s}`),
     ];
 
     const system =
       'You are Stewra, a warm, concise personal assistant giving the user their daily briefing. ' +
       'From the facts, write a short first-person-to-the-user summary (2-4 sentences) and a few ' +
-      'titled sections (e.g. Inbox, Waiting on you, Calendar). Respond with ONLY a JSON object of ' +
+      'titled sections (e.g. Inbox, Waiting on you, Calendar). ' +
+      'Where a Money fact and a Calendar fact genuinely bear on each other — a commitment that ' +
+      'costs both time and money, a tight balance in a busy week — connect them in plain words. ' +
+      'Never invent a tradeoff the facts do not support. Money observations are informational ' +
+      'only: describe what the numbers show, never tell the user what to do with their money. ' +
+      'Respond with ONLY a JSON object of ' +
       'the form {"summary": string, "sections": [{"heading": string, "body": string}]}. No prose ' +
       'outside the JSON, no code fences.';
     const user = `Facts:\n${factLines.map((f) => `- ${f}`).join('\n')}`;
@@ -200,11 +231,17 @@ class BriefingService {
 
     const parsed = await this.tryStructured(messages);
     if (parsed !== null) {
-      return { summary: parsed.summary, sections: parsed.sections };
+      return {
+        summary: parsed.summary,
+        sections: withMoneyFraming(parsed.sections, context.moneyFacts.length > 0),
+      };
     }
     // Degrade: a deterministic, honest summary from the same facts, no sections.
     logger.info('briefing: model output unparseable, using deterministic summary');
-    return { summary: factLines.join(' '), sections: [] };
+    return {
+      summary: factLines.join(' '),
+      sections: withMoneyFraming([], context.moneyFacts.length > 0),
+    };
   }
 
   /** Call the model (structured path when available), extract + validate JSON, with one repair retry. */
@@ -260,6 +297,30 @@ class BriefingService {
       });
     }
   }
+}
+
+/**
+ * Append the "informational, not financial advice" note whenever money facts fed the briefing.
+ * Deterministic on purpose: the framing is a product requirement, so it is added in code, never
+ * left to whether the model felt like including it — and it survives the degraded (model-less)
+ * path for the same reason.
+ */
+export function withMoneyFraming(
+  sections: ReadonlyArray<BriefingSection>,
+  hasMoneyFacts: boolean,
+): ReadonlyArray<BriefingSection> {
+  if (!hasMoneyFacts) {
+    return sections;
+  }
+  return [
+    ...sections,
+    {
+      heading: 'About money mentions',
+      body:
+        'Anything here about your accounts or spending is informational only — a description of ' +
+        'what the numbers show, not financial advice.',
+    },
+  ];
 }
 
 /** Extract the first balanced JSON object from a model response (tolerates code fences / stray text). */

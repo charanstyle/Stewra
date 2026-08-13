@@ -137,4 +137,15 @@ describe('the briefing reads the calendar through the broker, not around it', ()
     expect(briefingSource).not.toContain('fetchUpcomingEvents');
     expect(briefingSource).not.toContain('extractCalendarFacts');
   });
+
+  it('asks the broker for the money slice, and never reads the money store itself', () => {
+    // The money mirror of the calendar guard. The direct path here would be the store repositories
+    // plus the fact extractor — the read `connectionService.moneyFacts` already owns, with its
+    // merchant decryption, per-connection labelling, and audit row. A second copy grown here would
+    // skip all three and nothing at the call site would show it.
+    expect(briefingSource).toMatch(/kind:\s*'money'/);
+    expect(briefingSource).not.toContain('extractMoneyFacts');
+    expect(briefingSource).not.toContain('moneyTransactionRepository');
+    expect(briefingSource).not.toContain('moneyAccountRepository');
+  });
 });
