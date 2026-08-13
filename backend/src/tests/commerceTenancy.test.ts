@@ -512,8 +512,8 @@ describe('billing stays inside the tenant, and pricing stays outside every tenan
     ];
     for (const user of [owner, admin]) {
       for (const call of calls) {
-        const res = await request(API)
-          [call.method](call.path)
+        const agent = request(API);
+        const res = await agent[call.method](call.path)
           .set('Authorization', user.auth)
           .send(call.body ?? {});
         // 404, not 403: to an org role these surfaces must not exist, or the response itself
