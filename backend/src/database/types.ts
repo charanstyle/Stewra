@@ -301,6 +301,56 @@ export interface EmailSyncStateTable {
   updated_at: ColumnType<Date, never, Date>;
 }
 
+/** One bank account inside a connected Item (migration 056). Balances are a snapshot, overwritten
+ * each sync; all money is bigint MICROS (pg int8 arrives as a string — convert with BigInt()). */
+export interface MoneyAccountsTable {
+  id: Generated<string>;
+  user_id: string;
+  connection_id: string;
+  /** Plaid's opaque account id — a string, never parsed. */
+  plaid_account_id: string;
+  name: ColumnType<string, string | undefined, string>;
+  account_type: ColumnType<string, string | undefined, string>;
+  account_subtype: ColumnType<string, string | undefined, string>;
+  mask: ColumnType<string, string | undefined, string>;
+  iso_currency_code: ColumnType<string | null, string | null | undefined, string | null>;
+  available_micros: ColumnType<string | null, bigint | null | undefined, bigint | null>;
+  current_micros: ColumnType<string | null, bigint | null | undefined, bigint | null>;
+  balance_as_of: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, never, Date>;
+}
+
+/** One transaction (migration 056). `merchant_ciphertext` is the fieldCrypto envelope of the
+ * merchant/description — never plaintext. Positive `amount_micros` = money leaving the account. */
+export interface MoneyTransactionsTable {
+  id: Generated<string>;
+  user_id: string;
+  connection_id: string;
+  account_id: string;
+  /** Plaid's opaque transaction id — a string, never parsed. */
+  plaid_transaction_id: string;
+  merchant_ciphertext: ColumnType<string, string | undefined, string>;
+  category: ColumnType<string, string | undefined, string>;
+  amount_micros: ColumnType<string, bigint, bigint>;
+  iso_currency_code: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Plaid's YYYY-MM-DD transaction date. */
+  posted_at: ColumnType<Date, string, string>;
+  pending: ColumnType<boolean, boolean | undefined, boolean>;
+  created_at: CreatedAt;
+}
+
+/** One sync-state row per bank connection (migration 056): the /transactions/sync cursor. */
+export interface MoneySyncStateTable {
+  connection_id: string;
+  user_id: string;
+  cursor: ColumnType<string | null, string | null | undefined, string | null>;
+  initial_sync_complete: ColumnType<boolean, boolean | undefined, boolean>;
+  last_synced_at: ColumnType<Date | null, Date | null, Date | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, never, Date>;
+}
+
 /** One current briefing per user (migration 026); upserted each run. */
 export interface BriefingsTable {
   id: Generated<string>;
@@ -1439,6 +1489,9 @@ export interface Database {
   email_threads: EmailThreadsTable;
   email_messages: EmailMessagesTable;
   email_sync_state: EmailSyncStateTable;
+  money_accounts: MoneyAccountsTable;
+  money_transactions: MoneyTransactionsTable;
+  money_sync_state: MoneySyncStateTable;
   briefings: BriefingsTable;
   suggestions: SuggestionsTable;
   contacts: ContactsTable;

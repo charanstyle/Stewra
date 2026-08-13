@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/node';
 import { config } from '../config/unifiedConfig.js';
 import { connectionRepository } from '../repositories/connectionRepository.js';
 import { gmailSyncService } from '../services/gmailSyncService.js';
+import { transactionSyncService } from '../services/transactionSyncService.js';
 import { briefingService } from '../services/briefingService.js';
 import { whatsappRetentionService } from '../services/whatsappRetentionService.js';
 import { hostedRunnerService } from '../services/hostedRunnerService.js';
@@ -16,10 +17,12 @@ import { logger } from '../utils/logger.js';
  */
 
 let timer: NodeJS.Timeout | null = null;
+let moneyTimer: NodeJS.Timeout | null = null;
 let retentionTimer: NodeJS.Timeout | null = null;
 let reconcileTimer: NodeJS.Timeout | null = null;
 let idleStopTimer: NodeJS.Timeout | null = null;
 let running = false;
+let moneySyncing = false;
 let sweeping = false;
 let reconciling = false;
 let idleStopping = false;
@@ -74,6 +77,37 @@ async function tick(): Promise<void> {
     Sentry.captureException(error);
   } finally {
     running = false;
+  }
+}
+
+/** Run one transactions-sync pass over every user with an active bank connection. Guarded like
+ * `tick`, and on its OWN timer + flag: bank syncing must not silently stop because an operator
+ * turned off Gmail polling (the same separation argument as the retention sweep). */
+async function moneyTick(): Promise<void> {
+  if (moneySyncing) {
+    logger.info('scheduler: previous money tick still running, skipping');
+    return;
+  }
+  moneySyncing = true;
+  try {
+    const userIds = await connectionRepository.activeUserIds('aggregator');
+    logger.info('scheduler: money tick starting', { users: userIds.length });
+    for (const userId of userIds) {
+      try {
+        await transactionSyncService.syncForUser(userId);
+      } catch (error) {
+        Sentry.captureException(error);
+        logger.error('scheduler: per-user money sync failed', {
+          userId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    logger.info('scheduler: money tick complete');
+  } catch (error) {
+    Sentry.captureException(error);
+  } finally {
+    moneySyncing = false;
   }
 }
 
@@ -158,6 +192,19 @@ export function startScheduler(): () => void {
     logger.info('scheduler: briefing disabled (BRIEFING_SCHEDULE_ENABLED=false)');
   }
 
+  if (config.moneySync.scheduleEnabled) {
+    const moneyIntervalMs = config.moneySync.intervalMinutes * 60 * 1000;
+    logger.info('scheduler: transactions sync enabled', {
+      intervalMinutes: config.moneySync.intervalMinutes,
+    });
+    moneyTimer = setInterval(() => {
+      void moneyTick();
+    }, moneyIntervalMs);
+    moneyTimer.unref();
+  } else {
+    logger.info('scheduler: transactions sync disabled (TRANSACTIONS_SYNC_ENABLED=false)');
+  }
+
   if (config.whatsappPersonal.enabled) {
     logger.info('scheduler: WhatsApp retention sweep enabled', {
       retentionDays: config.whatsappPersonal.retentionDays,
@@ -197,6 +244,10 @@ export function startScheduler(): () => void {
     if (timer !== null) {
       clearInterval(timer);
       timer = null;
+    }
+    if (moneyTimer !== null) {
+      clearInterval(moneyTimer);
+      moneyTimer = null;
     }
     if (retentionTimer !== null) {
       clearInterval(retentionTimer);

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import * as Sentry from '@sentry/node';
 import type {
   StartCalendarConnectionResponse,
+  StartMoneyConnectionResponse,
   ListConnectionsResponse,
   ConnectionResponse,
 } from '@stewra/shared-types';
@@ -18,11 +19,18 @@ import {
   fetchAccountEmail,
   revokeRefreshToken,
 } from '../services/googleOAuthService.js';
+import {
+  createLinkToken,
+  exchangePublicToken,
+  removeItem,
+} from '../services/plaidService.js';
+import { transactionSyncService } from '../services/transactionSyncService.js';
+import { purgeConnectionMoneyData } from '../repositories/moneyStore.js';
 import { memoryService } from '../services/memoryService.js';
 import { processMemoryService } from '../services/processMemoryService.js';
 import { emailRetentionService } from '../services/emailRetentionService.js';
 import { parse } from '../utils/validate.js';
-import { NotFoundError } from '../utils/errors.js';
+import { NotFoundError, ServiceUnavailableError } from '../utils/errors.js';
 
 // The OAuth callback Google redirects the browser to — carries the code and our signed state.
 const callbackSchema = z.object({
@@ -32,6 +40,11 @@ const callbackSchema = z.object({
 
 const disconnectParamsSchema = z.object({
   id: z.string().uuid(),
+});
+
+// Plaid Link hands the client a one-time public token; the client posts it here for exchange.
+const exchangePlaidSchema = z.object({
+  publicToken: z.string().min(1),
 });
 
 class ConnectionController extends BaseController {
@@ -101,6 +114,103 @@ class ConnectionController extends BaseController {
     }
   }
 
+  /**
+   * POST /connections/plaid/start — the plain-language consent + a short-lived Link token. Refuses
+   * with a 503 naming the flag when no aggregator is configured: nothing about the request is
+   * wrong, and it will work unchanged once the operator turns the integration on.
+   */
+  async startPlaid(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId;
+      if (userId === undefined) {
+        throw new Error('startPlaid() requires requireAuth middleware');
+      }
+      const money = config.moneyAggregator;
+      if (!money.enabled) {
+        throw new ServiceUnavailableError(
+          'Bank connections are not enabled on this install (MONEY_AGGREGATOR_ENABLED=false)',
+        );
+      }
+      const linkToken = await createLinkToken(userId);
+      const body: StartMoneyConnectionResponse = { consentPrompt: money.consentPrompt, linkToken };
+      this.handleSuccess(res, body, 200);
+    } catch (error) {
+      this.handleError(error, res, 'ConnectionController.startPlaid');
+    }
+  }
+
+  /**
+   * POST /connections/plaid/exchange — swap Link's one-time public token for the long-lived access
+   * token, which goes STRAIGHT into the vault (never logged, never returned), and record the
+   * connection keyed by Plaid's item id (banks have no email; the item id is the stable per-grant
+   * identity the unique index needs). An authenticated JSON call, not a browser redirect — Link
+   * runs client-side, so no signed state is involved.
+   */
+  async exchangePlaid(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.userId;
+      if (userId === undefined) {
+        throw new Error('exchangePlaid() requires requireAuth middleware');
+      }
+      const money = config.moneyAggregator;
+      if (!money.enabled) {
+        throw new ServiceUnavailableError(
+          'Bank connections are not enabled on this install (MONEY_AGGREGATOR_ENABLED=false)',
+        );
+      }
+      const { publicToken } = parse(exchangePlaidSchema, req.body);
+      const { accessToken, itemId } = await exchangePublicToken(publicToken);
+
+      // Reconnecting the same Item replaces its token — purge the superseded ciphertext, exactly
+      // like the Google callback does.
+      const priorVaultRef = await connectionRepository.vaultRefForAccount(
+        userId,
+        'aggregator',
+        itemId,
+      );
+      const vaultRef = await vault.put(accessToken);
+      const row = await connectionRepository.upsert(
+        userId,
+        'aggregator',
+        itemId,
+        vaultRef,
+        money.products,
+      );
+      if (priorVaultRef !== undefined && priorVaultRef !== vaultRef) {
+        await vault.delete(priorVaultRef);
+      }
+
+      await auditWriter.write({
+        userId,
+        action: 'connect',
+        resourceType: 'system',
+        resourceId: null,
+        summary: 'Connected a bank (balances + transactions, read-only)',
+        success: true,
+        metadata: { itemId, provider: 'aggregator' },
+      });
+
+      // Pull the first snapshot now so facts exist the moment the user looks. Best-effort: a slow
+      // or briefly failing first sync must not fail the connect the user just completed — the
+      // scheduled sync (or /home/recompute) will catch up.
+      try {
+        await transactionSyncService.syncConnection(row);
+      } catch (error) {
+        Sentry.captureException(error);
+      }
+
+      const connection = await connectionRepository.listForUser(userId);
+      const created = connection.find((c) => c.id === row.id);
+      if (created === undefined) {
+        throw new Error('exchangePlaid: connection vanished after upsert');
+      }
+      const body: ConnectionResponse = { connection: created };
+      this.handleSuccess(res, body, 200);
+    } catch (error) {
+      this.handleError(error, res, 'ConnectionController.exchangePlaid');
+    }
+  }
+
   /** GET /connections — all of the user's connections (active and revoked), no vault handles. */
   async list(req: Request, res: Response): Promise<void> {
     try {
@@ -130,13 +240,17 @@ class ConnectionController extends BaseController {
       }
 
       // A one-tap disconnect must sever access everywhere, not just flip a local flag. Revoke the
-      // token at Google, then delete the ciphertext from the vault so no dead credential lingers at
-      // rest. Both are best-effort — a token Google already dropped, or an already-purged secret,
-      // must not block the user's revoke — but we record whether Google acknowledged it.
-      let revokedAtGoogle = false;
+      // credential at its provider (Google's token endpoint, or Plaid's /item/remove), then delete
+      // the ciphertext from the vault so no dead credential lingers at rest. Both are best-effort —
+      // a credential the provider already dropped, or an already-purged secret, must not block the
+      // user's revoke — but we record whether the provider acknowledged it.
+      let revokedAtProvider = false;
       try {
-        const refreshToken = await vault.get(existing.vaultRef);
-        revokedAtGoogle = await revokeRefreshToken(refreshToken);
+        const secret = await vault.get(existing.vaultRef);
+        revokedAtProvider =
+          existing.provider === 'aggregator'
+            ? await removeItem(secret)
+            : await revokeRefreshToken(secret);
         await vault.delete(existing.vaultRef);
       } catch (error) {
         Sentry.captureException(error);
@@ -149,9 +263,12 @@ class ConnectionController extends BaseController {
         action: 'disconnect',
         resourceType: 'system',
         resourceId: id,
-        summary: `Disconnected Google account ${existing.accountEmail}`,
+        summary:
+          existing.provider === 'aggregator'
+            ? 'Disconnected a bank connection'
+            : `Disconnected Google account ${existing.accountEmail}`,
         success: true,
-        metadata: { accountEmail: existing.accountEmail, revokedAtGoogle },
+        metadata: { accountEmail: existing.accountEmail, revokedAtProvider },
       });
 
       // Forget-on-disconnect: purge learnings derived from a source the user just revoked, so nothing
@@ -161,9 +278,14 @@ class ConnectionController extends BaseController {
       // latter also purges any vaulted contact behind an `identifying` rule.
       await memoryService.forgetForDisconnectedProvider(userId, existing.provider);
       await processMemoryService.forgetForDisconnectedProvider(userId, existing.provider);
-      // Also purge the encrypted email store for this specific connection (its rows are only
-      // flipped to revoked, so the ON DELETE CASCADE never fires) and the vaulted contact addresses.
-      await emailRetentionService.forgetForDisconnectedConnection(userId, id);
+      // Also purge this connection's per-source store (its rows are only flipped to revoked, so the
+      // ON DELETE CASCADE never fires): the encrypted email store + vaulted contact addresses for
+      // Google, the money store (accounts, transactions, sync cursor) for a bank.
+      if (existing.provider === 'aggregator') {
+        await purgeConnectionMoneyData(id);
+      } else {
+        await emailRetentionService.forgetForDisconnectedConnection(userId, id);
+      }
 
       const body: ConnectionResponse = { connection };
       this.handleSuccess(res, body, 200);

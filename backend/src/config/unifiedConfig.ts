@@ -113,6 +113,41 @@ const EnvSchema = z.object({
   // each connected user's briefing. Sane defaults, overridable — never magic numbers in code.
   BRIEFING_SCHEDULE_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   BRIEFING_INTERVAL_MINUTES: z.coerce.number().int().min(5).max(1440).default(180),
+  // ── Money (personal-plane Milestone 2): bank data via the Plaid aggregator ──────────────────────
+  // OFF by default: an install without Plaid credentials simply has no money surface, and the
+  // connect endpoints refuse with a 503 naming this flag. Turning it on is what makes the two
+  // credentials below required — enforced by the post-parse guard, so a money deploy with a missing
+  // credential fails at boot, not at the first Link exchange.
+  MONEY_AGGREGATOR_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  PLAID_CLIENT_ID: z.string().min(1).optional(),
+  PLAID_SECRET: z.string().min(1).optional(),
+  // Which Plaid environment the credentials belong to. Sandbox until Plaid's production review
+  // passes. (Plaid retired its separate "development" environment; sandbox and production are the
+  // two that exist.)
+  PLAID_ENV: z.enum(['sandbox', 'production']).default('sandbox'),
+  // API origin. Normally derived from PLAID_ENV; overridable so the whole connect/sync path can be
+  // driven end-to-end against a local stand-in in tests, same reasoning as STRIPE_API_BASE_URL.
+  PLAID_API_BASE_URL: z.string().url().optional(),
+  // Comma-separated ISO country codes offered in Link, and the Plaid products requested. Explicit
+  // env values (not code) so widening either is a visible, auditable config change — same reasoning
+  // as GOOGLE_SCOPES.
+  PLAID_COUNTRY_CODES: z.string().min(1).default('US'),
+  PLAID_PRODUCTS: z.string().min(1).default('transactions'),
+  // Plain-language consent copy shown before Plaid Link opens. Overridable for wording/locale.
+  PLAID_CONSENT_PROMPT: z
+    .string()
+    .min(1)
+    .default('Allow Stewra to read your bank balances and transactions (read-only)?'),
+  // The background transactions sync. Its OWN switch, deliberately not hung off
+  // BRIEFING_SCHEDULE_ENABLED — an operator who turns off hourly Gmail polling must not silently
+  // stop bank syncs too (same separation argument as the retention sweep).
+  TRANSACTIONS_SYNC_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  TRANSACTIONS_SYNC_INTERVAL_MINUTES: z.coerce.number().int().min(15).max(1440).default(360),
+  // Bounds exponential backoff on transient Plaid errors; auth errors fail fast (reconnect needed).
+  TRANSACTIONS_SYNC_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(5),
+  // How far back stored transactions feed the derived money facts. A read window, not a retention
+  // promise: it bounds what the fact extractor sees, not what is stored.
+  MONEY_FACTS_LOOKBACK_DAYS: z.coerce.number().int().min(7).max(365).default(90),
   // Outbound mail (Mailu mailbox), used for the email-verification code. Required: a new account
   // can't be verified without it, so we fail loud rather than silently skip verification.
   SMTP_HOST: z.string().min(1, 'SMTP_HOST is required'),
@@ -537,6 +572,17 @@ if (env.COMMERCE_BILLING_PROVIDER === 'stripe') {
   }
 }
 
+// Fail loud when the money surface is enabled but under-configured. Without the client id + secret
+// no Link token can be created and no public token exchanged — every connect attempt would fail at
+// the moment a user is trying to hand over bank access. Booting half-configured is strictly worse
+// than not booting.
+if (env.MONEY_AGGREGATOR_ENABLED) {
+  const missing = (['PLAID_CLIENT_ID', 'PLAID_SECRET'] as const).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`MONEY_AGGREGATOR_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+}
+
 // Fail loud when the experimental companion-device channel is enabled but under-configured. Without a
 // download URL the web UI would offer a consent gate leading nowhere; without a minimum bridge version
 // we would have no way to refuse a build that is getting users banned. Both are worse than not booting.
@@ -735,6 +781,54 @@ function readCommerceBillingConfig(): CommerceBillingConfig {
   };
 }
 
+/** The one Plaid origin per environment; PLAID_API_BASE_URL overrides for tests. */
+const PLAID_ENV_BASE_URLS: Record<'sandbox' | 'production', string> = {
+  sandbox: 'https://sandbox.plaid.com',
+  production: 'https://production.plaid.com',
+};
+
+/**
+ * The money surface's aggregator — a discriminated union for the same reason MetaCommerceConfig is:
+ * callers narrow on `enabled` first, and when they do the credentials are non-optional strings that
+ * are really there. There is no way to hold a half-configured Plaid.
+ */
+export type MoneyAggregatorConfig =
+  | { readonly enabled: false }
+  | {
+      readonly enabled: true;
+      readonly clientId: string;
+      readonly secret: string;
+      readonly plaidEnv: 'sandbox' | 'production';
+      readonly apiBaseUrl: string;
+      readonly countryCodes: ReadonlyArray<string>;
+      readonly products: ReadonlyArray<string>;
+      readonly consentPrompt: string;
+    };
+
+function readMoneyAggregatorConfig(): MoneyAggregatorConfig {
+  if (!env.MONEY_AGGREGATOR_ENABLED) return { enabled: false };
+  // The post-parse guard above already refused to boot without these; this re-reads them as a type
+  // narrowing that cannot be satisfied by a placeholder. If it ever throws, the guard has a hole.
+  const { PLAID_CLIENT_ID, PLAID_SECRET } = env;
+  if (PLAID_CLIENT_ID === undefined || PLAID_SECRET === undefined) {
+    throw new Error('MONEY_AGGREGATOR_ENABLED=true but its credentials are not all set');
+  }
+  return {
+    enabled: true,
+    clientId: PLAID_CLIENT_ID,
+    secret: PLAID_SECRET,
+    plaidEnv: env.PLAID_ENV,
+    apiBaseUrl: env.PLAID_API_BASE_URL ?? PLAID_ENV_BASE_URLS[env.PLAID_ENV],
+    countryCodes: env.PLAID_COUNTRY_CODES.split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+    products: env.PLAID_PRODUCTS.split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+    consentPrompt: env.PLAID_CONSENT_PROMPT,
+  };
+}
+
 export const config = {
   nodeEnv: env.NODE_ENV,
   isProduction: env.NODE_ENV === 'production',
@@ -798,6 +892,15 @@ export const config = {
   gmail: {
     // Default lookback window (days); a per-insight request may override within the shared bounds.
     lookbackDays: env.GMAIL_LOOKBACK_DAYS,
+  },
+  moneyAggregator: readMoneyAggregatorConfig(),
+  moneySync: {
+    // Background transactions sync: master switch + tick interval, its own flag on purpose (see the
+    // env comment). Retry bound for transient Plaid errors; facts read window for the extractor.
+    scheduleEnabled: env.TRANSACTIONS_SYNC_ENABLED,
+    intervalMinutes: env.TRANSACTIONS_SYNC_INTERVAL_MINUTES,
+    maxRetries: env.TRANSACTIONS_SYNC_MAX_RETRIES,
+    factsLookbackDays: env.MONEY_FACTS_LOOKBACK_DAYS,
   },
   sentMailObserver: {
     // Sampling + evidence thresholds for the opt-in Sent-mail style observer. `maxSamples`/
