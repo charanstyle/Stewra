@@ -275,14 +275,40 @@ export default function CampaignsPage(): React.JSX.Element {
       setOpenBroadcastId(broadcastId);
       setRecipients([]);
       try {
-        const res = await api.listBroadcastRecipients(orgId, broadcastId, { limit: 100 });
-        setRecipients(res.recipients);
+        // The single-broadcast read rides along so the opened panel shows LIVE counters — the list
+        // row above it is only as fresh as the last full page load, and a running broadcast moves.
+        const [recipientsRes, broadcastRes] = await Promise.all([
+          api.listBroadcastRecipients(orgId, broadcastId, { limit: 100 }),
+          api.getBroadcast(orgId, broadcastId),
+        ]);
+        setRecipients(recipientsRes.recipients);
+        setBroadcasts((current) =>
+          current.map((b) => (b.id === broadcastId ? broadcastRes.broadcast : b)),
+        );
       } catch (err) {
         setError(describeError(err));
       }
     },
     [orgId, openBroadcastId],
   );
+
+  /** Re-fetch just the opened broadcast and its recipients — progress without a whole-page reload. */
+  const refreshOpenBroadcast = useCallback(async (): Promise<void> => {
+    if (orgId === null || openBroadcastId === null) return;
+    setError(null);
+    try {
+      const [recipientsRes, broadcastRes] = await Promise.all([
+        api.listBroadcastRecipients(orgId, openBroadcastId, { limit: 100 }),
+        api.getBroadcast(orgId, openBroadcastId),
+      ]);
+      setRecipients(recipientsRes.recipients);
+      setBroadcasts((current) =>
+        current.map((b) => (b.id === openBroadcastId ? broadcastRes.broadcast : b)),
+      );
+    } catch (err) {
+      setError(describeError(err));
+    }
+  }, [orgId, openBroadcastId]);
 
   const loadCosts = useCallback(async (): Promise<void> => {
     if (orgId === null) return;
@@ -507,21 +533,46 @@ export default function CampaignsPage(): React.JSX.Element {
                         </span>
                       </div>
                       {broadcast.id === openBroadcastId && (
-                        <ul className={styles.list}>
-                          {recipients.length === 0 ? (
-                            <li className={styles.muted}>
-                              Nobody yet — recipients are chosen when the broadcast dispatches.
-                            </li>
-                          ) : (
-                            recipients.map((recipient) => (
-                              <li key={recipient.id} className={styles.muted}>
-                                {recipient.displayName ?? `+${recipient.externalId}`} —{' '}
-                                {recipient.status}
-                                {recipient.reason !== null && ` (${recipient.reason})`}
+                        <div className={styles.subsection}>
+                          {/* What the campaign IS, said with names — the ids on the row above are
+                              addresses, not answers. */}
+                          <p className={styles.muted}>
+                            Template:{' '}
+                            {templates.find((t) => t.id === broadcast.templateId)?.name ??
+                              'deleted template'}
+                            {broadcast.variables.length > 0 &&
+                              ` (${broadcast.variables.map((v, i) => `{{${i + 1}}}=${v}`).join(', ')})`}
+                            {' · '}Segment:{' '}
+                            {segments.find((s) => s.id === broadcast.segmentId)?.name ??
+                              'deleted segment'}
+                            {broadcast.startedAt !== null &&
+                              ` · started ${new Date(broadcast.startedAt).toLocaleString()}`}
+                            {broadcast.completedAt !== null &&
+                              ` · finished ${new Date(broadcast.completedAt).toLocaleString()}`}{' '}
+                            <button
+                              type="button"
+                              className={styles.ghost}
+                              onClick={() => void refreshOpenBroadcast()}
+                            >
+                              Refresh
+                            </button>
+                          </p>
+                          <ul className={styles.list}>
+                            {recipients.length === 0 ? (
+                              <li className={styles.muted}>
+                                Nobody yet — recipients are chosen when the broadcast dispatches.
                               </li>
-                            ))
-                          )}
-                        </ul>
+                            ) : (
+                              recipients.map((recipient) => (
+                                <li key={recipient.id} className={styles.muted}>
+                                  {recipient.displayName ?? `+${recipient.externalId}`} —{' '}
+                                  {recipient.status}
+                                  {recipient.reason !== null && ` (${recipient.reason})`}
+                                </li>
+                              ))
+                            )}
+                          </ul>
+                        </div>
                       )}
                     </li>
                   ))}
