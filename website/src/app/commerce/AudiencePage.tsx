@@ -3,10 +3,13 @@ import clsx from 'clsx';
 import { Link } from 'react-router';
 import type {
   AudiencePreview,
+  ChannelAccount,
   CommerceContactWithTags,
   CommerceSegment,
   CommerceTag,
+  ConsentPurpose,
   ConsentSource,
+  OptinLink,
   ContactConsent,
   ContactImport,
   ContactImportRow,
@@ -96,6 +99,15 @@ export default function AudiencePage(): React.JSX.Element {
   const [skippedRows, setSkippedRows] = useState<ReadonlyArray<ContactImportRow>>([]);
   const [skippedTruncated, setSkippedTruncated] = useState(false);
 
+  const [optinLinks, setOptinLinks] = useState<ReadonlyArray<OptinLink>>([]);
+  const [channelAccounts, setChannelAccounts] = useState<ReadonlyArray<ChannelAccount>>([]);
+  const [linkChannelId, setLinkChannelId] = useState('');
+  const [linkName, setLinkName] = useState('');
+  const [linkPurpose, setLinkPurpose] = useState<ConsentPurpose>('marketing');
+  const [linkPhrase, setLinkPhrase] = useState('Yes, please send me offers and updates');
+  const [mintingLink, setMintingLink] = useState(false);
+  const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
+
   const [tags, setTags] = useState<ReadonlyArray<CommerceTag>>([]);
 
   const [segments, setSegments] = useState<ReadonlyArray<CommerceSegment>>([]);
@@ -112,12 +124,22 @@ export default function AudiencePage(): React.JSX.Element {
 
   const loadAll = useCallback(async (id: string): Promise<void> => {
     try {
-      const [policyRes, contactsRes, tagsRes, segmentsRes, suppressionsRes] = await Promise.all([
+      const [
+        policyRes,
+        contactsRes,
+        tagsRes,
+        segmentsRes,
+        suppressionsRes,
+        linksRes,
+        channelsRes,
+      ] = await Promise.all([
         api.getMessagingPolicy(id),
         api.listCommerceContacts(id, { limit: 50 }),
         api.listCommerceTags(id),
         api.listCommerceSegments(id),
         api.listSuppressions(id, { limit: 50 }),
+        api.listOptinLinks(id),
+        api.listChannelAccounts(id),
       ]);
       setPolicy(policyRes.policy);
       if (policyRes.policy !== null) {
@@ -129,6 +151,12 @@ export default function AudiencePage(): React.JSX.Element {
       setTags(tagsRes.tags);
       setSegments(segmentsRes.segments);
       setSuppressions(suppressionsRes.suppressions);
+      setOptinLinks(linksRes.links);
+      setChannelAccounts(channelsRes.accounts);
+      // Preselect when there is exactly one connected number, which is the ordinary case. With two,
+      // the operator has to say which one the sticker points at — guessing would print the wrong one.
+      const only = channelsRes.accounts.length === 1 ? channelsRes.accounts[0] : undefined;
+      if (only !== undefined) setLinkChannelId(only.id);
     } catch (err) {
       setError(describeError(err));
     }
@@ -231,6 +259,57 @@ export default function AudiencePage(): React.JSX.Element {
       setUploading(false);
     }
   }, [orgId, importFile]);
+
+  /**
+   * Mint an opt-in link.
+   *
+   * The phrase is the only part the operator writes, and it is worth writing carefully: it is the
+   * sentence the customer sends, which means it is also the evidence of what they agreed to. The
+   * server appends the reference code that identifies the link on the way back.
+   */
+  const mintOptinLink = useCallback(async (): Promise<void> => {
+    if (orgId === null || linkChannelId === '') return;
+    setError(null);
+    setNotice(null);
+    setMintingLink(true);
+    try {
+      const res = await api.createOptinLink(orgId, {
+        channelAccountId: linkChannelId,
+        name: linkName,
+        purpose: linkPurpose,
+        phrase: linkPhrase,
+      });
+      setOptinLinks((current) => [res.link, ...current]);
+      setLinkName('');
+      setNotice(
+        `"${res.link.name}" is live. Anyone who opens it and sends the message is recorded as ` +
+          `${res.link.purpose === 'marketing' ? 'opted in to marketing' : 'a service contact'}.`,
+      );
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setMintingLink(false);
+    }
+  }, [orgId, linkChannelId, linkName, linkPurpose, linkPhrase]);
+
+  const disableOptinLink = useCallback(
+    async (linkId: string): Promise<void> => {
+      if (orgId === null) return;
+      setError(null);
+      setNotice(null);
+      try {
+        const res = await api.disableOptinLink(orgId, linkId);
+        setOptinLinks((current) => current.map((l) => (l.id === linkId ? res.link : l)));
+        setNotice(
+          `"${res.link.name}" is retired. Anyone who scans it from here on lands in the inbox as ` +
+            'an ordinary message, with no opt-in recorded.',
+        );
+      } catch (err) {
+        setError(describeError(err));
+      }
+    },
+    [orgId],
+  );
 
   /**
    * Follow a running import until it stops.
@@ -703,6 +782,142 @@ export default function AudiencePage(): React.JSX.Element {
                   )}
                 </div>
               )}
+
+              <div className={styles.subsection}>
+                <h3 className={styles.subTitle}>Opt-in links</h3>
+                {/*
+                  Framed around what the link IS rather than how it works. The operator's decision is
+                  what sentence to put in front of a customer; the token, the matching and the consent
+                  row are ours. The one mechanical fact worth stating is that a customer has to send
+                  the message — opening the chat and closing it records nothing — because that is what
+                  makes the phrase evidence rather than a checkbox.
+                */}
+                <p className={styles.muted}>
+                  A link that opens WhatsApp with a message already written. When the customer sends
+                  it, their permission is recorded against their own number, in their own words.
+                  Opening the chat is not enough — they have to send it. Put one behind a QR code on
+                  a receipt, a menu, or a website button.
+                </p>
+
+                {isAdmin && (
+                  <>
+                    {channelAccounts.length === 0 ? (
+                      <p className={styles.muted}>
+                        Connect a WhatsApp number first — a link has to open a chat with something.
+                      </p>
+                    ) : (
+                      <>
+                        <div className={styles.row}>
+                          {/* Shown whenever there is a choice to make. With one number it is
+                              preselected and this still displays it, so what the link will point at
+                              is never implicit. */}
+                          <select
+                            className={styles.select}
+                            value={linkChannelId}
+                            onChange={(e) => setLinkChannelId(e.target.value)}
+                          >
+                            <option value="">Which number…</option>
+                            {channelAccounts.map((account) => (
+                              <option key={account.id} value={account.id}>
+                                {account.displayName}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            className={styles.input}
+                            placeholder="Name it — Receipt QR, Website footer"
+                            value={linkName}
+                            onChange={(e) => setLinkName(e.target.value)}
+                          />
+                          <select
+                            className={styles.select}
+                            value={linkPurpose}
+                            onChange={(e) => setLinkPurpose(e.target.value as ConsentPurpose)}
+                          >
+                            <option value="marketing">Marketing — campaigns and offers</option>
+                            <option value="service">Service — support replies only</option>
+                          </select>
+                        </div>
+                        <div className={styles.row}>
+                          <input
+                            className={styles.input}
+                            placeholder="The message they will send"
+                            value={linkPhrase}
+                            onChange={(e) => setLinkPhrase(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className={styles.primary}
+                            disabled={
+                              mintingLink ||
+                              linkChannelId === '' ||
+                              linkName.trim() === '' ||
+                              linkPhrase.trim() === ''
+                            }
+                            onClick={() => void mintOptinLink()}
+                          >
+                            {mintingLink ? 'Creating…' : 'Create link'}
+                          </button>
+                        </div>
+                        {/* Said next to the field that decides it. A marketing link is the only one
+                            of the two that changes who a campaign can reach, so the wording of its
+                            sentence is the thing a complaint will be judged against. */}
+                        {linkPurpose === 'marketing' && (
+                          <p className={styles.muted}>
+                            Write it as an agreement — &ldquo;Yes, send me offers&rdquo; — not a
+                            greeting. This sentence is what proves they asked to hear from you.
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+
+                {optinLinks.length === 0 ? (
+                  <p className={styles.muted}>No opt-in links yet.</p>
+                ) : (
+                  <ul className={styles.list}>
+                    {optinLinks.map((link) => (
+                      <li key={link.id} className={styles.listRow}>
+                        <span>
+                          <strong>{link.name}</strong>
+                          {' — '}
+                          {link.optInCount} opt-in{link.optInCount === 1 ? '' : 's'}
+                          {link.status === 'disabled' && ' (retired)'}
+                          <br />
+                          <code>{link.prefillText}</code>
+                        </span>
+                        <span className={styles.row}>
+                          <span className={clsx(styles.tag, link.purpose === 'marketing' && styles.tagWarn)}>
+                            {link.purpose}
+                          </span>
+                          {/* Copying the URL is the whole point of the row — it is what gets pasted
+                              into a QR generator or a website button. */}
+                          <button
+                            type="button"
+                            className={styles.ghost}
+                            onClick={() => {
+                              void navigator.clipboard.writeText(link.url);
+                              setCopiedLinkId(link.id);
+                            }}
+                          >
+                            {copiedLinkId === link.id ? 'Copied' : 'Copy link'}
+                          </button>
+                          {isAdmin && link.status === 'active' && (
+                            <button
+                              type="button"
+                              className={styles.ghost}
+                              onClick={() => void disableOptinLink(link.id)}
+                            >
+                              Retire
+                            </button>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
 
               {contacts.length === 0 ? (
                 <p className={styles.muted}>

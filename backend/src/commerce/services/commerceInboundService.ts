@@ -1,4 +1,4 @@
-import type { CommercePlatform } from '@stewra/shared-types';
+import type { CommercePlatform, ContactConsent } from '@stewra/shared-types';
 import type {
   NormalizedDeliveryReceipt,
   NormalizedInboundMessage,
@@ -87,9 +87,10 @@ class CommerceInboundService {
     // Meta has been acked, so throwing here would only lose the log line. The failure is reported
     // rather than swallowed into a success — an opt-out that did not record is a real problem, and
     // the next send attempt must not be told everything is fine.
+    let keywordConsent: ContactConsent | null = null;
     if (message.text !== null) {
       try {
-        await consentService.applyInboundKeyword({
+        keywordConsent = await consentService.applyInboundKeyword({
           orgId: account.orgId,
           contactId,
           platform: message.platform,
@@ -105,6 +106,33 @@ class CommerceInboundService {
           error: error instanceof Error ? error.message : String(error),
         });
       }
+    }
+
+    // Where they came from: an opt-in link's token in the text, or Meta's referral block on a message
+    // that began at an ad. Deliberately AFTER the keyword pass and told its result, so that a message
+    // which was both an opt-out and an entry point resolves as the opt-out.
+    //
+    // Non-fatal for the same reason the keyword pass is — the message is stored and Meta is acked, so
+    // throwing here would only lose the log line — and reported for the same reason too: an opt-in
+    // that failed to record means the next campaign will refuse to reach someone who agreed to it.
+    try {
+      await consentService.applyEntryPoint({
+        orgId: account.orgId,
+        contactId,
+        platform: message.platform,
+        externalId: message.externalContactId,
+        body,
+        providerMessageId: message.providerMessageId,
+        referral: message.referral,
+        optedOutJustNow: keywordConsent?.state === 'opted_out',
+      });
+    } catch (error) {
+      logger.error('commerce webhook: failed to record an entry-point consent', {
+        orgId: account.orgId,
+        contactId,
+        providerMessageId: message.providerMessageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

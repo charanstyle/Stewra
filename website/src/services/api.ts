@@ -110,6 +110,10 @@ import type {
   CreateCommerceContactResponse,
   CommercePlatform,
   CreateContactImportResponse,
+  CreateOptinLinkRequest,
+  CreateOptinLinkResponse,
+  ListOptinLinksResponse,
+  DisableOptinLinkResponse,
   ListContactImportsResponse,
   GetContactImportResponse,
   GetCommerceContactResponse,
@@ -651,6 +655,24 @@ export const api = {
 
   getContactImport: (orgId: string, importId: string): Promise<GetContactImportResponse> =>
     request(`/orgs/${orgId}/contacts/imports/${importId}`),
+
+  /**
+   * Mint a click-to-WhatsApp opt-in link. The server appends the reference code to `phrase` and
+   * returns the finished `wa.me` URL — the caller must not build one, or the token that identifies
+   * the link on the way back would be missing.
+   */
+  createOptinLink: (
+    orgId: string,
+    body: CreateOptinLinkRequest,
+  ): Promise<CreateOptinLinkResponse> =>
+    request(`/orgs/${orgId}/optin-links`, { method: 'POST', body }),
+
+  listOptinLinks: (orgId: string): Promise<ListOptinLinksResponse> =>
+    request(`/orgs/${orgId}/optin-links`),
+
+  /** Stop honouring a link. The opt-ins it already gathered stay, and stay attributed to it. */
+  disableOptinLink: (orgId: string, linkId: string): Promise<DisableOptinLinkResponse> =>
+    request(`/orgs/${orgId}/optin-links/${linkId}/disable`, { method: 'POST' }),
 
   getCommerceContact: (orgId: string, contactId: string): Promise<GetCommerceContactResponse> =>
     request(`/orgs/${orgId}/contacts/${contactId}`),

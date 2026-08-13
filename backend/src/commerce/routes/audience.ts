@@ -4,6 +4,7 @@ import multer from 'multer';
 import type { ApiResponse } from '@stewra/shared-types';
 import { contactsController } from '../controllers/contactsController.js';
 import { contactImportsController } from '../controllers/contactImportsController.js';
+import { optinLinksController } from '../controllers/optinLinksController.js';
 import { segmentsController } from '../controllers/segmentsController.js';
 import { requireOrgMember } from '../middleware/requireOrgMember.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
@@ -157,6 +158,30 @@ router.delete(
   requireOrgMember('admin'),
   (req, res) => {
     void contactsController.removeTag(req, res);
+  },
+);
+
+// --- Opt-in links ---------------------------------------------------------------------------
+//
+// The third contact-ingestion door, and the only one where the consent is created by the customer
+// rather than asserted by the organization. Mounted here rather than under `/consent` because what it
+// produces is contacts; the consent it records is how they arrive, not a policy setting.
+
+router.get('/optin-links', requireAuth, verified, requireOrgMember('viewer'), (req, res) => {
+  void optinLinksController.list(req, res);
+});
+
+router.post('/optin-links', requireAuth, verified, requireOrgMember('admin'), (req, res) => {
+  void optinLinksController.create(req, res);
+});
+
+router.post(
+  '/optin-links/:linkId/disable',
+  requireAuth,
+  verified,
+  requireOrgMember('admin'),
+  (req, res) => {
+    void optinLinksController.disable(req, res);
   },
 );
 

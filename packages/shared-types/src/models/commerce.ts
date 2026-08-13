@@ -887,3 +887,53 @@ export interface ContactImportRow {
   /** The specific complaint, for a row the reason alone does not locate. */
   readonly detail: string | null;
 }
+
+export const OPTIN_LINK_STATUSES = ['active', 'disabled'] as const;
+export type OptinLinkStatus = (typeof OPTIN_LINK_STATUSES)[number];
+
+/**
+ * A per-organization click-to-WhatsApp link that collects consent from the customer's own first
+ * message.
+ *
+ * The mechanism is the point, and it is not the one Meta's `referral` block provides. Meta attaches
+ * `referral` only to messages that began at an AD or a Facebook POST — a link a business prints on a
+ * receipt or puts in its website footer produces an ordinary text message with no referral at all. So
+ * the provenance has to travel in the only field that survives an arbitrary `wa.me` link: the
+ * prefilled message text. Each link owns an unguessable {@link token} which is appended to that text,
+ * and the inbound path matches it back.
+ *
+ * That indirection buys something better than attribution. The customer does not click a box on a
+ * page we control and take our word for it afterwards; they send us a sentence, in their own account,
+ * that says what they are agreeing to — and Meta keeps a copy. It is the same class of evidence as a
+ * keyword opt-out, which is the strongest kind this system has.
+ */
+export interface OptinLink {
+  readonly id: UUID;
+  readonly orgId: UUID;
+  /** The connected number the link opens a chat with. */
+  readonly channelAccountId: UUID;
+  /** What the operator calls it — "Receipt QR", "Website footer". Unique per organization. */
+  readonly name: string;
+  /**
+   * What a customer arriving through this link is consenting to. A link that says "send me offers"
+   * collects `marketing`; one that only opens a support chat collects `service` and grants nothing
+   * the 24-hour window would not already give.
+   */
+  readonly purpose: ConsentPurpose;
+  /**
+   * The exact message the customer will send, token included. Immutable: the link is a published
+   * artifact — printed on packaging, encoded in a QR — and editing the sentence after people have
+   * begun agreeing to it would change what past opt-ins mean. Superseding it is a new link.
+   */
+  readonly prefillText: string;
+  /** The unguessable marker inside {@link prefillText}. Matching this is how an opt-in is recognised. */
+  readonly token: string;
+  /** The full `https://wa.me/...?text=...` URL. Derived, never stored — the parts are the truth. */
+  readonly url: string;
+  readonly status: OptinLinkStatus;
+  /** Consents recorded through this link. The honest answer to "is my link working?". */
+  readonly optInCount: number;
+  readonly createdByUserId: UUID | null;
+  readonly createdAt: ISODateString;
+  readonly disabledAt: ISODateString | null;
+}

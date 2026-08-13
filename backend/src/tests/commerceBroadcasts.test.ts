@@ -153,6 +153,7 @@ async function tenant(): Promise<Tenant> {
     externalAccountId: wabaId,
     phoneNumberId: `pn-${randomUUID().slice(0, 12)}`,
     displayName: 'Broadcasts Test Number',
+    displayPhoneNumber: null,
     credentialRef,
     credentialExpiresAt: null,
     meta: {},
