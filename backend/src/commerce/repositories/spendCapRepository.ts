@@ -219,8 +219,9 @@ class SpendCapRepository {
    *
    * The closing ledger entry is inserted FIRST, inside the transaction, so the partial unique
    * index aborts a duplicate close before any counter moves — a replayed webhook cannot credit a
-   * period twice. Returns 'closed', 'already_closed', or 'no_reservation' (a message that was never
-   * reserved — an inbound-conversation charge, or a send from before the cap existed).
+   * period twice. Returns 'closed', 'already_settled'/'already_released' (which prior close won),
+   * or 'no_reservation' (a message that was never reserved — an inbound-conversation charge, or a
+   * send from before the cap existed).
    */
   async closeReservation(params: {
     messageId: string;
@@ -236,7 +237,13 @@ class SpendCapRepository {
      */
     actualCurrency?: string;
     note?: string;
-  }): Promise<'closed' | 'closed_currency_mismatch' | 'already_closed' | 'no_reservation'> {
+  }): Promise<
+    | 'closed'
+    | 'closed_currency_mismatch'
+    | 'already_settled'
+    | 'already_released'
+    | 'no_reservation'
+  > {
     const reservation = await db
       .selectFrom('commerce_spend_ledger')
       .select(['org_id', 'currency', 'period_start', 'amount_micros', 'broadcast_id'])
@@ -282,10 +289,69 @@ class SpendCapRepository {
         `.execute(trx);
       });
     } catch (error) {
-      if (isUniqueViolation(error)) return 'already_closed';
+      if (isUniqueViolation(error)) {
+        // Which close got there first changes what the caller must do next: a prior SETTLE means
+        // the charge is on the books; a prior RELEASE (a refused send — or the backfill freeing a
+        // reservation whose receipt timed out) means a real charge arriving NOW still needs to be
+        // booked, unreserved. The distinction is one read of the row that beat us.
+        const existing = await db
+          .selectFrom('commerce_spend_ledger')
+          .select('kind')
+          .where('message_id', '=', params.messageId)
+          .where('kind', 'in', ['release', 'settle'])
+          .executeTakeFirst();
+        return existing?.kind === 'settle' ? 'already_settled' : 'already_released';
+      }
       throw error;
     }
     return mismatch ? 'closed_currency_mismatch' : 'closed';
+  }
+
+  /**
+   * Reservations the backfill should give up on: held for a message whose receipt never came
+   * (`billable` still NULL) and whose send is older than `before`. Anchored on the MESSAGE's
+   * `created_at` — the age of the send is the fact that matters, and the ledger's own timestamps
+   * are behind an append-only trigger. Reservations for messages whose receipt DID arrive but
+   * could not be priced (`unrated_*`) are deliberately absent here: money that cannot be priced
+   * must not free headroom.
+   */
+  async staleOpenReservations(params: {
+    orgId: string;
+    before: Date;
+    limit: number;
+  }): Promise<{ messageId: string }[]> {
+    const rows = await sql<{ message_id: string }>`
+      SELECT l.message_id
+      FROM commerce_spend_ledger l
+      JOIN commerce_messages m ON m.id = l.message_id
+      WHERE l.org_id = ${params.orgId}
+        AND l.kind = 'reserve'
+        AND m.billable IS NULL
+        AND ${params.before} > m.created_at
+        AND NOT EXISTS (
+          SELECT 1 FROM commerce_spend_ledger c
+          WHERE c.message_id = l.message_id AND c.kind IN ('release', 'settle')
+        )
+      LIMIT ${params.limit}
+    `.execute(db);
+    return rows.rows.map((row) => ({ messageId: row.message_id }));
+  }
+
+  /** Which orgs hold stale open reservations — the backfill sweep's second candidate list. */
+  async orgsWithStaleOpenReservations(before: Date): Promise<string[]> {
+    const rows = await sql<{ org_id: string }>`
+      SELECT DISTINCT l.org_id
+      FROM commerce_spend_ledger l
+      JOIN commerce_messages m ON m.id = l.message_id
+      WHERE l.kind = 'reserve'
+        AND m.billable IS NULL
+        AND ${before} > m.created_at
+        AND NOT EXISTS (
+          SELECT 1 FROM commerce_spend_ledger c
+          WHERE c.message_id = l.message_id AND c.kind IN ('release', 'settle')
+        )
+    `.execute(db);
+    return rows.rows.map((row) => row.org_id);
   }
 
   /**

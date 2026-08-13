@@ -530,6 +530,113 @@ export interface CommerceSpendUsage {
 }
 
 /**
+ * A named offering in the operator's catalog. The plan itself is only an identity — every number
+ * lives on its versions, because a subscriber's price must be frozen by what they subscribed TO,
+ * not by what the catalog says today.
+ */
+export interface CommercePlan {
+  readonly id: UUID;
+  readonly name: string;
+  readonly createdAt: ISODateString;
+}
+
+/**
+ * One immutable pricing of a plan. Changing a plan's fee appends a new version; existing
+ * subscriptions keep pointing at the version they accepted. The platform's whole revenue model is
+ * here: message costs pass through at Meta's exact price, and this flat fee is the fee.
+ */
+export interface CommercePlanVersion {
+  readonly id: UUID;
+  readonly planId: UUID;
+  /** 1-based, dense per plan. */
+  readonly version: number;
+  /** The flat monthly platform fee, micros as a decimal string. Zero is a legal fee. */
+  readonly platformFeeMicros: string;
+  /** ISO 4217 currency the fee is invoiced in. */
+  readonly currency: string;
+  /** Why this version exists — the agreement or decision it transcribes. */
+  readonly note: string;
+  readonly createdByUserId: UUID | null;
+  readonly createdAt: ISODateString;
+}
+
+/**
+ * An org's subscription, joined with the plan-version facts a reader actually wants. At most one
+ * is active (endedAt null) per org; assigning a new plan ends the old subscription and starts a
+ * fresh row, so the history of what an org was on is never overwritten.
+ */
+export interface CommerceSubscriptionView {
+  readonly id: UUID;
+  readonly orgId: UUID;
+  readonly planId: UUID;
+  readonly planName: string;
+  readonly planVersionId: UUID;
+  readonly planVersion: number;
+  readonly platformFeeMicros: string;
+  readonly currency: string;
+  readonly note: string;
+  readonly startedAt: ISODateString;
+  readonly endedAt: ISODateString | null;
+  readonly createdAt: ISODateString;
+}
+
+/**
+ * Where an invoice is in its life. `draft` is the honest-refusal state: the period contains
+ * messages still unrated or unpriced, so the document exists but does not claim to be a bill yet.
+ * `issued` is final and immutable — a correction is a new document, never an edit. `paid` and
+ * `void` arrive with Phase 2.5's payment providers.
+ */
+export const COMMERCE_INVOICE_STATUSES = ['draft', 'issued', 'paid', 'void'] as const;
+
+export type CommerceInvoiceStatus = (typeof COMMERCE_INVOICE_STATUSES)[number];
+
+/**
+ * What a line charges for. `message_costs` is the pass-through of Meta's own prices for the
+ * period; `platform_fee` is the flat fee from the org's plan version. There is deliberately no
+ * markup kind and no adjustment kind — the pricing model is those two lines.
+ */
+export const COMMERCE_INVOICE_LINE_KINDS = ['message_costs', 'platform_fee'] as const;
+
+export type CommerceInvoiceLineKind = (typeof COMMERCE_INVOICE_LINE_KINDS)[number];
+
+/**
+ * One org, one calendar month, ONE currency. Never a conversion: an org whose WABA currency
+ * changed mid-period gets one invoice per currency, each true in its own unit, rather than a
+ * single total computed through an exchange rate this system refuses to invent.
+ */
+export interface CommerceInvoice {
+  readonly id: UUID;
+  readonly orgId: UUID;
+  /** ISO 4217. Every line on this invoice is in this currency. */
+  readonly currency: string;
+  /** First day of the month, UTC, as YYYY-MM-DD. */
+  readonly periodStart: string;
+  /** First day of the NEXT month (half-open window), YYYY-MM-DD. */
+  readonly periodEnd: string;
+  readonly status: CommerceInvoiceStatus;
+  /** Sum of the lines, micros as a decimal string. */
+  readonly totalMicros: string;
+  /** Billable messages in the period the rater could not price. Non-zero holds the draft. */
+  readonly unratedBillable: number;
+  /** Messages sent in the period whose receipt has not priced them yet. Non-zero holds the draft. */
+  readonly unpricedMessages: number;
+  readonly issuedAt: ISODateString | null;
+  readonly createdAt: ISODateString;
+  readonly updatedAt: ISODateString;
+}
+
+export interface CommerceInvoiceLine {
+  readonly id: UUID;
+  readonly invoiceId: UUID;
+  readonly kind: CommerceInvoiceLineKind;
+  /** Human sentence naming exactly what was counted — the reader should never need the ledger. */
+  readonly description: string;
+  /** Messages for `message_costs`, 1 for `platform_fee`. */
+  readonly quantity: number;
+  readonly amountMicros: string;
+}
+
+/**
  * A hand-applied label on a contact. The name is what people type, so identity ignores its case —
  * "VIP" and "vip" as two separate tags splits an audience in half and reports nothing wrong.
  */
@@ -686,6 +793,12 @@ export interface AudiencePreview {
  * a batch of those recipients and sends to each. Two kinds rather than one because they fail
  * differently and must retry differently: re-running a dispatch re-reads the segment and adds nobody
  * twice, while re-running a send batch must never re-send to someone it already reached.
+ *
+ * `message_cost_backfill` re-rates messages whose receipt carried pricing but whose rating never
+ * happened (the rater erred, or a rate card arrived after the fact), and releases spend
+ * reservations stranded by receipts that never came. `billing_period_close` turns one org's ended
+ * calendar month into invoices — or refuses to, leaving the period open, while anything in it is
+ * still unrated or unpriced.
  */
 export const COMMERCE_JOB_KINDS = [
   'channel_token_refresh',
@@ -693,6 +806,8 @@ export const COMMERCE_JOB_KINDS = [
   'broadcast_dispatch',
   'broadcast_send',
   'contact_import',
+  'message_cost_backfill',
+  'billing_period_close',
 ] as const;
 
 export type CommerceJobKind = (typeof COMMERCE_JOB_KINDS)[number];

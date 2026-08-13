@@ -28,6 +28,7 @@ import whatsappWebhookRoutes from './routes/whatsappWebhook.js';
 import orgRoutes from './commerce/routes/organizations.js';
 import rateCardRoutes from './commerce/routes/rateCards.js';
 import spendCapRoutes from './commerce/routes/spendCaps.js';
+import billingRoutes from './commerce/routes/billing.js';
 import metaWebhookRoutes from './commerce/routes/metaWebhook.js';
 import { commerceIntentService } from './commerce/services/commerceIntentService.js';
 import { commerceProposalExecutorRegistry, turnIntentRegistry } from './ports/turnIntent.js';
@@ -103,6 +104,7 @@ export function createApp(): Express {
   // requireInstallAdmin, never by org role — a client must not edit the price they pay.
   app.use('/platform/rate-cards', rateCardRoutes);
   app.use('/platform/spend-caps', spendCapRoutes);
+  app.use('/platform/billing', billingRoutes);
   app.use('/conversations', conversationsRoutes);
   app.use('/messages', messagesRoutes);
   app.use('/users', usersRoutes);

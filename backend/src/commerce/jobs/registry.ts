@@ -5,6 +5,8 @@ import { templateSyncHandler } from './templateSyncHandler.js';
 import { broadcastDispatchHandler } from './broadcastDispatchHandler.js';
 import { broadcastSendHandler } from './broadcastSendHandler.js';
 import { contactImportHandler } from './contactImportHandler.js';
+import { messageCostBackfillHandler } from './messageCostBackfillHandler.js';
+import { billingPeriodCloseHandler } from './billingPeriodCloseHandler.js';
 
 /**
  * Every job kind, mapped to the thing that runs it.
@@ -20,6 +22,8 @@ const HANDLERS: Record<CommerceJobKind, JobHandler> = {
   broadcast_dispatch: broadcastDispatchHandler,
   broadcast_send: broadcastSendHandler,
   contact_import: contactImportHandler,
+  message_cost_backfill: messageCostBackfillHandler,
+  billing_period_close: billingPeriodCloseHandler,
 };
 
 /**

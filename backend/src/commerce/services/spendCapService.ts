@@ -126,6 +126,19 @@ class SpendCapService {
   }
 
   /**
+   * The backfill giving up on a reservation whose receipt never came. The headroom returns; if a
+   * receipt arrives even later, `settleFromRating` finds the release and books the real charge as
+   * an unreserved actual — freed headroom is a judgment call, an uncounted charge would be a hole.
+   */
+  async releaseStaleReservation(messageId: string): Promise<void> {
+    await spendCapRepository.closeReservation({
+      messageId,
+      outcome: 'release',
+      note: 'Released by the cost backfill: no delivery receipt priced this send within the staleness window.',
+    });
+  }
+
+  /**
    * A receipt priced the message: move its reservation to actuals at the real charge. Called by
    * the rater for the three priced states; unrated states deliberately keep their reservation
    * held — the money may have been spent, and an unpriceable charge must not free headroom.
@@ -146,10 +159,16 @@ class SpendCapService {
             actualCurrency: params.currency,
           },
     );
-    if (outcome === 'no_reservation' || outcome === 'closed_currency_mismatch') {
+    if (
+      outcome === 'no_reservation' ||
+      outcome === 'closed_currency_mismatch' ||
+      outcome === 'already_released'
+    ) {
       // Real spend with no (usable) hold behind it — a customer-opened conversation, a send from
-      // before the cap, or a WABA whose currency changed mid-flight. Booked as-is; zero charges
-      // add nothing and are skipped.
+      // before the cap, a WABA whose currency changed mid-flight, or a receipt arriving after the
+      // backfill already released its stranded hold. Booked as-is (recordUnreservedActual has its
+      // own one-per-message index, so a replayed webhook still books once); zero charges add
+      // nothing and are skipped. Only 'already_settled' means the charge is on the books.
       if (params.amountMicros > 0n && params.currency !== null) {
         await spendCapRepository.recordUnreservedActual({
           orgId: params.orgId,

@@ -38,6 +38,8 @@ import type {
   CommerceJobStatus,
   MessageCostState,
   SpendLedgerKind,
+  CommerceInvoiceStatus,
+  CommerceInvoiceLineKind,
   MessagePricingCategory,
   RateUnit,
   TemplateCategory,
@@ -1308,6 +1310,103 @@ export interface CommerceSpendLedgerTable {
   created_at: CreatedAt;
 }
 
+/** A named offering (migration 053). Identity only — every number lives on a version. */
+export interface CommercePlansTable {
+  id: Generated<string>;
+  name: string;
+  created_at: CreatedAt;
+}
+
+/**
+ * One immutable pricing of a plan (migration 053). Append-only by trigger; a fee change is a new
+ * version. `platform_fee_micros` comes back from pg as a string — convert with BigInt().
+ */
+export interface CommercePlanVersionsTable {
+  id: Generated<string>;
+  plan_id: string;
+  version: number;
+  platform_fee_micros: ColumnType<string, string, never>;
+  currency: ColumnType<string, string, never>;
+  note: ColumnType<string, string, never>;
+  created_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+}
+
+/**
+ * An org's tenure on one plan version (migration 053). At most one row per org has a NULL
+ * `ended_at` (partial unique); assigning a new plan ends the old row and inserts a fresh one.
+ */
+export interface CommerceSubscriptionsTable {
+  id: Generated<string>;
+  org_id: string;
+  plan_version_id: string;
+  started_at: ColumnType<Date, Date | undefined, never>;
+  ended_at: ColumnType<Date | null, Date | null | undefined, Date>;
+  note: string;
+  created_by_user_id: ColumnType<string | null, string | null | undefined, never>;
+  created_at: CreatedAt;
+}
+
+/**
+ * One org, one month, one currency (migration 054). Unique on that triple; immutable once issued
+ * (trigger). `total_micros` comes back from pg as a string — convert with BigInt().
+ */
+export interface CommerceInvoicesTable {
+  id: Generated<string>;
+  org_id: string;
+  currency: string;
+  /** First day of the month, UTC, as a date. */
+  period_start: ColumnType<Date, string, never>;
+  period_end: ColumnType<Date, string, never>;
+  status: ColumnType<CommerceInvoiceStatus, CommerceInvoiceStatus | undefined, CommerceInvoiceStatus>;
+  total_micros: string;
+  unrated_billable: ColumnType<number, number | undefined, number>;
+  unpriced_messages: ColumnType<number, number | undefined, number>;
+  issued_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/** One charge on an invoice (migration 054). Mutable only while the invoice is a draft (trigger). */
+export interface CommerceInvoiceLinesTable {
+  id: Generated<string>;
+  invoice_id: string;
+  kind: CommerceInvoiceLineKind;
+  description: string;
+  quantity: number;
+  amount_micros: string;
+  created_at: CreatedAt;
+}
+
+/** A provider charge against an invoice (migration 054). Written by Phase 2.5's payment seam. */
+export interface CommercePaymentAttemptsTable {
+  id: Generated<string>;
+  invoice_id: string;
+  provider: string;
+  status: 'pending' | 'succeeded' | 'failed';
+  idempotency_key: string;
+  provider_ref: ColumnType<string | null, string | null | undefined, string | null>;
+  error: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/**
+ * The close job's steering row for one (org, month) — migration 054. `open` = tried and refused
+ * (discrepancy counts say why); `closed` = invoices issued (or honestly nothing to invoice).
+ */
+export interface CommerceBillingPeriodsTable {
+  id: Generated<string>;
+  org_id: string;
+  period_start: ColumnType<Date, string, never>;
+  status: 'open' | 'closed';
+  unrated_billable: ColumnType<number, number | undefined, number>;
+  unpriced_messages: ColumnType<number, number | undefined, number>;
+  closed_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -1384,4 +1483,14 @@ export interface Database {
   commerce_spend_caps: CommerceSpendCapsTable;
   commerce_spend_periods: CommerceSpendPeriodsTable;
   commerce_spend_ledger: CommerceSpendLedgerTable;
+  // ── Billing (migrations 053/054): the catalog is operator data like the rate cards; the
+  //    subscriptions, invoices and period markers are org-scoped documents readable through
+  //    /orgs routes but written only by the close job and the install-admin surface. ──
+  commerce_plans: CommercePlansTable;
+  commerce_plan_versions: CommercePlanVersionsTable;
+  commerce_subscriptions: CommerceSubscriptionsTable;
+  commerce_invoices: CommerceInvoicesTable;
+  commerce_invoice_lines: CommerceInvoiceLinesTable;
+  commerce_payment_attempts: CommercePaymentAttemptsTable;
+  commerce_billing_periods: CommerceBillingPeriodsTable;
 }
