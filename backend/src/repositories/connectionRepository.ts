@@ -26,8 +26,15 @@ function parseScopes(value: string): ReadonlyArray<string> {
     .filter((s) => s.length > 0);
 }
 
-/** A connection needs re-consent when its granted scopes are missing any required scope. */
-function computeNeedsReconsent(granted: ReadonlyArray<string>): boolean {
+/**
+ * A connection needs re-consent when its granted scopes are missing any required scope. The
+ * required set is Google's — an aggregator connection has Plaid products, not OAuth scopes, and
+ * must never light up the "reconnect Google" banner because of that.
+ */
+function computeNeedsReconsent(provider: string, granted: ReadonlyArray<string>): boolean {
+  if (provider !== 'google') {
+    return false;
+  }
   return config.google.requiredScopes.some((required) => !granted.includes(required));
 }
 
@@ -199,7 +206,7 @@ export class ConnectionRepository {
       accountEmail: row.account_email,
       status: toConnectionStatus(row.status),
       scopes,
-      needsReconsent: computeNeedsReconsent(scopes),
+      needsReconsent: computeNeedsReconsent(row.provider, scopes),
       createdAt: row.created_at.toISOString(),
     };
   }

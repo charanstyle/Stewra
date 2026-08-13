@@ -18,6 +18,7 @@ import { suggestionService } from '../services/suggestionService.js';
 import { draftService } from '../services/draftService.js';
 import { briefingService } from '../services/briefingService.js';
 import { gmailSyncService } from '../services/gmailSyncService.js';
+import { transactionSyncService } from '../services/transactionSyncService.js';
 import { conversationService } from '../services/conversationService.js';
 import { messageService } from '../services/messageService.js';
 
@@ -162,11 +163,13 @@ class HomeController extends BaseController {
     }
   }
 
-  /** POST /home/recompute — sync the user's mail then rebuild their briefing + nudges (manual refresh). */
+  /** POST /home/recompute — sync the user's mail + bank data then rebuild their briefing + nudges
+   * (manual refresh). The money sync is a no-op for users with no bank connection. */
   async recompute(req: Request, res: Response): Promise<void> {
     try {
       const userId = this.userId(req);
       await gmailSyncService.syncForUser(userId);
+      await transactionSyncService.syncForUser(userId);
       const briefing = await briefingService.computeAndStore(userId);
       const body: GetBriefingResponse = { briefing };
       this.handleSuccess(res, body);

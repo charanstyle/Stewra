@@ -216,6 +216,8 @@ export type {
 export type { ListActivityRequest, ListActivityResponse } from './api/activity';
 export type {
   StartCalendarConnectionResponse,
+  StartMoneyConnectionResponse,
+  ExchangeMoneyPublicTokenRequest,
   ConnectionResponse,
   ListConnectionsResponse,
 } from './api/connections';

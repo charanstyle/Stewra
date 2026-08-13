@@ -5,8 +5,19 @@ import { vault } from '../control-plane/vault/vault.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
 import { preferencesService } from './preferencesService.js';
 import { processMemoryService } from './processMemoryService.js';
+import { config } from '../config/unifiedConfig.js';
+import { decryptField } from '../control-plane/vault/fieldCrypto.js';
+import {
+  moneyAccountRepository,
+  moneyTransactionRepository,
+} from '../repositories/moneyStore.js';
 import { extractCalendarFacts } from './calendarFacts.js';
 import { extractGmailFacts } from './gmailFacts.js';
+import {
+  extractMoneyFacts,
+  type MoneyAccountSnapshot,
+  type MoneyTransactionView,
+} from './moneyFacts.js';
 import { fetchUpcomingEvents, fetchRecentEmails, isGoogleAuthError } from './googleOAuthService.js';
 import type { ConnectionRow } from '../repositories/connectionRepository.js';
 
@@ -22,10 +33,62 @@ export class ConnectionService {
     if (kind === 'calendar' || kind === 'gmail') {
       return this.googleFacts(userId, kind);
     }
+    if (kind === 'money') {
+      return this.moneyFacts(userId);
+    }
     throw new Error(
       `ConnectionService.fetchDerivedFacts(${kind}) is not implemented yet ` +
-        `(money/memory arrive in a later milestone).`,
+        `(memory is served by the broker directly).`,
     );
+  }
+
+  /**
+   * Money facts come from the STORE, not a live Plaid call: the sync engine (scheduled, or the
+   * manual /home/recompute) keeps the store fresh, and reading here stays fast and rate-limit-free.
+   * Terminal grant loss is therefore detected at sync time, which revokes the connection — by the
+   * time we read, a revoked connection is simply absent from `listActive`. Merchant text is
+   * decrypted transiently here, reduced to fact strings, and only those strings cross the broker.
+   */
+  private async moneyFacts(userId: string): Promise<ReadonlyArray<string>> {
+    const connections = await connectionRepository.listActive(userId, 'aggregator');
+    const labelByAccount = connections.length > 1;
+    const now = new Date();
+    const since = new Date(now.getTime() - config.moneySync.factsLookbackDays * 24 * 60 * 60 * 1000);
+    const sinceDay = since.toISOString().slice(0, 10);
+    const facts: string[] = [];
+
+    for (const connection of connections) {
+      let accountFacts: ReadonlyArray<string>;
+      try {
+        const accounts: MoneyAccountSnapshot[] = (
+          await moneyAccountRepository.listForConnection(connection.id)
+        ).map((a) => ({
+          name: a.name,
+          accountType: a.accountType,
+          isoCurrencyCode: a.isoCurrencyCode,
+          availableMicros: a.availableMicros,
+          currentMicros: a.currentMicros,
+        }));
+        const transactions: MoneyTransactionView[] = (
+          await moneyTransactionRepository.listSince(connection.id, sinceDay)
+        ).map((t) => ({
+          merchant: t.merchantCiphertext.length > 0 ? decryptField(t.merchantCiphertext) : '',
+          amountMicros: t.amountMicros,
+          isoCurrencyCode: t.isoCurrencyCode,
+          postedAt: t.postedAt,
+          pending: t.pending,
+        }));
+        accountFacts = extractMoneyFacts(accounts, transactions, now);
+      } catch (error) {
+        // One bank failing to read must not sink the others — capture and move on, same as Google.
+        Sentry.captureException(error);
+        continue;
+      }
+      for (const fact of accountFacts) {
+        facts.push(labelByAccount ? `[${connection.accountEmail}] ${fact}` : fact);
+      }
+    }
+    return facts;
   }
 
   private async googleFacts(
