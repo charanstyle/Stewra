@@ -1,15 +1,18 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type {
+  ChargeInvoiceResponse,
   GetInvoiceResponse,
   GetOrgBillingResponse,
   ListInvoicesResponse,
   ListPlansResponse,
+  MarkInvoicePaidResponse,
   SetSubscriptionResponse,
   UpsertPlanResponse,
 } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { billingService } from '../services/billingService.js';
+import { paymentService } from '../services/paymentService.js';
 import { orgContext } from '../middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 import { AuthenticationError } from '../../utils/errors.js';
@@ -30,6 +33,10 @@ const setSubscriptionSchema = z.object({
 
 const invoiceParamsSchema = z.object({
   invoiceId: z.string().uuid(),
+});
+
+const markPaidSchema = z.object({
+  note: z.string().min(1).max(2000),
 });
 
 /**
@@ -111,10 +118,38 @@ class BillingController extends BaseController {
       const { orgId } = orgContext(req);
       const params = parse(invoiceParamsSchema, req.params);
       const result = await billingService.getInvoice(orgId, params.invoiceId);
-      const response: GetInvoiceResponse = result;
+      const attempts = await paymentService.attemptsForInvoice(params.invoiceId);
+      const response: GetInvoiceResponse = { ...result, attempts };
       this.handleSuccess(res, response);
     } catch (error) {
       this.handleError(error, res, 'BillingController.getInvoice');
+    }
+  }
+
+  /** POST /platform/billing/invoices/:invoiceId/mark-paid */
+  async markInvoicePaid(req: Request, res: Response): Promise<void> {
+    try {
+      if (req.userId === undefined) throw new AuthenticationError('Authentication required');
+      const params = parse(invoiceParamsSchema, req.params);
+      const body = parse(markPaidSchema, req.body);
+      const invoice = await paymentService.markInvoicePaid(params.invoiceId, body.note);
+      const response: MarkInvoicePaidResponse = { invoice };
+      this.handleSuccess(res, response);
+    } catch (error) {
+      this.handleError(error, res, 'BillingController.markInvoicePaid');
+    }
+  }
+
+  /** POST /platform/billing/invoices/:invoiceId/charge */
+  async chargeInvoice(req: Request, res: Response): Promise<void> {
+    try {
+      if (req.userId === undefined) throw new AuthenticationError('Authentication required');
+      const params = parse(invoiceParamsSchema, req.params);
+      const result = await paymentService.chargeInvoice(params.invoiceId);
+      const response: ChargeInvoiceResponse = result;
+      this.handleSuccess(res, response);
+    } catch (error) {
+      this.handleError(error, res, 'BillingController.chargeInvoice');
     }
   }
 }

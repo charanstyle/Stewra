@@ -40,6 +40,7 @@ import type {
   SpendLedgerKind,
   CommerceInvoiceStatus,
   CommerceInvoiceLineKind,
+  CommercePaymentProvider,
   MessagePricingCategory,
   RateUnit,
   TemplateCategory,
@@ -1392,6 +1393,20 @@ export interface CommercePaymentAttemptsTable {
 }
 
 /**
+ * An org's identity at a payment provider (migration 055). Opaque provider-side refs, not
+ * credentials — the install's secret key in env is what makes them mean anything.
+ */
+export interface CommerceBillingCustomersTable {
+  id: Generated<string>;
+  org_id: string;
+  provider: CommercePaymentProvider;
+  customer_ref: string;
+  payment_method_ref: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/**
  * The close job's steering row for one (org, month) — migration 054. `open` = tried and refused
  * (discrepancy counts say why); `closed` = invoices issued (or honestly nothing to invoice).
  */
@@ -1493,4 +1508,5 @@ export interface Database {
   commerce_invoice_lines: CommerceInvoiceLinesTable;
   commerce_payment_attempts: CommercePaymentAttemptsTable;
   commerce_billing_periods: CommerceBillingPeriodsTable;
+  commerce_billing_customers: CommerceBillingCustomersTable;
 }

@@ -637,6 +637,36 @@ export interface CommerceInvoiceLine {
 }
 
 /**
+ * How an invoice gets paid. `manual` — the default — is an offline settlement (bank transfer, a
+ * check, a handshake): the system records that money moved, it never moves it. `stripe` moves it.
+ * A new provider is a new union member, which the payment registry refuses to compile without.
+ */
+export const COMMERCE_PAYMENT_PROVIDERS = ['manual', 'stripe'] as const;
+
+export type CommercePaymentProvider = (typeof COMMERCE_PAYMENT_PROVIDERS)[number];
+
+export const COMMERCE_PAYMENT_ATTEMPT_STATUSES = ['pending', 'succeeded', 'failed'] as const;
+
+export type CommercePaymentAttemptStatus = (typeof COMMERCE_PAYMENT_ATTEMPT_STATUSES)[number];
+
+/**
+ * One try at collecting one invoice. `idempotencyKey` is unique per attempt and travels to the
+ * provider on the wire — a retried request that already charged is the provider's problem to
+ * dedupe, and a provider that cannot honor that is not an acceptable provider.
+ */
+export interface CommercePaymentAttempt {
+  readonly id: UUID;
+  readonly invoiceId: UUID;
+  readonly provider: CommercePaymentProvider;
+  readonly status: CommercePaymentAttemptStatus;
+  /** The provider's own reference (payment intent, transfer id) once it has one. */
+  readonly providerRef: string | null;
+  readonly error: string | null;
+  readonly createdAt: ISODateString;
+  readonly updatedAt: ISODateString;
+}
+
+/**
  * A hand-applied label on a contact. The name is what people type, so identity ignores its case —
  * "VIP" and "vip" as two separate tags splits an audience in half and reports nothing wrong.
  */

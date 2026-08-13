@@ -29,6 +29,7 @@ import orgRoutes from './commerce/routes/organizations.js';
 import rateCardRoutes from './commerce/routes/rateCards.js';
 import spendCapRoutes from './commerce/routes/spendCaps.js';
 import billingRoutes from './commerce/routes/billing.js';
+import paymentsWebhookRoutes from './commerce/routes/paymentsWebhook.js';
 import metaWebhookRoutes from './commerce/routes/metaWebhook.js';
 import { commerceIntentService } from './commerce/services/commerceIntentService.js';
 import { commerceProposalExecutorRegistry, turnIntentRegistry } from './ports/turnIntent.js';
@@ -75,6 +76,8 @@ export function createApp(): Express {
   // Same reasoning, different Meta app: this one is the commerce plane's, and it carries traffic for
   // every connected organization rather than for Stewra's own number.
   app.use('/webhooks/meta', metaWebhookRoutes);
+  // The payment provider's webhook, same raw-bytes reasoning: Stripe signs the exact body.
+  app.use('/webhooks/payments', paymentsWebhookRoutes);
 
   app.use(express.json({ limit: '1mb' }));
 
