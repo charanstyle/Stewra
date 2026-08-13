@@ -48,6 +48,15 @@ const CALLING_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Whether a string is an assigned E.164 calling code, exactly as {@link countryCallingCode} would
+ * return it. The rate-card loader uses this so a typo in Meta's transcribed sheet ("US" or "001")
+ * is refused at load time rather than sitting in the table as a row no message can ever match.
+ */
+export function isCallingCode(code: string): boolean {
+  return CALLING_CODES.has(code);
+}
+
+/**
  * The calling code of an E.164 number (`+14155550100` → `1`), or null when none matches.
  *
  * Null is an honest "this number's country is not identifiable" — a malformed number, or a code

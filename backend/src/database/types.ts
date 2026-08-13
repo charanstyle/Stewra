@@ -37,6 +37,7 @@ import type {
   ContactImportStatus,
   CommerceJobStatus,
   MessagePricingCategory,
+  RateUnit,
   TemplateCategory,
   TemplateStatus,
   BroadcastStatus,
@@ -1197,6 +1198,39 @@ export interface CommerceContactImportRowsTable {
   detail: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
+/**
+ * One operator load of Meta's price sheet for one currency (migration 050).
+ *
+ * Immutable once written except for the single closing transition (`effective_to` NULL → value),
+ * enforced by trigger. `effective_to` NULL means this is the live card for its currency; the
+ * partial unique index guarantees there is at most one.
+ */
+export interface CommerceRateCardsTable {
+  id: Generated<string>;
+  currency: string;
+  effective_from: Date;
+  effective_to: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  source_note: string;
+  loaded_by_user_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+}
+
+/**
+ * One price on a rate card (migration 050): country calling code × pricing category → micros.
+ * Fully append-only by trigger; a wrong number is corrected by loading a corrected card.
+ *
+ * `amount_micros` comes back from pg as a string (bigint); callers convert with BigInt(), never
+ * Number() — a price times 40k recipients must not pass through a float.
+ */
+export interface CommerceMessageRatesTable {
+  id: Generated<string>;
+  rate_card_id: string;
+  country_calling_code: string;
+  pricing_category: MessagePricingCategory;
+  amount_micros: ColumnType<string, string, never>;
+  unit: RateUnit;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -1263,4 +1297,8 @@ export interface Database {
   commerce_broadcast_recipients: CommerceBroadcastRecipientsTable;
   commerce_contact_imports: CommerceContactImportsTable;
   commerce_contact_import_rows: CommerceContactImportRowsTable;
+  // ── Platform-operator data (migration 050): no org_id, gated by requireInstallAdmin, never
+  //    readable or writable through any /orgs route. ──
+  commerce_rate_cards: CommerceRateCardsTable;
+  commerce_message_rates: CommerceMessageRatesTable;
 }
