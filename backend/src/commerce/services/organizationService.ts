@@ -7,6 +7,9 @@ import type {
 } from '@stewra/shared-types';
 import { roleMeetsMinimum } from '@stewra/shared-types';
 import { organizationRepository, slugify } from '../repositories/organizationRepository.js';
+import { orgInviteEmailRegistry } from '../../ports/orgInviteEmail.js';
+import { config } from '../../config/unifiedConfig.js';
+import { logger } from '../../utils/logger.js';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../utils/errors.js';
 
 /**
@@ -98,13 +101,49 @@ class OrganizationService {
     }
     this.assertMayAssignRole(params.actorRole, params.role);
 
-    return organizationRepository.createInvite({
+    // Fetched before minting, so a missing identity (a real anomaly — the actor was just verified
+    // as a member) fails the request while there is still nothing to clean up.
+    const { orgName, inviterName } = await organizationRepository.findInviteEmailIdentity(
+      params.orgId,
+      params.actorId,
+    );
+
+    const created = await organizationRepository.createInvite({
       orgId: params.orgId,
       email,
       role: params.role,
       invitedBy: params.actorId,
       expiresAt: new Date(Date.now() + INVITE_TTL_MS),
     });
+
+    // Deliver the link. On failure the invite is revoked before the error surfaces: a pending row
+    // whose token never reached anyone is indistinguishable from "the invitee is ignoring me", and
+    // the admin's retry (creating a fresh invite) should not leave zombies behind.
+    const acceptUrl = `${config.web.appUrl}/invites/accept?token=${encodeURIComponent(created.token)}`;
+    try {
+      await orgInviteEmailRegistry.require().send({
+        to: email,
+        inviterName,
+        orgName,
+        role: params.role,
+        acceptUrl,
+        expiresAt: new Date(created.invite.expiresAt),
+      });
+    } catch (error) {
+      await organizationRepository.revokeInvite(params.orgId, created.invite.id);
+      logger.error('commerce: invite email failed to send; invite revoked', {
+        orgId: params.orgId,
+        inviteId: created.invite.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new Error(
+        `The invite email to ${email} could not be sent, so the invite was not created. ` +
+          `Fix the mail problem and invite them again.`,
+        { cause: error },
+      );
+    }
+
+    return created;
   }
 
   /**

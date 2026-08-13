@@ -294,7 +294,8 @@ export default function CommercePage(): React.JSX.Element {
         <p className={styles.subtitle}>
           Your businesses, the numbers they message from, and everything customers have said. Manage
           contacts and consent on <Link to="/commerce/audience">Audience</Link>; templates,
-          broadcasts and costs on <Link to="/commerce/campaigns">Campaigns</Link>.
+          broadcasts and costs on <Link to="/commerce/campaigns">Campaigns</Link>; members and
+          invites on <Link to="/commerce/team">Team</Link>.
         </p>
 
         {error !== null && <div className={styles.error}>{error}</div>}

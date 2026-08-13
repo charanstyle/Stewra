@@ -3,6 +3,16 @@ import type { Transporter } from 'nodemailer';
 import { config } from '../config/unifiedConfig.js';
 import { logger } from '../utils/logger.js';
 
+/** For interpolating user-supplied names into HTML mail bodies — an org name is arbitrary input. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
  * Thin wrapper over a Mailu/SMTP transport (nodemailer), mirroring the pattern the other apps on the
  * host use. The transport is created lazily and reused. Sending FAILS LOUDLY — a verification flow
@@ -89,6 +99,45 @@ class EmailService {
 
     await this.getTransporter().sendMail({ from: config.email.from, to, subject, text, html });
     logger.info(`Contact invite emailed to ${to}`);
+  }
+
+  /**
+   * Email an organization invite for the commerce plane. Reached through the `orgInviteEmail` port
+   * (`ports/orgInviteEmail.ts`) rather than imported by commerce directly — the plane boundary
+   * forbids that import. `acceptUrl` carries the one-time token and arrives pre-assembled.
+   */
+  async sendOrgInvite(params: {
+    to: string;
+    inviterName: string;
+    orgName: string;
+    role: string;
+    acceptUrl: string;
+    expiresAt: Date;
+  }): Promise<void> {
+    const { to, inviterName, orgName, role, acceptUrl, expiresAt } = params;
+    // Escaped copies for the HTML body only; subject and text/plain must stay literal.
+    const inviterHtml = escapeHtml(inviterName);
+    const orgHtml = escapeHtml(orgName);
+    const expiresOn = expiresAt.toUTCString();
+    const subject = `${inviterName} invited you to join ${orgName} on Stewra`;
+    const text =
+      `${inviterName} invited you to join ${orgName} on Stewra as ${role}.\n\n` +
+      `Open this link to accept: ${acceptUrl}\n\n` +
+      `The link works until ${expiresOn}. You'll need a Stewra account on this email address — ` +
+      `the invite is tied to it and cannot be accepted from another one.\n\n` +
+      `If you weren't expecting this, you can safely ignore this email — nothing happens until you act.`;
+    const html =
+      `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;color:#1a1a2e">` +
+      `<h1 style="font-size:20px;margin:0 0 4px">Stewra</h1>` +
+      `<p style="color:#555;margin:0 0 24px">A careful advisor that only reads — and never acts without you.</p>` +
+      `<p style="margin:0 0 16px"><strong>${inviterHtml}</strong> invited you to join <strong>${orgHtml}</strong> as <strong>${role}</strong>.</p>` +
+      `<p style="margin:0 0 24px"><a href="${acceptUrl}" style="display:inline-block;background:#1a1a2e;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:600">Accept invitation</a></p>` +
+      `<p style="color:#555;font-size:13px;margin:0 0 8px">The link works until ${expiresOn}, and only for a Stewra account on this email address.</p>` +
+      `<p style="color:#888;font-size:13px;margin:0">If you weren't expecting this, you can safely ignore this email — nothing happens until you act.</p>` +
+      `</div>`;
+
+    await this.getTransporter().sendMail({ from: config.email.from, to, subject, text, html });
+    logger.info(`Org invite emailed to ${to}`);
   }
 }
 

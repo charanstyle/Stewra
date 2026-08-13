@@ -94,6 +94,10 @@ import type {
   CreateOrgInviteResponse,
   AcceptOrgInviteRequest,
   AcceptOrgInviteResponse,
+  DeleteOrgInviteResponse,
+  UpdateOrgMemberRequest,
+  UpdateOrgMemberResponse,
+  DeleteOrgMemberResponse,
   ListChannelAccountsResponse,
   CreateChannelAccountRequest,
   CreateChannelAccountResponse,
@@ -565,6 +569,19 @@ export const api = {
 
   acceptOrgInvite: (body: AcceptOrgInviteRequest): Promise<AcceptOrgInviteResponse> =>
     request('/orgs/invites/accept', { method: 'POST', body }),
+
+  revokeOrgInvite: (orgId: string, inviteId: string): Promise<DeleteOrgInviteResponse> =>
+    request(`/orgs/${orgId}/invites/${inviteId}`, { method: 'DELETE' }),
+
+  updateOrgMember: (
+    orgId: string,
+    memberId: string,
+    body: UpdateOrgMemberRequest,
+  ): Promise<UpdateOrgMemberResponse> =>
+    request(`/orgs/${orgId}/members/${memberId}`, { method: 'PATCH', body }),
+
+  removeOrgMember: (orgId: string, memberId: string): Promise<DeleteOrgMemberResponse> =>
+    request(`/orgs/${orgId}/members/${memberId}`, { method: 'DELETE' }),
 
   listChannelAccounts: (orgId: string): Promise<ListChannelAccountsResponse> =>
     request(`/orgs/${orgId}/channels`),

@@ -283,6 +283,22 @@ class OrganizationRepository {
     return { invite: toInvite(row), token };
   }
 
+  /**
+   * The two display names the invite email needs: the org being joined and the member doing the
+   * inviting. Throws rather than returning nulls — the caller was just verified as a member of this
+   * org by `requireOrgMember`, so either row being absent is a real anomaly, not an empty result.
+   */
+  async findInviteEmailIdentity(
+    orgId: string,
+    inviterUserId: string,
+  ): Promise<{ orgName: string; inviterName: string }> {
+    const [org, inviter] = await Promise.all([
+      db.selectFrom('organizations').select('name').where('id', '=', orgId).executeTakeFirstOrThrow(),
+      db.selectFrom('users').select('display_name').where('id', '=', inviterUserId).executeTakeFirstOrThrow(),
+    ]);
+    return { orgName: org.name, inviterName: inviter.display_name };
+  }
+
   async listInvites(orgId: string): Promise<OrgInvite[]> {
     const rows = await db
       .selectFrom('org_invites')

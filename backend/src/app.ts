@@ -29,6 +29,8 @@ import orgRoutes from './commerce/routes/organizations.js';
 import metaWebhookRoutes from './commerce/routes/metaWebhook.js';
 import { commerceIntentService } from './commerce/services/commerceIntentService.js';
 import { commerceProposalExecutorRegistry, turnIntentRegistry } from './ports/turnIntent.js';
+import { orgInviteEmailRegistry } from './ports/orgInviteEmail.js';
+import { emailService } from './services/emailService.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
 /**
@@ -52,6 +54,13 @@ export function createApp(): Express {
   // the same code path.
   turnIntentRegistry.register(commerceIntentService);
   commerceProposalExecutorRegistry.register(commerceIntentService);
+  // Same inversion, other direction: the commerce plane cannot import `services/emailService`, so an
+  // org invite reaches SMTP through this port. Registration is a plain overwrite — the last
+  // `createApp()` wins with an identical binding, so re-creation in tests is harmless, and a test
+  // that swaps in a scripted sender must do so AFTER building the app.
+  orgInviteEmailRegistry.register({
+    send: (email) => emailService.sendOrgInvite(email),
+  });
 
   app.use(helmet());
   app.use(cors({ origin: config.web.appUrl, credentials: false }));
