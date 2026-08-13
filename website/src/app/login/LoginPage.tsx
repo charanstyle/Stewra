@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -17,7 +17,15 @@ type FormValues = z.infer<typeof schema>;
 
 export default function LoginPage(): React.JSX.Element {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login, register: registerUser } = useAuth();
+
+  // Where to land after signing in. Exists for links that carry one-time state — an org-invite email
+  // points here with `?next=/invites/accept?token=…`, and dropping it would strand the invitee on
+  // /today with no way back to the token. Only a same-app path is honoured: anything not starting
+  // with "/" (or trying "//host" protocol-relative escape) would make this an open redirect.
+  const rawNext = searchParams.get('next');
+  const next = rawNext !== null && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : null;
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -36,11 +44,14 @@ export default function LoginPage(): React.JSX.Element {
           values.password,
           values.displayName ?? '',
         );
-        navigate(requiresVerification ? '/verify-email' : '/today');
+        // A fresh account that still has to verify goes through /verify-email regardless — the
+        // destination (e.g. an invite-accept page) sits behind the verified gate anyway. The link in
+        // the invite email stays valid, so re-opening it after verifying picks the flow back up.
+        navigate(requiresVerification ? '/verify-email' : (next ?? '/today'));
         return;
       }
       await login(values.email, values.password);
-      navigate('/today');
+      navigate(next ?? '/today');
     } catch (err) {
       setServerError(err instanceof ApiError ? err.message : 'Something went wrong');
     }

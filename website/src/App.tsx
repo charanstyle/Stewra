@@ -29,6 +29,8 @@ const GithubSetupPage = lazy(() => import('./app/github/GithubSetupPage'));
 const CommercePage = lazy(() => import('./app/commerce/CommercePage'));
 const AudiencePage = lazy(() => import('./app/commerce/AudiencePage'));
 const CampaignsPage = lazy(() => import('./app/commerce/CampaignsPage'));
+const TeamPage = lazy(() => import('./app/commerce/TeamPage'));
+const InviteAcceptPage = lazy(() => import('./app/commerce/InviteAcceptPage'));
 const PrivacyPage = lazy(() => import('./app/legal/PrivacyPage'));
 const TermsPage = lazy(() => import('./app/legal/TermsPage'));
 
@@ -142,6 +144,18 @@ export default function App(): React.JSX.Element {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/commerce/team"
+              element={
+                <ProtectedRoute>
+                  <TeamPage />
+                </ProtectedRoute>
+              }
+            />
+            {/* Where the org-invite email lands. NOT inside ProtectedRoute: its redirect to /login
+              drops the query string, and the token in it is the entire invite. The page gates
+              itself and hands /login a `next` back here. */}
+            <Route path="/invites/accept" element={<InviteAcceptPage />} />
             <Route
               path="/settings"
               element={

@@ -9,6 +9,13 @@ import { db, closeDb } from '../database/index.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import orgRoutes from '../commerce/routes/organizations.js';
 import { organizationRepository } from '../commerce/repositories/organizationRepository.js';
+import { orgInviteEmailRegistry } from '../ports/orgInviteEmail.js';
+
+// Creating an invite now delivers its link through the orgInviteEmail port, and this file builds the
+// router directly rather than through `createApp()`, so no transport is wired. This suite is about
+// tenancy, not delivery — a sink keeps the invite tests running; delivery itself is what
+// commerceOrgInvites.test.ts covers.
+orgInviteEmailRegistry.register({ send: async () => {} });
 
 /**
  * TENANCY. The commerce plane is multi-tenant, so the question this suite exists to answer is the
