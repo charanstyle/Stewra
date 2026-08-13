@@ -5,6 +5,8 @@ import type {
 import { channelAccountService } from './channelAccountService.js';
 import { consentService } from './consentService.js';
 import { buildSender } from './senders/index.js';
+import { renderTemplateBody } from './templateBody.js';
+import { templateService } from './templateService.js';
 import { channelAccountRepository } from '../repositories/channelAccountRepository.js';
 import { commerceInboxRepository } from '../repositories/commerceInboxRepository.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../utils/errors.js';
@@ -178,6 +180,126 @@ class CommerceInboxService {
       });
       // Re-thrown, not converted into a "queued" success: the agent must know the customer did not
       // get this, while they are still looking at the screen.
+      throw error;
+    }
+  }
+
+  /**
+   * One approved template, into one conversation. The business-initiated half of the inbox.
+   *
+   * There is deliberately NO service-window check here — a template is the one thing Meta delivers
+   * outside the window, and it is never less deliverable inside it. What replaces the window check
+   * is the consent gate, at a purpose the TEMPLATE'S CATEGORY decides:
+   *
+   *   - `utility` / `authentication` → `service`: transactional content, gated on suppression only,
+   *     the same permission an ordinary reply needs.
+   *   - `marketing` → `marketing`: the full gate — policy, attestation, consent, quiet hours —
+   *     exactly as a broadcast would face. Sending a campaign one recipient at a time through the
+   *     inbox must not be cheaper, in permission terms, than sending the campaign.
+   *   - a category this build does not recognize (`null`) is gated as `marketing`, because the safe
+   *     reading of "we cannot tell what kind of message this is" is the strict one.
+   *
+   * Meta re-files templates it reads as marketing regardless of what was submitted, and the sync
+   * mirrors the category Meta actually assigned — so this decision rides on Meta's judgement of the
+   * content, not the client's.
+   */
+  async sendTemplate(params: {
+    orgId: string;
+    conversationId: string;
+    templateId: string;
+    variables: readonly string[];
+    sentByUserId: string;
+  }): Promise<CommerceMessage> {
+    const conversation = await commerceInboxRepository.findConversation(
+      params.orgId,
+      params.conversationId,
+    );
+    if (conversation === null) {
+      throw new NotFoundError('Conversation not found');
+    }
+
+    const template = await templateService.assertSendable(
+      params.orgId,
+      params.templateId,
+      params.variables.length,
+    );
+    // A template belongs to one WABA. Sent through a different number, Meta rejects it — after the
+    // message row exists. Refusing here names the actual mistake instead.
+    if (template.channelAccountId !== conversation.channelAccountId) {
+      throw new ValidationError('Validation failed', [
+        {
+          field: 'templateId',
+          message: `Template "${template.name}" belongs to a different WhatsApp number than this conversation.`,
+        },
+      ]);
+    }
+
+    const account = await channelAccountRepository.findForOrg(
+      params.orgId,
+      conversation.channelAccountId,
+    );
+    if (account === null) {
+      throw new NotFoundError('The channel this conversation belongs to is no longer connected');
+    }
+
+    const to = await commerceInboxRepository.findContactExternalId(
+      params.orgId,
+      conversation.contactId,
+    );
+    if (to === null) {
+      throw new NotFoundError('Contact not found');
+    }
+
+    const purpose =
+      template.category === 'utility' || template.category === 'authentication'
+        ? 'service'
+        : 'marketing';
+    await consentService.assertMaySend({
+      orgId: params.orgId,
+      contactId: conversation.contactId,
+      platform: conversation.platform,
+      externalId: to,
+      purpose,
+    });
+
+    // Same order as a reply: the row exists BEFORE the send, so a failure leaves evidence.
+    const queued = await commerceInboxRepository.recordOutbound({
+      orgId: params.orgId,
+      conversationId: params.conversationId,
+      platform: conversation.platform,
+      body: renderTemplateBody(template.bodyText, params.variables),
+      sentByUserId: params.sentByUserId,
+      templateId: template.id,
+    });
+
+    try {
+      const sender = buildSender(await channelAccountService.resolve(account));
+      const providerMessageId = await sender.sendTemplate({
+        to,
+        templateName: template.name,
+        languageCode: template.language,
+        variables: params.variables,
+      });
+      return await commerceInboxRepository.settleOutbound({
+        orgId: params.orgId,
+        messageId: queued.id,
+        status: 'sent',
+        providerMessageId,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      await commerceInboxRepository.settleOutbound({
+        orgId: params.orgId,
+        messageId: queued.id,
+        status: 'failed',
+        failureReason: reason,
+      });
+      logger.error('commerce: outbound template send failed', {
+        orgId: params.orgId,
+        conversationId: params.conversationId,
+        templateId: params.templateId,
+        error: reason,
+      });
       throw error;
     }
   }

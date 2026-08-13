@@ -9,6 +9,7 @@ import { channelAccountService } from '../services/channelAccountService.js';
 import { consentService } from '../services/consentService.js';
 import { buildSender } from '../services/senders/index.js';
 import { WhatsappSendRefusedError } from '../services/senders/whatsappCloudSender.js';
+import { renderTemplateBody } from '../services/templateBody.js';
 import { templateService } from '../services/templateService.js';
 import { logger } from '../../utils/logger.js';
 import {
@@ -329,22 +330,6 @@ class BroadcastSendHandler implements JobHandler {
       lastError: reason,
     });
   }
-}
-
-/**
- * The template body with its `{{n}}` placeholders filled, for the message row the inbox shows.
- *
- * What the customer's phone displays is rendered by Meta from the approved template; this is our
- * copy of the same substitution so the conversation thread reads as what was said, not as a
- * template's raw source. A placeholder beyond the supplied variables is left visible — the variable
- * count was validated upstream, and rendering an invented value would hide the mismatch if that
- * validation ever regressed.
- */
-function renderTemplateBody(bodyText: string, variables: readonly string[]): string {
-  return bodyText.replace(/\{\{\s*(\d+)\s*\}\}/g, (placeholder, index: string) => {
-    const value = variables[Number(index) - 1];
-    return value === undefined ? placeholder : value;
-  });
 }
 
 export const broadcastSendHandler = new BroadcastSendHandler();

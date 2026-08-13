@@ -4,6 +4,7 @@ import type {
   CreateCommerceMessageResponse,
   ListCommerceConversationsResponse,
   ListCommerceMessagesResponse,
+  SendConversationTemplateResponse,
 } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { commerceInboxService } from '../services/commerceInboxService.js';
@@ -16,6 +17,12 @@ const pageSchema = z.object({
 });
 const conversationParamsSchema = z.object({ conversationId: z.string().uuid() });
 const replySchema = z.object({ body: z.string().min(1).max(4096) });
+const templateSendSchema = z.object({
+  templateId: z.string().uuid(),
+  // The bounds are transport sanity only — the count is checked against the template's own
+  // variableCount in the service, where the mismatch can be named.
+  variables: z.array(z.string().max(1024)).max(50),
+});
 
 /** The shared inbox surface. Every method reads its tenant from `requireOrgMember`, never the body. */
 class ConversationsController extends BaseController {
@@ -73,6 +80,26 @@ class ConversationsController extends BaseController {
       this.handleSuccess(res, body, 201);
     } catch (error) {
       this.handleError(error, res, 'ConversationsController.reply');
+    }
+  }
+
+  /** POST /orgs/:orgId/conversations/:conversationId/template-messages */
+  async sendTemplate(req: Request, res: Response): Promise<void> {
+    try {
+      const { orgId } = orgContext(req);
+      const { conversationId } = parse(conversationParamsSchema, req.params);
+      const { templateId, variables } = parse(templateSendSchema, req.body);
+      const message = await commerceInboxService.sendTemplate({
+        orgId,
+        conversationId,
+        templateId,
+        variables,
+        sentByUserId: this.userId(req),
+      });
+      const body: SendConversationTemplateResponse = { message };
+      this.handleSuccess(res, body, 201);
+    } catch (error) {
+      this.handleError(error, res, 'ConversationsController.sendTemplate');
     }
   }
 }

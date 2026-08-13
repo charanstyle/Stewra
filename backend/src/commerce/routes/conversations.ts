@@ -38,4 +38,17 @@ router.post(
   },
 );
 
+// Same role as a reply, on purpose: one template to one customer in an existing thread is inbox
+// work, not a campaign. The consent gate inside the service is what makes a marketing-category
+// template face the full marketing rules regardless of who clicks send.
+router.post(
+  '/:conversationId/template-messages',
+  requireAuth,
+  verified,
+  requireOrgMember('agent'),
+  (req, res) => {
+    void conversationsController.sendTemplate(req, res);
+  },
+);
+
 export default router;

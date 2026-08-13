@@ -139,6 +139,32 @@ export interface CreateCommerceMessageResponse {
 }
 
 /**
+ * POST /orgs/:orgId/conversations/:conversationId/template-messages — send one approved template
+ * into one conversation.
+ *
+ * This is the business-initiated half of the inbox: the way to reach a customer after the 24-hour
+ * service window has closed (and the only way Meta will deliver anything then). It is valid inside
+ * the window too — a template is never LESS deliverable than free text.
+ *
+ * The consent gate keys off the template's category: a `utility` or `authentication` template asks
+ * only that the contact is not suppressed, while a `marketing` template — or one whose category
+ * this build does not recognize — requires full marketing consent, exactly as a broadcast would.
+ * One-at-a-time is not a loophole.
+ *
+ * Requires `agent` or above, like a reply: it is one message to one customer who is part of an
+ * existing conversation, not a campaign.
+ */
+export interface SendConversationTemplateRequest {
+  readonly templateId: string;
+  /** Positional fills. Length must equal the template's `variableCount`, checked before sending. */
+  readonly variables: readonly string[];
+}
+
+export interface SendConversationTemplateResponse {
+  readonly message: CommerceMessage;
+}
+
+/**
  * The consent surface — how an organization proves it may message the people on its list.
  *
  * Read routes are open to `viewer` because seeing why a contact cannot be messaged is part of doing
