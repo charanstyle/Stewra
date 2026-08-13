@@ -12,6 +12,7 @@ import type {
   CommerceContact,
   CommerceConversationSummary,
   CommerceMessageRate,
+  CommerceMoneySummary,
   CommerceRateCard,
   MessagePricingCategory,
   RateUnit,
@@ -700,6 +701,15 @@ export interface GetCommerceCostsRequest {
 
 export interface GetCommerceCostsResponse {
   readonly summary: CommerceCostSummary;
+  /**
+   * Real money, ADDED BESIDE the counts (migration 051) — `summary` still refuses to invent a
+   * number, and anything unpriced or unrated shows up here as `complete: false` rather than as a
+   * smaller total. Note the two halves cut time differently on purpose: `summary` counts by when
+   * messages were CREATED, `money` sums by when they were PRICED, because a receipt landing three
+   * days into the next month must bill in the period it was priced to keep closed invoices
+   * immutable.
+   */
+  readonly money: CommerceMoneySummary;
 }
 
 /**

@@ -53,6 +53,7 @@ import * as m047 from './migrations/047_audit_log_erasure.js';
 import * as m048 from './migrations/048_commerce_contact_imports.js';
 import * as m049 from './migrations/049_commerce_optin_links.js';
 import * as m050 from './migrations/050_commerce_rate_cards.js';
+import * as m051 from './migrations/051_commerce_message_costs.js';
 import { logger } from '../utils/logger.js';
 
 interface Migration {
@@ -112,6 +113,7 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '048_commerce_contact_imports', up: m048.up },
   { name: '049_commerce_optin_links', up: m049.up },
   { name: '050_commerce_rate_cards', up: m050.up },
+  { name: '051_commerce_message_costs', up: m051.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

@@ -36,6 +36,7 @@ import type {
   ContactImportSkipReason,
   ContactImportStatus,
   CommerceJobStatus,
+  MessageCostState,
   MessagePricingCategory,
   RateUnit,
   TemplateCategory,
@@ -838,6 +839,12 @@ export interface ChannelAccountsTable {
    * "expires now".
    */
   credential_expires_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  /**
+   * The WABA's billing currency as Meta reports it (migration 051) — load-bearing, unlike `meta`:
+   * it selects the rate card every message on this account is billed from. NULL means Meta
+   * reported none, and such messages rate as `unrated_no_currency` rather than being guessed.
+   */
+  billing_currency: ColumnType<string | null, string | null | undefined, string | null>;
   connected_at: CreatedAt;
 }
 
@@ -1231,6 +1238,28 @@ export interface CommerceMessageRatesTable {
   unit: RateUnit;
 }
 
+/**
+ * The rating outcome for one delivered message (migration 051). One row per message, written only
+ * once a receipt carried pricing; no receipt → no row, so `unpricedMessages` keeps its meaning.
+ * `amount_micros`/`rate_amount_micros` come back from pg as strings — convert with BigInt().
+ */
+export interface CommerceMessageCostsTable {
+  id: Generated<string>;
+  org_id: string;
+  message_id: string;
+  state: MessageCostState;
+  billable: boolean;
+  currency: ColumnType<string | null, string | null | undefined, never>;
+  pricing_category: ColumnType<MessagePricingCategory | null, string | null | undefined, never>;
+  country_calling_code: ColumnType<string | null, string | null | undefined, never>;
+  provider_conversation_id: ColumnType<string | null, string | null | undefined, never>;
+  rate_card_id: ColumnType<string | null, string | null | undefined, never>;
+  unit: ColumnType<RateUnit | null, RateUnit | null | undefined, never>;
+  rate_amount_micros: ColumnType<string | null, string | null | undefined, never>;
+  amount_micros: ColumnType<string | null, string | null | undefined, never>;
+  priced_at: CreatedAt;
+}
+
 export interface Database {
   users: UsersTable;
   audit_log: AuditLogTable;
@@ -1301,4 +1330,5 @@ export interface Database {
   //    readable or writable through any /orgs route. ──
   commerce_rate_cards: CommerceRateCardsTable;
   commerce_message_rates: CommerceMessageRatesTable;
+  commerce_message_costs: CommerceMessageCostsTable;
 }

@@ -26,6 +26,12 @@ export interface ChannelAccountRow {
   readonly status: ChannelAccountStatus;
   readonly errorDetail: string | null;
   readonly meta: ChannelAccountMeta;
+  /**
+   * The WABA's billing currency (migration 051) — what selects the rate card this account's
+   * messages are billed from. Null when Meta reported none; those messages get the
+   * `unrated_no_currency` outcome rather than a guessed currency.
+   */
+  readonly billingCurrency: string | null;
   /** When the vaulted credential dies. Null when Meta reported no expiry — see migration 041. */
   readonly credentialExpiresAt: string | null;
   readonly connectedAt: string;
@@ -44,6 +50,7 @@ function toRow(row: Selectable<ChannelAccountsTable>): ChannelAccountRow {
     status: row.status,
     errorDetail: row.error_detail,
     meta: row.meta,
+    billingCurrency: row.billing_currency,
     credentialExpiresAt: row.credential_expires_at?.toISOString() ?? null,
     connectedAt: row.connected_at.toISOString(),
   };
@@ -140,6 +147,8 @@ class ChannelAccountRepository {
     credentialRef: string;
     /** What Meta said about the new credential's lifetime. Null means it reported no expiry. */
     credentialExpiresAt: Date | null;
+    /** The WABA's billing currency, or null when Meta reported none (or an unusable shape). */
+    billingCurrency: string | null;
     meta: ChannelAccountMeta;
   }): Promise<{ account: ChannelAccountRow; supersededCredentialRef: string | null }> {
     return db.transaction().execute(async (trx) => {
@@ -164,6 +173,7 @@ class ChannelAccountRepository {
         display_phone_number: params.displayPhoneNumber,
         credential_ref: params.credentialRef,
         credential_expires_at: params.credentialExpiresAt,
+        billing_currency: params.billingCurrency,
         meta: JSON.stringify(params.meta),
       };
 
