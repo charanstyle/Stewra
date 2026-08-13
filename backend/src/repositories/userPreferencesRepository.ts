@@ -12,6 +12,8 @@ export interface UserPreferencesRow {
   readonly readReceiptsEnabled: boolean;
   /** Whether the user opted into approve-to-send email over WhatsApp (DB default false). */
   readonly sendEmailOverWhatsapp: boolean;
+  /** The global kill switch (DB default false). */
+  readonly pauseAll: boolean;
 }
 
 /**
@@ -22,7 +24,7 @@ export class UserPreferencesRepository {
   async findForUser(userId: string): Promise<UserPreferencesRow | undefined> {
     const row = await db
       .selectFrom('user_preferences')
-      .select(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
+      .select(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp', 'pause_all'])
       .where('user_id', '=', userId)
       .executeTakeFirst();
     return row ? toRow(row) : undefined;
@@ -36,7 +38,7 @@ export class UserPreferencesRepository {
       .onConflict((oc) =>
         oc.column('user_id').doUpdateSet({ email_retention_days: days, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp', 'pause_all'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -49,7 +51,7 @@ export class UserPreferencesRepository {
       .onConflict((oc) =>
         oc.column('user_id').doUpdateSet({ gmail_lookback_days: days, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp', 'pause_all'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -77,7 +79,7 @@ export class UserPreferencesRepository {
           .column('user_id')
           .doUpdateSet({ learn_from_sent_mail: learn, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp', 'pause_all'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -101,7 +103,7 @@ export class UserPreferencesRepository {
       .onConflict((oc) =>
         oc.column('user_id').doUpdateSet({ read_receipts_enabled: enabled, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp', 'pause_all'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -129,7 +131,32 @@ export class UserPreferencesRepository {
           .column('user_id')
           .doUpdateSet({ send_email_over_whatsapp: enabled, updated_at: new Date() }),
       )
-      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp'])
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp', 'pause_all'])
+      .executeTakeFirstOrThrow();
+    return toRow(row);
+  }
+
+  /**
+   * Insert-or-update the global kill switch. Like the other opt-ins, first write needs a concrete
+   * `gmail_lookback_days` (NOT NULL, no DB default); on conflict only the switch and `updated_at`
+   * change.
+   */
+  async upsertPauseAll(
+    userId: string,
+    paused: boolean,
+    gmailLookbackDaysForInsert: number,
+  ): Promise<UserPreferencesRow> {
+    const row = await db
+      .insertInto('user_preferences')
+      .values({
+        user_id: userId,
+        gmail_lookback_days: gmailLookbackDaysForInsert,
+        pause_all: paused,
+      })
+      .onConflict((oc) =>
+        oc.column('user_id').doUpdateSet({ pause_all: paused, updated_at: new Date() }),
+      )
+      .returning(['user_id', 'gmail_lookback_days', 'learn_from_sent_mail', 'email_retention_days', 'read_receipts_enabled', 'send_email_over_whatsapp', 'pause_all'])
       .executeTakeFirstOrThrow();
     return toRow(row);
   }
@@ -143,6 +170,7 @@ function toRow(row: {
   email_retention_days: number | null;
   read_receipts_enabled: boolean;
   send_email_over_whatsapp: boolean;
+  pause_all: boolean;
 }): UserPreferencesRow {
   return {
     userId: row.user_id,
@@ -151,6 +179,7 @@ function toRow(row: {
     emailRetentionDays: row.email_retention_days,
     readReceiptsEnabled: row.read_receipts_enabled,
     sendEmailOverWhatsapp: row.send_email_over_whatsapp,
+    pauseAll: row.pause_all,
   };
 }
 

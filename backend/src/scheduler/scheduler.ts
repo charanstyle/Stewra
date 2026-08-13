@@ -4,6 +4,7 @@ import { connectionRepository } from '../repositories/connectionRepository.js';
 import { gmailSyncService } from '../services/gmailSyncService.js';
 import { transactionSyncService } from '../services/transactionSyncService.js';
 import { briefingService } from '../services/briefingService.js';
+import { preferencesService } from '../services/preferencesService.js';
 import { whatsappRetentionService } from '../services/whatsappRetentionService.js';
 import { hostedRunnerService } from '../services/hostedRunnerService.js';
 import { logger } from '../utils/logger.js';
@@ -62,6 +63,12 @@ async function tick(): Promise<void> {
     logger.info('scheduler: briefing tick starting', { users: userIds.length });
     for (const userId of userIds) {
       try {
+        // The global kill switch: a paused user gets NO background work — no Gmail fetch, no
+        // briefing — not merely an empty result. Checked per user so one user's pause never
+        // affects the rest of the batch.
+        if (await preferencesService.pauseAll(userId)) {
+          continue;
+        }
         await gmailSyncService.syncForUser(userId);
         await briefingService.computeAndStore(userId);
       } catch (error) {
@@ -94,6 +101,10 @@ async function moneyTick(): Promise<void> {
     logger.info('scheduler: money tick starting', { users: userIds.length });
     for (const userId of userIds) {
       try {
+        // Same kill-switch rule as the briefing tick: paused means no bank fetch at all.
+        if (await preferencesService.pauseAll(userId)) {
+          continue;
+        }
         await transactionSyncService.syncForUser(userId);
       } catch (error) {
         Sentry.captureException(error);

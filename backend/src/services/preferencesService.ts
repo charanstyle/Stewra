@@ -5,6 +5,7 @@ import {
 } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
 import { userPreferencesRepository } from '../repositories/userPreferencesRepository.js';
+import { auditWriter } from '../control-plane/audit/auditWriter.js';
 import { ValidationError } from '../utils/errors.js';
 
 /**
@@ -25,7 +26,19 @@ export class PreferencesService {
       readReceiptsEnabled: stored?.readReceiptsEnabled ?? true,
       // Approve-to-send email over WhatsApp is off until the user turns it on (password-gated elsewhere).
       sendEmailOverWhatsapp: stored?.sendEmailOverWhatsapp ?? false,
+      // The global kill switch — no row (or no choice) means running normally.
+      pauseAll: stored?.pauseAll ?? false,
     };
+  }
+
+  /**
+   * Whether the user has pulled the global kill switch. The gate the policy engine, the scheduler
+   * ticks, and the manual refresh all check — one source, so "paused" means the same thing to every
+   * path that could touch the user's data.
+   */
+  async pauseAll(userId: string): Promise<boolean> {
+    const stored = await userPreferencesRepository.findForUser(userId);
+    return stored?.pauseAll ?? false;
   }
 
   /** Whether the user shares read receipts — the gate the chat read path checks before writing/emitting. */
@@ -81,6 +94,7 @@ export class PreferencesService {
       gmailLookbackDays?: number | undefined;
       learnFromSentMail?: boolean | undefined;
       readReceiptsEnabled?: boolean | undefined;
+      pauseAll?: boolean | undefined;
     },
   ): Promise<UserPreferences> {
     if (patch.gmailLookbackDays !== undefined) {
@@ -118,6 +132,26 @@ export class PreferencesService {
         patch.readReceiptsEnabled,
         lookbackForInsert,
       );
+    }
+    if (patch.pauseAll !== undefined) {
+      // Flipping the kill switch is a consequential, user-visible act — audit it, but only when the
+      // effective value actually changes, so re-saving settings doesn't fill the feed with no-ops.
+      const wasPaused = await this.pauseAll(userId);
+      const lookbackForInsert = await this.gmailLookbackDays(userId);
+      await userPreferencesRepository.upsertPauseAll(userId, patch.pauseAll, lookbackForInsert);
+      if (patch.pauseAll !== wasPaused) {
+        await auditWriter.write({
+          userId,
+          action: patch.pauseAll ? 'pause' : 'resume',
+          resourceType: 'system',
+          resourceId: null,
+          summary: patch.pauseAll
+            ? 'Paused Stewra — no data will be read and nothing will run until you resume'
+            : 'Resumed Stewra',
+          success: true,
+          metadata: {},
+        });
+      }
     }
     return this.getForUser(userId);
   }

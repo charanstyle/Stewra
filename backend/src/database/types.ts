@@ -128,6 +128,9 @@ export interface UserPreferencesTable {
   // Approve-to-send email over WhatsApp opt-in (migration 030). NOT NULL with a DB default of false, so
   // it is optional on insert (default fills it) and settable on update.
   send_email_over_whatsapp: ColumnType<boolean, boolean | undefined, boolean>;
+  // The global kill switch (migration 057). NOT NULL with a DB default of false, so it is optional on
+  // insert (default fills it) and settable on update.
+  pause_all: ColumnType<boolean, boolean | undefined, boolean>;
   created_at: CreatedAt;
   updated_at: ColumnType<Date, never, Date>;
 }
