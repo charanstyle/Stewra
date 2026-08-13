@@ -325,7 +325,10 @@ test.describe('commerce', () => {
     // payload, because Meta delivers every tenant's traffic to the one URL.
     await expect(page.getByText('Dana Customer')).toBeVisible();
     await page.getByText('Dana Customer').click();
-    await expect(page.getByText(question)).toBeVisible();
+    // `.first()`: once the thread is open the text exists twice — the conversation-list preview and
+    // the message bubble — and which paints first is a race CI loses. Either one proves the
+    // round-trip; strict mode must not fail the test for the message being visible twice.
+    await expect(page.getByText(question).first()).toBeVisible();
 
     // The 24-hour service window is open, so a free-form reply is allowed and the box is offered.
     const reply = page.getByPlaceholder(/Reply/i);
@@ -334,7 +337,7 @@ test.describe('commerce', () => {
     await reply.fill(answer);
     await page.getByRole('button', { name: 'Send' }).click();
 
-    await expect(page.getByText(answer)).toBeVisible();
+    await expect(page.getByText(answer).first()).toBeVisible();
     // It really left: the backend called Meta's send endpoint over a real socket.
     expect(
       (await graphCalls()).filter((c) => c.pathname.endsWith('/messages')).length,
