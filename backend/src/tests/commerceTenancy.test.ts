@@ -8,7 +8,11 @@ import { config } from '../config/unifiedConfig.js';
 import { db, closeDb } from '../database/index.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import orgRoutes from '../commerce/routes/organizations.js';
+import rateCardRoutes from '../commerce/routes/rateCards.js';
+import spendCapRoutes from '../commerce/routes/spendCaps.js';
+import billingRoutes from '../commerce/routes/billing.js';
 import { organizationRepository } from '../commerce/repositories/organizationRepository.js';
+import { invoiceRepository } from '../commerce/repositories/invoiceRepository.js';
 import { orgInviteEmailRegistry } from '../ports/orgInviteEmail.js';
 
 // Creating an invite now delivers its link through the orgInviteEmail port, and this file builds the
@@ -34,6 +38,11 @@ orgInviteEmailRegistry.register({ send: async () => {} });
 const app = express();
 app.use(express.json());
 app.use('/orgs', orgRoutes);
+// The platform-operator surfaces, mounted exactly as app.ts mounts them — this suite proves an
+// org role, owner included, does not exist to them.
+app.use('/platform/rate-cards', rateCardRoutes);
+app.use('/platform/spend-caps', spendCapRoutes);
+app.use('/platform/billing', billingRoutes);
 app.use(errorHandler);
 const server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -95,6 +104,17 @@ async function addMember(orgId: string, role: string): Promise<TestUser> {
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   if (createdOrgs.length > 0) {
+    // This suite only ever writes DRAFT invoices, which the immutability trigger lets go freely.
+    await db
+      .deleteFrom('commerce_invoice_lines')
+      .where(
+        'invoice_id',
+        'in',
+        db.selectFrom('commerce_invoices').select('id').where('org_id', 'in', createdOrgs),
+      )
+      .execute();
+    await db.deleteFrom('commerce_invoices').where('org_id', 'in', createdOrgs).execute();
+    await db.deleteFrom('commerce_billing_periods').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('commerce_active_orgs').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('org_invites').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('org_members').where('org_id', 'in', createdOrgs).execute();
@@ -388,6 +408,119 @@ describe('invites', () => {
       .executeTakeFirstOrThrow();
     expect(row.token_hash).not.toContain(token);
     expect(row.token_hash).toHaveLength(64);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Money: the billing documents and the platform-operator surfaces
+// ---------------------------------------------------------------------------------------------
+
+describe('billing stays inside the tenant, and pricing stays outside every tenant', () => {
+  /** A draft invoice for the org — enough document to point a cross-tenant read at. */
+  async function draftInvoice(orgId: string): Promise<string> {
+    const now = new Date();
+    const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
+      .toISOString()
+      .slice(0, 10);
+    const periodEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+      .toISOString()
+      .slice(0, 10);
+    const invoice = await invoiceRepository.writeCloseOutcome({
+      orgId,
+      currency: 'ZZZ',
+      periodStart,
+      periodEnd,
+      lines: [
+        { kind: 'message_costs', description: 'tenancy fixture', quantity: 1, amountMicros: 1_000n },
+      ],
+      unratedBillable: 1, // keeps it a draft, which keeps the cleanup trigger-free
+      unpricedMessages: 0,
+      issue: false,
+    });
+    return invoice.id;
+  }
+
+  it("keeps one org's invoices, costs, spend and plan unreadable from another", async () => {
+    const a = await createOrg('Org A Money');
+    const b = await createOrg('Org B Money');
+    const invoiceId = await draftInvoice(a.orgId);
+
+    // The owner reads their own documents…
+    const own = await request(API)
+      .get(`/orgs/${a.orgId}/invoices/${invoiceId}`)
+      .set('Authorization', a.owner.auth);
+    expect(own.status).toBe(200);
+
+    // …and a neighboring org's owner reads none of it, with the same non-oracle 404.
+    for (const path of [
+      `/orgs/${a.orgId}/invoices`,
+      `/orgs/${a.orgId}/invoices/${invoiceId}`,
+      `/orgs/${a.orgId}/billing`,
+      `/orgs/${a.orgId}/spend`,
+      `/orgs/${a.orgId}/costs?from=2026-01-01T00:00:00Z&to=2026-02-01T00:00:00Z`,
+    ]) {
+      const res = await request(API).get(path).set('Authorization', b.owner.auth);
+      expect(res.status, path).toBe(404);
+    }
+  });
+
+  it('holds the billing reads to admin, except the spend explanation', async () => {
+    const { orgId } = await createOrg('Roles And Money');
+    const viewer = await addMember(orgId, 'viewer');
+
+    // What the org is billed is the admin's business…
+    for (const path of [
+      `/orgs/${orgId}/invoices`,
+      `/orgs/${orgId}/billing`,
+      `/orgs/${orgId}/costs?from=2026-01-01T00:00:00Z&to=2026-02-01T00:00:00Z`,
+    ]) {
+      const res = await request(API).get(path).set('Authorization', viewer.auth);
+      expect(res.status, path).toBe(403);
+      expect(res.body.error.code).toBe('INSUFFICIENT_ORG_ROLE');
+    }
+    // …but the person watching a campaign the cap paused deserves the explanation.
+    const spend = await request(API).get(`/orgs/${orgId}/spend`).set('Authorization', viewer.auth);
+    expect(spend.status).toBe(200);
+  });
+
+  it('answers every platform-operator surface with 404 for org roles, owner included', async () => {
+    const { owner, orgId } = await createOrg('Would-Be Self-Pricer');
+    const admin = await addMember(orgId, 'admin');
+    const invoiceId = await draftInvoice(orgId);
+
+    const calls: Array<{ method: 'get' | 'put' | 'post'; path: string; body?: object }> = [
+      { method: 'get', path: '/platform/rate-cards' },
+      { method: 'get', path: '/platform/spend-caps?orgId=' + orgId },
+      {
+        method: 'put',
+        path: '/platform/spend-caps',
+        body: { orgId, currency: 'USD', limitMicros: '999999999', note: 'self-serve' },
+      },
+      { method: 'get', path: '/platform/billing/plans' },
+      {
+        method: 'put',
+        path: '/platform/billing/plans',
+        body: { name: 'Free For Me', platformFeeMicros: '0', currency: 'USD', note: 'self-serve' },
+      },
+      {
+        method: 'put',
+        path: '/platform/billing/subscriptions',
+        body: { orgId, planId: null, note: 'self-serve' },
+      },
+      { method: 'post', path: `/platform/billing/invoices/${invoiceId}/mark-paid`, body: { note: 'paid myself' } },
+      { method: 'post', path: `/platform/billing/invoices/${invoiceId}/charge`, body: {} },
+    ];
+    for (const user of [owner, admin]) {
+      for (const call of calls) {
+        const agent = request(API);
+        const res = await agent[call.method](call.path)
+          .set('Authorization', user.auth)
+          .send(call.body ?? {});
+        // 404, not 403: to an org role these surfaces must not exist, or the response itself
+        // confirms there is a pricing panel worth attacking.
+        expect(res.status, `${call.method} ${call.path}`).toBe(404);
+      }
+    }
   });
 });
 
