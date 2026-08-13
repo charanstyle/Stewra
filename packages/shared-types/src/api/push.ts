@@ -84,3 +84,36 @@ export interface EmailApprovalPushData {
  */
 export const EMAIL_APPROVAL_PUSH_TITLE = 'Approve email?';
 export const EMAIL_APPROVAL_PUSH_BODY = 'Stewra drafted an email for you to review and send.';
+
+/**
+ * The proactive source-data nudge push (build-plan M4: "calendar conflict tomorrow", "low balance
+ * trending") — sent when the background recompute produces a NEW nudge, never for a refresh of one
+ * the user has already been told about. No action buttons: the notification is a doorbell, the
+ * decision surface is the Today screen. Same shared-constant rule as the approval category above.
+ */
+export const SUGGESTION_CATEGORY = 'suggestion';
+
+/**
+ * The Android channel nudge pushes are delivered on. Its own channel (not the approval one) so the
+ * user can silence proactive nudges in OS settings without also silencing approve-to-send prompts —
+ * the two interruptions have very different stakes. The app creates it with PRIVATE lock-screen
+ * visibility, like the approval channel.
+ */
+export const SUGGESTION_ANDROID_CHANNEL_ID = 'suggestions';
+
+/**
+ * The `data` a nudge push carries. Deliberately just an id — never the nudge title, which names a
+ * real email subject or calendar event and must not sit on a lock screen. The app re-fetches the
+ * suggestion over its authenticated session.
+ */
+export interface SuggestionPushData {
+  readonly type: typeof SUGGESTION_CATEGORY;
+  readonly suggestionId: string;
+}
+
+/**
+ * The user-facing copy of a nudge push. Deliberately GENERIC — the specifics live behind the app's
+ * authentication, not on the lock screen — and shared so both transports present identical text.
+ */
+export const SUGGESTION_PUSH_TITLE = 'Stewra noticed something';
+export const SUGGESTION_PUSH_BODY = 'Something may need your attention — open Today to take a look.';

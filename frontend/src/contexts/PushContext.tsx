@@ -4,6 +4,7 @@ import {
   EMAIL_APPROVAL_ACTION_APPROVE,
   EMAIL_APPROVAL_ACTION_DENY,
   EMAIL_APPROVAL_CATEGORY,
+  SUGGESTION_CATEGORY,
 } from '@stewra/shared-types';
 import { api } from '../services/api';
 import { registerForApprovalPush } from '../services/push';
@@ -31,11 +32,19 @@ function readMessageId(data: unknown): string | null {
   return typeof messageId === 'string' && messageId.length > 0 ? messageId : null;
 }
 
+/** Whether a notification's data is a proactive-nudge push (type-narrowed, never asserted). */
+function isSuggestionPush(data: unknown): boolean {
+  if (typeof data !== 'object' || data === null) return false;
+  return 'type' in data && data.type === SUGGESTION_CATEGORY;
+}
+
 export function PushProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
   const { user } = useAuth();
   const registeredRef = useRef(false);
   /** An Approve tap waiting for the navigator + session to exist (see COLD START above). */
   const pendingApprovalRef = useRef<string | null>(null);
+  /** A nudge tap waiting for the navigator + session, same cold-start rule as approvals. */
+  const pendingSuggestionRef = useRef(false);
   /**
    * Notification ids already acted on. The launch response is delivered BOTH by
    * `getLastNotificationResponseAsync` and by the listener, so without this a single Deny tap would
@@ -63,9 +72,22 @@ export function PushProvider({ children }: { children: React.ReactNode }): React
     navigationRef.navigate('EmailApproval', { messageId });
   }, [user]);
 
+  /** Open the Today tab for a recorded nudge tap, once the navigator + session exist. */
+  const flushPendingSuggestion = useCallback((): void => {
+    if (!pendingSuggestionRef.current || !user || !navigationRef.isReady()) {
+      return;
+    }
+    pendingSuggestionRef.current = false;
+    // The push carries only an id and the decision surface is the Today screen, which fetches the
+    // open nudges itself over the authenticated session — so navigation targets the tab, not a
+    // per-suggestion route, and a nudge resolved since the push simply isn't in the list.
+    navigationRef.navigate('MainTabs', { screen: 'Today' });
+  }, [user]);
+
   useEffect(() => {
     flushPendingApproval();
-  }, [flushPendingApproval]);
+    flushPendingSuggestion();
+  }, [flushPendingApproval, flushPendingSuggestion]);
 
   const handleResponse = useCallback(
     (response: Notifications.NotificationResponse): void => {
@@ -73,7 +95,14 @@ export function PushProvider({ children }: { children: React.ReactNode }): React
       if (handledRef.current.has(notificationId)) {
         return;
       }
-      const messageId = readMessageId(response.notification.request.content.data);
+      const data = response.notification.request.content.data;
+      if (isSuggestionPush(data)) {
+        handledRef.current.add(notificationId);
+        pendingSuggestionRef.current = true;
+        flushPendingSuggestion();
+        return;
+      }
+      const messageId = readMessageId(data);
       if (messageId === null) {
         return;
       }

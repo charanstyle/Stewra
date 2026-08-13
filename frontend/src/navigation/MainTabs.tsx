@@ -2,12 +2,13 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { BottomTabNavigationOptions } from '@react-navigation/bottom-tabs';
 import type { MainTabParamList } from './types';
+import TodayScreen from '../screens/today/TodayScreen';
 import ChatListScreen from '../screens/chat/ChatListScreen';
 import ContactsScreen from '../screens/chat/ContactsScreen';
 import StewraVoiceScreen from '../screens/chat/StewraVoiceScreen';
 import CommerceScreen from '../screens/commerce/CommerceScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
-import { BriefcaseIcon, ChatIcon, ContactsIcon, MicIcon, SettingsIcon } from '../components/icons/Icons';
+import { BriefcaseIcon, ChatIcon, ContactsIcon, MicIcon, SettingsIcon, SparkleIcon } from '../components/icons/Icons';
 import LogoutButton from '../components/LogoutButton';
 import { theme } from '../theme/colors';
 
@@ -39,6 +40,15 @@ export default function MainTabs(): React.JSX.Element {
 
   return (
     <Tab.Navigator screenOptions={screenOptions}>
+      <Tab.Screen
+        name="Today"
+        component={TodayScreen}
+        options={{
+          title: 'Today',
+          tabBarButtonTestID: 'tab-today',
+          tabBarIcon: ({ color, size }: TabBarIconArgs) => <SparkleIcon color={color} size={size} />,
+        }}
+      />
       <Tab.Screen
         name="Chats"
         component={ChatListScreen}

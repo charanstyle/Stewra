@@ -392,6 +392,7 @@ export type {
 } from './api/calls';
 export type {
   EmailApprovalPushData,
+  SuggestionPushData,
   PushPlatform,
   RegisterAndroidPushTokenRequest,
   RegisterIosPushTokenRequest,
@@ -405,6 +406,10 @@ export {
   EMAIL_APPROVAL_CATEGORY,
   EMAIL_APPROVAL_PUSH_BODY,
   EMAIL_APPROVAL_PUSH_TITLE,
+  SUGGESTION_ANDROID_CHANNEL_ID,
+  SUGGESTION_CATEGORY,
+  SUGGESTION_PUSH_BODY,
+  SUGGESTION_PUSH_TITLE,
 } from './api/push';
 
 export type {

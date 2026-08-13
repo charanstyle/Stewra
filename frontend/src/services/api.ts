@@ -75,6 +75,25 @@ import type {
   CancelBroadcastResponse,
   ResumeBroadcastResponse,
   ListCommerceJobsResponse,
+  ListActivityResponse,
+  ListConnectionsResponse,
+  StartCalendarConnectionResponse,
+  ConnectionResponse,
+  GenerateInsightRequest,
+  GenerateInsightResponse,
+  SubmitFeedbackRequest,
+  SubmitFeedbackResponse,
+  InsightEngagementResponse,
+  GetBriefingResponse,
+  ListSuggestionsResponse,
+  SnoozeSuggestionRequest,
+  SnoozeSuggestionResponse,
+  DismissSuggestionResponse,
+  MarkSuggestionDoneResponse,
+  RequestDraftRequest,
+  RequestDraftResponse,
+  ChatAboutSuggestionRequest,
+  ChatAboutSuggestionResponse,
 } from '@stewra/shared-types';
 import { File, Paths } from 'expo-file-system';
 import { config } from './config';
@@ -338,6 +357,69 @@ export const api = {
   /** Per-participant read acknowledgements for one message (drives the read-receipt detail view). */
   listMessageReceipts: (messageId: string): Promise<ListReadReceiptsResponse> =>
     request(`/messages/${messageId}/receipts`),
+
+  // --- Activity + connections (mirrors the website's ActivityPage wrappers) ---
+
+  listActivity: (): Promise<ListActivityResponse> => request('/activity'),
+
+  listConnections: (): Promise<ListConnectionsResponse> => request('/connections'),
+
+  startGoogleConnection: (): Promise<StartCalendarConnectionResponse> =>
+    request('/connections/google/start', { method: 'POST', body: {} }),
+
+  disconnect: (id: string): Promise<ConnectionResponse> =>
+    request(`/connections/${id}/disconnect`, { method: 'POST', body: {} }),
+
+  // --- Insights ---
+
+  generateInsight: (body: GenerateInsightRequest): Promise<GenerateInsightResponse> =>
+    request('/insights', { method: 'POST', body }),
+
+  submitFeedback: (
+    insightId: string,
+    body: SubmitFeedbackRequest,
+  ): Promise<SubmitFeedbackResponse> =>
+    request(`/insights/${insightId}/feedback`, { method: 'POST', body }),
+
+  /** Impression beacon: record that an insight was shown. First-write-wins, no reward effect. */
+  markInsightSeen: (insightId: string): Promise<InsightEngagementResponse> =>
+    request(`/insights/${insightId}/seen`, { method: 'POST', body: {} }),
+
+  /** Fired when the user closes an insight without rating it — a weak implicit-negative signal. */
+  markInsightDismissed: (insightId: string): Promise<InsightEngagementResponse> =>
+    request(`/insights/${insightId}/dismissed`, { method: 'POST', body: {} }),
+
+  // --- Today (briefing + nudges) ---
+
+  getBriefing: (): Promise<GetBriefingResponse> => request('/home/briefing'),
+
+  listSuggestions: (): Promise<ListSuggestionsResponse> => request('/home/suggestions'),
+
+  snoozeSuggestion: (
+    id: string,
+    body: SnoozeSuggestionRequest,
+  ): Promise<SnoozeSuggestionResponse> =>
+    request(`/home/suggestions/${id}/snooze`, { method: 'POST', body }),
+
+  dismissSuggestion: (id: string): Promise<DismissSuggestionResponse> =>
+    request(`/home/suggestions/${id}/dismiss`, { method: 'POST', body: {} }),
+
+  markSuggestionDone: (id: string): Promise<MarkSuggestionDoneResponse> =>
+    request(`/home/suggestions/${id}/done`, { method: 'POST', body: {} }),
+
+  /** Read-only: returns draft text for review, never sends. */
+  requestDraft: (id: string, body: RequestDraftRequest): Promise<RequestDraftResponse> =>
+    request(`/home/suggestions/${id}/draft`, { method: 'POST', body }),
+
+  chatAboutSuggestion: (
+    id: string,
+    body: ChatAboutSuggestionRequest,
+  ): Promise<ChatAboutSuggestionResponse> =>
+    request(`/home/suggestions/${id}/chat`, { method: 'POST', body }),
+
+  /** Manual refresh: sync mail + bank data, rebuild the briefing. Refused (409) while paused. */
+  recomputeToday: (): Promise<GetBriefingResponse> =>
+    request('/home/recompute', { method: 'POST', body: {} }),
 
   getPreferences: (): Promise<GetPreferencesResponse> => request('/preferences'),
 

@@ -15,6 +15,7 @@ import MainTabs from './MainTabs';
 import ConversationScreen from '../screens/chat/ConversationScreen';
 import EmailApprovalScreen from '../screens/chat/EmailApprovalScreen';
 import CallScreen from '../screens/call/CallScreen';
+import ActivityScreen from '../screens/settings/ActivityScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -84,6 +85,11 @@ export default function RootNavigator(): React.JSX.Element {
               name="EmailApproval"
               component={EmailApprovalScreen}
               options={{ title: 'Approve email', presentation: 'modal' }}
+            />
+            <Stack.Screen
+              name="Activity"
+              component={ActivityScreen}
+              options={{ title: 'Activity' }}
             />
           </>
         )}

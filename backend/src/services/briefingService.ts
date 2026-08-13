@@ -21,6 +21,7 @@ import {
 import { briefingRepository } from '../repositories/briefingRepository.js';
 import { suggestionRepository } from '../repositories/suggestionRepository.js';
 import { isReplyableInbound } from './emailClassification.js';
+import { suggestionPushService } from './suggestionPushService.js';
 import { processMemoryService } from './processMemoryService.js';
 import { logger } from '../utils/logger.js';
 
@@ -270,7 +271,12 @@ class BriefingService {
     return null;
   }
 
-  /** Turn each awaiting-reply thread into an open nudge, upserted by a stable dedup key. */
+  /**
+   * Turn each awaiting-reply thread into an open nudge, upserted by a stable dedup key. A nudge the
+   * user has never been told about — newly CREATED, not refreshed in place — also rings their devices
+   * (best-effort; a push failure never sinks the recompute). One buzz per genuinely new thing: the
+   * dedup key means later ticks refresh the same row and send nothing.
+   */
   private async upsertNudges(
     userId: string,
     awaitingThreads: ReadonlyArray<{ id: string; subject: string }>,
@@ -287,7 +293,7 @@ class BriefingService {
           action: { type: 'reply_email', targetRefs: { threadId: thread.id } },
         },
       ];
-      await suggestionRepository.upsertByDedup(userId, {
+      const upserted = await suggestionRepository.upsertByDedup(userId, {
         dedupKey: `needs_reply:${thread.id}`,
         kind: 'needs_reply',
         title: `Reply to "${label}"`,
@@ -295,6 +301,13 @@ class BriefingService {
         sourceRefs,
         options,
       });
+      if (upserted !== undefined && upserted.created) {
+        try {
+          await suggestionPushService.send(userId, { suggestionId: upserted.id });
+        } catch (error) {
+          Sentry.captureException(error);
+        }
+      }
     }
   }
 }

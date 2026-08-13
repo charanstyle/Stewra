@@ -2,8 +2,15 @@ import {
   EMAIL_APPROVAL_ANDROID_CHANNEL_ID,
   EMAIL_APPROVAL_CATEGORY,
   EMAIL_APPROVAL_PUSH_BODY,
+  SUGGESTION_ANDROID_CHANNEL_ID,
+  SUGGESTION_CATEGORY,
+  SUGGESTION_PUSH_BODY,
 } from '@stewra/shared-types';
-import { buildEmailApprovalMessage, expoPushService } from '../services/expoPushService.js';
+import {
+  buildEmailApprovalMessage,
+  buildSuggestionMessage,
+  expoPushService,
+} from '../services/expoPushService.js';
 
 /**
  * Fail-safe contract for the iOS Expo sender. NO mocks: this runs the real service against the real
@@ -52,5 +59,29 @@ describe('buildEmailApprovalMessage — the iOS action-button contract', () => {
     // Generic body only — no recipient/subject/body could ride along to a lock-screen preview.
     expect(message.body).toBe(EMAIL_APPROVAL_PUSH_BODY);
     expect(JSON.stringify(message)).not.toContain('@'); // no email address leaked into the payload
+  });
+});
+
+/**
+ * The nudge push: no action category (tapping opens Today — the decision surface stays behind the
+ * app's authentication), its own Android channel, and generic copy with only the suggestion id.
+ */
+describe('buildSuggestionMessage — the iOS nudge-push contract', () => {
+  const message = buildSuggestionMessage('ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]', {
+    suggestionId: 'sug-1',
+  });
+
+  it('has NO category (no action buttons) and its own channel, separate from approvals', () => {
+    expect(message.categoryId).toBeUndefined();
+    expect(message.channelId).toBe(SUGGESTION_ANDROID_CHANNEL_ID);
+    expect(message.channelId).not.toBe(EMAIL_APPROVAL_ANDROID_CHANNEL_ID);
+  });
+
+  it('carries the suggestion id and generic copy only — never the nudge title', () => {
+    const data = message.data as Record<string, unknown>;
+    expect(data['suggestionId']).toBe('sug-1');
+    expect(data['type']).toBe(SUGGESTION_CATEGORY);
+    expect(message.body).toBe(SUGGESTION_PUSH_BODY);
+    expect(JSON.stringify(message)).not.toContain('@');
   });
 });
