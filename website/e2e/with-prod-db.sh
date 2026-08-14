@@ -6,10 +6,11 @@
 #   ./with-prod-db.sh                       # the whole main suite
 #   ./with-prod-db.sh npx playwright test tests/today.spec.ts
 #
-# Why this exists: 16 of the main suite's skips are one missing variable. `.env.e2e` is TRACKED in
-# git (owner decision 2026-08-13 — it holds only QA-account credentials) and its own header forbids
-# putting a production secret in it, so the URL cannot live in the file the rest of the config lives
-# in. Before this script that meant hand-exporting a password-bearing URL on every run, which is
+# Why this exists: 16 of the main suite's skips are one missing variable. `.env.e2e` holds only
+# QA-account credentials and its own header forbids putting a production secret in it — a rule that
+# outlived the file being git-tracked, because the reason was never only git: a gitignored file is
+# still plaintext in a working tree that gets backed up and synced. So the URL cannot live in the
+# file the rest of the config lives in. Before this script that meant hand-exporting a password-bearing URL on every run, which is
 # both easy to get wrong and easy to leak into a shell history. Here the secret is read from the
 # server at run time, used, and never written down.
 #

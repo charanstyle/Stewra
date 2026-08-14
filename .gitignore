@@ -4,11 +4,13 @@ dist/
 .env
 .env.*
 !.env.example
-# Shared E2E QA credentials for both suites. Tracked by explicit owner decision (2026-08-13)
-# so they cannot be lost: they guard only the dedicated QA accounts. Production secrets
-# (E2E_DATABASE_URL etc.) must be passed as env vars, never written to this file.
+# Shared E2E QA credentials for both suites. UNTRACKED again (2026-08-14), reversing the
+# 2026-08-13 "so they cannot be lost" decision: the accounts they guard are real, they log in
+# to production, and one of them now keeps a runner paired — which makes repo read access a
+# route to a coding agent on a dev machine. "Cannot be lost" is what the template plus
+# `bootstrap-qa-users.mjs` are for; a password in git is not a backup, it is a second copy on
+# every clone and every fork, forever. Only the template is tracked.
 !.env.e2e.example
-!.env.e2e
 # Backend test-suite credentials (real Postgres + Redis) — real creds gitignored, template tracked.
 !.env.test.example
 # Production runtime secrets that live beside the deployed app on the host — NEVER commit these.
