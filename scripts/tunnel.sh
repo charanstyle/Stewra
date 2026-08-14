@@ -2,8 +2,8 @@
 #
 # Bring up the SSH tunnels that local development and the backend test suite need.
 #
-#   local 127.0.0.1:5433 -> home:127.0.0.1:5433   (the `postgres` container's published port)
-#   local 127.0.0.1:6379 -> home:<container-ip>:6379  (the `stewra-redis-1` container)
+#   local 127.0.0.1:5433 -> stewra-server:127.0.0.1:5433   (the `postgres` container's published port)
+#   local 127.0.0.1:6379 -> stewra-server:<container-ip>:6379  (the `stewra-redis-1` container)
 #
 # Postgres publishes a host port on the server, so its forward is a fixed address. Redis does NOT —
 # `stewra-redis-1` only exposes 6379 on the docker network — so its address has to be resolved at
@@ -18,12 +18,13 @@
 # "tunnel already up" for a forward that had been dead for hours; the backend suite failed 17 tests
 # with connection resets while the tunnel claimed to be healthy.
 #
-# The ControlMaster for `home` is SHARED with other projects on this machine (TrueTalk forwards its
-# redis over the same connection). So this script never runs `ssh -O exit` to clear a bad forward —
+# The ControlMaster for the host may be SHARED with other projects on this machine (the `home`
+# master carried TrueTalk's redis forward; treat `stewra-server`'s the same way — nothing here may
+# assume it is the only user). So this script never runs `ssh -O exit` to clear a bad forward —
 # that would drop someone else's tunnel too. It cancels the one forward it owns, using the remote
 # address it recorded last run, and fails loudly if it cannot.
 #
-# Both forwards ride the ControlMaster connection defined for `home` in ~/.ssh/config, so this is
+# Both forwards ride the ControlMaster connection defined for `stewra-server` in ~/.ssh/config, so this is
 # cheap to re-run and safe to run twice: an already-established forward is reported, not duplicated.
 #
 # A launchd agent (scripts/com.stewra.tunnel.plist) re-runs this every 5 minutes so the master never
@@ -33,7 +34,7 @@
 
 set -euo pipefail
 
-HOST=home
+HOST=stewra-server
 REDIS_CONTAINER=stewra-redis-1
 PG_LOCAL=5433
 REDIS_LOCAL=6379
@@ -110,7 +111,7 @@ forward_redis() {
   [ -f "$STATE_FILE" ] && previous=$(tr -d '[:space:]' <"$STATE_FILE")
   if [ -z "$previous" ]; then
     echo "cannot re-point it: no record of the address this forward was created with ($STATE_FILE)." >&2
-    echo "the ssh master is SHARED with other projects, so do not run 'ssh -O exit home' blindly." >&2
+    echo "the ssh master may be SHARED with other projects, so do not run 'ssh -O exit $HOST' blindly." >&2
     echo "cancel the stale forward by hand once the old address is known, then re-run this script:" >&2
     echo "  ssh -O cancel -L 127.0.0.1:${REDIS_LOCAL}:<old-addr>:6379 ${HOST}" >&2
     exit 1

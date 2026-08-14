@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Keeps the Stewra dev tunnels (Postgres 127.0.0.1:5433, Redis :6379 -> home) alive.
+  Keeps the Stewra dev tunnels (Postgres 127.0.0.1:5433, Redis :6379 -> stewra-server) alive.
 
-  Why: the forwards ride the `home` ControlMaster, and ~/.ssh/config's `ControlPersist 600`
+  Why: the forwards ride the `stewra-server` ControlMaster, and ~/.ssh/config's `ControlPersist 600`
   kills that master 10 minutes after the last SSH session closes - taking the forwards with it.
   Re-running scripts/tunnel.sh every 5 minutes opens a session (the Redis docker-IP lookup),
   which resets the ControlPersist timer and re-creates any forward that died (sleep, roaming).
   The script is idempotent by design - "safe to run twice" per its own header.
 
-  PATH is explicit because launchd agents don't inherit a shell PATH, and the `home`
-  ProxyCommand (~/.ssh/ssh-home-proxy.sh) needs tailscale/cloudflared from /opt/homebrew/bin.
+  PATH is explicit because launchd agents don't inherit a shell PATH, and an ssh
+  ProxyCommand (if the host has one in ~/.ssh/config) needs tailscale/cloudflared from /opt/homebrew/bin.
 
   The agent runs a HOME-DIRECTORY COPY of scripts/tunnel.sh, not the repo file: the repo lives on
   an exFAT removable volume (/Volumes/charan), and macOS TCC denies launchd agents access to

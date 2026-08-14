@@ -1,49 +1,42 @@
-# Production deployment artifact for the SSH host (home / 192.168.1.179).
-# Lives at /media/WDHD/docker/stewra/ alongside the other apps and is fronted by the host's
-# `tunnel-access` nginx (Cloudflare tunnel -> nginx :8080 -> these loopback ports).
+# Production deployment artifact for stewra-server (ssh alias `stewra-server`).
+# Lives at /srv/docker/stewra/ and is fronted by this host's own nginx
+# (Cloudflare tunnel on the router -> nginx :8080 here -> these BIND_ADDR ports).
 #
-# This does NOT define Postgres — it reuses the shared `postgres` container (external network
-# `postgres_default`, reachable as host `postgres:5432`). Stewra has its own isolated `stewra`
-# database + role; set DATABASE_URL in stewra.env to postgresql://stewra:<pw>@postgres:5432/stewra.
+# Moved off `home` (/media/WDHD/docker/stewra) on 2026-08-14. What changed:
+#
+#   1. coturn is gone from this file — it lives in docker-compose.coturn.yml and still runs on
+#      home, because the router's port-forward for the relay points there. See that file.
+#   2. The published address is BIND_ADDR instead of a hardcoded 127.0.0.1. Normally it IS
+#      127.0.0.1 (nginx is local again), but during the cutover window the ports were published
+#      on this host's tailnet address so home's nginx could proxy across to them. Declared `:?`
+#      with no default on purpose: an unset BIND_ADDR must stop the deploy, never silently fall
+#      back to 0.0.0.0 and publish the app to the world.
+#
+# What did NOT change: this file still does NOT define Postgres — it reuses the shared `postgres`
+# container (external network `postgres_default`, reachable as host `postgres:5432`), which runs
+# on stewra-server exactly as it did on home, same container name, same network name. Stewra has
+# its own isolated `stewra` database + role; set DATABASE_URL in stewra.env to
+# postgresql://stewra:<pw>@postgres:5432/stewra.
 #
 # Two env files are involved:
 #   stewra.env  — backend RUNTIME env (DATABASE_URL, JWT_SECRET, VAULT_KEY, model + Google creds, …)
-#   .env        — compose-substitution only; supplies the website's build-time VITE_API_BASE_URL
+#   .env        — compose-substitution only: VITE_API_BASE_URL (website build) and BIND_ADDR
 #
-# Deploy (run ON the host, not the dev machine):
-#   cd /media/WDHD/docker/stewra
+# Deploy (run ON stewra-server, not the dev machine):
+#   cd /srv/docker/stewra
 #   docker compose -f docker-compose.prod.yml build
 #   docker compose -f docker-compose.prod.yml run --rm backend node backend/dist/database/migrate.js
 #   docker compose -f docker-compose.prod.yml up -d
 
 services:
-  # Stewra's OWN coturn (TURN/STUN) — deliberately NOT the shared rankrise-coturn, which runs in
-  # use-auth-secret mode with a single global secret (a second realm there couldn't have its own
-  # secret). This instance has a distinct realm, secret, ports (3481 / relay 49202-49250), and never
-  # touches RankRise/TrueTalk. network_mode: host mirrors rankrise so relay candidates use the real LAN
-  # IP. The secret + public IP are injected on the command line (never committed): TURN_STATIC_AUTH_SECRET
-  # and TURN_EXTERNAL_IP come from the compose ./.env file; the SAME secret is TURN_SECRET in stewra.env
-  # (the backend mints matching HMAC credentials). Gated by CALLS_ENABLED in stewra.env on the app side.
-  coturn:
-    image: coturn/coturn:latest
-    container_name: stewra-coturn
-    restart: unless-stopped
-    network_mode: host
-    command: >-
-      -c /etc/coturn/turnserver.conf
-      --static-auth-secret=${TURN_STATIC_AUTH_SECRET:?set TURN_STATIC_AUTH_SECRET in ./.env}
-      --external-ip=${TURN_EXTERNAL_IP:?set TURN_EXTERNAL_IP in ./.env}
-    volumes:
-      - ./deploy/coturn/turnserver-stewra.conf:/etc/coturn/turnserver.conf:ro
-
   # Redis is REQUIRED by the realtime layer: the Socket.IO adapter (cross-instance room fan-out) and the
   # presence store. Isolated to this stack's own instance; set REDIS_URL=redis://redis:6379 in stewra.env.
+  # No `networks:` key, so it sits on the project's implicit `default` bridge together with the backend —
+  # it has no business on `postgres_default`, where it used to sit for no reason beyond history.
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no"]
-    networks:
-      - postgres_default
 
   backend:
     build:
@@ -54,10 +47,15 @@ services:
     env_file: ./stewra.env
     depends_on:
       - redis
-    # Loopback-only; the host nginx proxies /api/ here and strips the prefix.
+    # Loopback in the final state; this host's nginx proxies /api/ here and strips the prefix.
+    # See the BIND_ADDR note in the header.
     ports:
-      - "127.0.0.1:3023:3001"
+      - "${BIND_ADDR:?set BIND_ADDR in ./.env — 127.0.0.1 behind the local nginx. Refusing to guess: a default of 0.0.0.0 would publish the backend on every interface.}:3023:3001"
     networks:
+      # The implicit project bridge: reaches redis by service name, and carries egress to the
+      # Google/Anthropic APIs.
+      - default
+      # The shared Postgres container's network — how DATABASE_URL's host `postgres` resolves.
       - postgres_default
       # How the backend reaches the provisioner (http://provisioner:3050) to create/start/stop hosted
       # runner containers. Internal-only network — see its definition at the bottom of this file.
@@ -122,14 +120,16 @@ services:
       dockerfile: website/Dockerfile
       args:
         # Baked into the SPA at build time. Fails loud if unset (see website/Dockerfile).
+        # This is a RELATIVE path (/api), so the built bundle names no host at all and the move
+        # across machines needed no rebuild-for-a-new-hostname.
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:?set VITE_API_BASE_URL in ./.env}
     image: stewra-website:latest
     restart: unless-stopped
     depends_on:
       - backend
-    # Loopback-only; the host nginx proxies / here.
+    # Loopback in the final state; this host's nginx proxies / here. See BIND_ADDR above.
     ports:
-      - "127.0.0.1:3022:80"
+      - "${BIND_ADDR:?set BIND_ADDR in ./.env — 127.0.0.1 behind the local nginx. Refusing to guess: a default of 0.0.0.0 would publish the website on every interface.}:3022:80"
 
 networks:
   # The shared Postgres container's network, created by the postgres stack.

@@ -18,10 +18,10 @@ website                 thin Next.js shell: login + activity feed
 ## Dev database (remote Postgres via SSH tunnel)
 
 There is no local Docker on the dev machine. The database is an isolated `stewra` DB + role on the
-shared Postgres container on the host `home` (`/media/WDHD/docker`, bound to `127.0.0.1:5433`).
+shared Postgres container on the host `stewra-server` (`/srv/docker`, bound to `127.0.0.1:5433`).
 
 ```bash
-npm run tunnel        # opens local 5433 -> home:127.0.0.1:5433 (background)
+npm run tunnel        # opens local 5433 -> stewra-server:127.0.0.1:5433 (background)
 cp .env.example backend/.env   # then fill DATABASE_URL / JWT_SECRET / VAULT_KEY
 ```
 
@@ -54,9 +54,10 @@ will need ownership handed back first — the recipe is in the file's header.
 
 ## Production
 
-`docker-compose.prod.yml` is the deploy artifact for `/media/WDHD/docker/stewra/` on the host. It
-brings up `backend`, `website`, `redis` and `coturn`, and reuses the existing shared `postgres`
-container. Deploy from the host, not the dev machine.
+`docker-compose.prod.yml` is the deploy artifact for `/srv/docker/stewra/` on `stewra-server`. It
+brings up `backend`, `website` and `redis`, and reuses the existing shared `postgres` container.
+coturn is the one piece that still runs on `home` (the router's relay port-forward points there) —
+see `docker-compose.coturn.yml`. Deploy from the host, not the dev machine.
 
 It is applied and serving https://www.stewra.com. `curl https://www.stewra.com/api/health` returning
 `{"success":true,"data":{"status":"ok"}}` is the quickest check that the stack is up.
