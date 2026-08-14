@@ -111,6 +111,12 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* Grid items default to min-width:auto, so one card with wide unbreakable content (e.g. a
+     runner session's single-line nowrap prompt) inflates the whole 1fr track past the viewport.
+     On mobile that made the page ~1400px wide: every card overflowed, the browser panned
+     horizontally, and taps/clicks kept missing their targets. min-width:0 pins the column to the
+     track so in-card truncation (ellipsis/overflow) does its job instead. */
+  min-width: 0;
 }
 
 .card {
@@ -154,6 +160,14 @@
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+/* The account email is one unbreakable token; without a shrink allowance the label + Disconnect
+   button set the row's minimum width past a phone viewport, leaving residual horizontal overflow
+   even once the column stops growing to min-content. Let the label shrink and the email wrap. */
+.connRow > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .connRow em {
