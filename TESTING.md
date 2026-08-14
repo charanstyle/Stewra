@@ -475,10 +475,13 @@ proven only against a scripted backend (`hostedRunnerService.test.ts`).
 Safety: it **refuses to adopt or destroy a pre-existing cloud runner**, and its `finally` destroys
 only what this run provisioned.
 
-> **Has never been executed.** Production reports `hosted enabled=false` and
-> `github-app configured=false`, so the cloud path is not live anywhere. The driver typechecks and
-> lints; standing the stack up is the four host prerequisites in `runner/HOSTED.md` plus a real GitHub
-> App. **Not covered even then:** the iptables egress fence — see the reboot trade in that document.
+> **First executed 2026-08-14** against www.stewra.com with the stack live on the provisioner host
+> (the `runner/HOSTED.md` prerequisites plus a real GitHub App) — all checks passed. The iptables
+> egress fence is still outside what this REST-level driver can claim; it is covered separately by
+> `deploy/hosted-runner/assert-fence-in-container.sh`, run on the provisioner host against a live
+> runner container (github.com reachable; the host's LAN sshd, tailnet Postgres, and the bridge
+> gateway all blocked — every "blocked" target a real listening service, so a pass means the rules
+> bite, not that a dead address timed out).
 
 ---
 
