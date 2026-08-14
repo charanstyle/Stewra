@@ -22,7 +22,8 @@
 // NOT covered here, deliberately: the iptables egress fence
 // (deploy/hosted-runner/iptables-egress.sh). Asserting it means running commands INSIDE the
 // container, which needs Docker access on the provisioner host — outside what a REST-level driver
-// can honestly claim. It stays an untested isolation boundary; see TESTING.md.
+// can honestly claim. Run deploy/hosted-runner/assert-fence-in-container.sh on the provisioner
+// host, against a live runner, to cover that boundary; see TESTING.md.
 //
 // Run it:
 //   cd runner && BASE=https://www.stewra.com/api CLAUDE_CODE_OAUTH_TOKEN=… npx tsx smoke-hosted-fullstack.mts
