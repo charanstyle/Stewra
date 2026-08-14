@@ -145,7 +145,8 @@ as **skipped**, not passed or failed) with the original safety reasoning preserv
 - **Delete memory** (`memory.spec.ts`) — runs for real, but only against a throwaway memory
   the suite seeds itself (`seed.mjs`, gated on `E2E_DATABASE_URL`), targeted by its
   distinctive label so genuinely learned data is never touched. Without a DB URL the seed
-  is skipped and so is the delete.
+  is skipped and so is the delete — run `npm run test:e2e:seeded` (see `with-prod-db.sh`)
+  to supply one without writing the password anywhere.
 
 ## `data-testid` contract
 

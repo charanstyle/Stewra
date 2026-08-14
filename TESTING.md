@@ -293,6 +293,29 @@ environment variable still wins, which is how CI holds the commerce suite to `0`
 > The reporter fails the run by returning `{ status: 'failed' }` from `onEnd()`. Setting
 > `process.exitCode` there is silently discarded — Playwright computes the exit code from the
 > aggregated result *after* reporters finish. Verified, not assumed.
+>
+> That exit code is easy to lose again from the outside: `npm run test:e2e | tail` reports the exit
+> status of `tail`, so an over-budget run reads as a pass. Do not pipe the suite when the result is
+> what you are after.
+
+A plain `npm run test:e2e` on a laptop skips **22**, not 6 — sixteen of them only because
+`E2E_DATABASE_URL` is unset, which is not something `.env.e2e` may hold (it is tracked; see its
+header). `npm run test:e2e:seeded` closes that gap: `website/e2e/with-prod-db.sh` brings up the ssh
+tunnel, reads `DATABASE_URL` off the deploy host, rewrites it onto the local forward, **probes that
+the database answers through it**, and execs the command with `E2E_DATABASE_URL` exported — so the
+secret is never written to a file or a shell history. With no arguments it runs the whole main
+suite; with arguments it runs those instead:
+
+```bash
+npm run test:e2e:seeded                                       # 22 skips → 6, the pinned budget
+./with-prod-db.sh npx playwright test tests/today.spec.ts     # or one spec
+```
+
+Every precondition is asserted and any failure stops the run — there is no local-database fallback,
+because a run that cannot reach the real store must fail loudly rather than turn back into the
+sixteen silent skips the script exists to remove. The remaining 6 are the ones no script can
+provision: sign-up (permanently creates an account), a paired online runner, and a connection that
+actually needs re-consent.
 
 ### Provisioned preconditions — `seed.mjs`
 
