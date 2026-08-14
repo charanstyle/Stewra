@@ -32,13 +32,12 @@ test.describe('auth', () => {
     await expect(gp.getByRole('button', { name: 'Create account' }).first()).toBeVisible();
     await expect(gp.locator('input[type="email"]')).toBeVisible();
 
-    // toggle to register mode → Name field appears
+    // toggle to register mode → Name field appears. Asserted with `expect(locator)`, which retries:
+    // the previous `isVisible()` + console.log answered against the DOM as it stood the instant
+    // after the click and could only ever report, never fail — the same shape that let the
+    // invite-by-email 404 ship green (see the header of contacts.spec.ts).
     await gp.getByRole('button', { name: 'Create account' }).first().click();
-    const nameVisible = await gp
-      .locator('input[autocomplete="name"]')
-      .isVisible()
-      .catch(() => false);
-    console.log(`[auth] register mode reveals Name field: nameVisible=${nameVisible}`);
+    await expect(gp.locator('input[autocomplete="name"]')).toBeVisible();
 
     await guest.close();
   });

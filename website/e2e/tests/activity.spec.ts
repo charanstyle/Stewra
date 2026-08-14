@@ -106,19 +106,18 @@ test.describe('activity', () => {
     await pageA.getByText('💡', { exact: false }).waitFor({ timeout: 90000 });
 
     // FeedbackControl appears — submit a rating.
+    // ActivityPage renders `{insightId !== null && <FeedbackControl .../>}` and the insight card
+    // above has already been waited for, so the control is guaranteed here. The previous
+    // `isVisible()` GUARD had the very trap its own inner comment describes: instantaneous, so a
+    // control that had not painted yet took the else branch and the whole feedback learning loop
+    // went untested while the run stayed green. The guard is now an assertion like the body.
     const fb = pageA.getByRole('group', { name: 'Rate this insight' });
-    if (await fb.isVisible().catch(() => false)) {
-      const firstRating = fb.getByRole('button').first();
-      await firstRating.click();
-      await pageA.getByRole('button', { name: 'Send feedback' }).click();
-      // FeedbackControl only swaps in the "✓ Thanks …" panel after `await api.submitFeedback(...)`
-      // resolves, so the old instantaneous `isVisible()` sampled before the POST could possibly have
-      // returned and reported `confirmation shown=false` on every run. `toBeVisible` retries, which is
-      // what makes this a real check on the feedback learning loop rather than a guaranteed miss.
-      await expect(pageA.getByText('Thanks', { exact: false })).toBeVisible();
-      console.log('[activity] submit insight feedback (feedback learning loop): confirmation shown');
-    } else {
-      console.log('[activity] feedback control: FeedbackControl not shown for this insight');
-    }
+    await expect(fb).toBeVisible();
+    await fb.getByRole('button').first().click();
+    await pageA.getByRole('button', { name: 'Send feedback' }).click();
+    // FeedbackControl only swaps in the "✓ Thanks …" panel after `await api.submitFeedback(...)`
+    // resolves, so an instantaneous check would sample before the POST could possibly have
+    // returned. `toBeVisible` retries, which is what makes this a real check on the loop.
+    await expect(pageA.getByText('Thanks', { exact: false })).toBeVisible();
   });
 });

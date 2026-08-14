@@ -30,26 +30,26 @@ test.describe('memory', () => {
     await pageA.goto(`${WEB}/memory`, { waitUntil: 'domcontentloaded' });
     await pageA.getByRole('heading', { name: /What Stewra has learned/i }).waitFor({ timeout: 12000 });
 
+    // Search and the source filter are page furniture — they render whether or not the account has
+    // a single memory — so their absence is a defect, not a data condition. Previously each was an
+    // `isVisible()` if/else in which BOTH branches passed: the page could lose its search box
+    // entirely and this test would log "not visible" and go green. Asserted with `expect(locator)`,
+    // which retries, and the interactions are no longer swallowed either.
     const search = pageA.getByPlaceholder(/Search by name, purpose, or guidance/i);
-    if (await search.isVisible().catch(() => false)) {
-      await search.fill('email');
-      await pageA.waitForTimeout(700);
-      await search.fill('');
-      await pageA.waitForTimeout(500);
-      console.log('[memory] search input accepts input (debounced), no crash on query');
-    } else {
-      console.log('[memory] search input not visible');
-    }
+    await expect(search).toBeVisible();
+    await search.fill('email');
+    await pageA.waitForTimeout(700);
+    await expect(search).toHaveValue('email');
+    await search.fill('');
+    await pageA.waitForTimeout(500);
 
     const filter = pageA.getByLabel('Filter by source');
-    if (await filter.isVisible().catch(() => false)) {
-      await filter.selectOption('gmail').catch(() => {});
-      await pageA.waitForTimeout(800);
-      await filter.selectOption('').catch(() => {});
-      console.log('[memory] source filter select changes value: toggled gmail → All sources');
-    } else {
-      console.log('[memory] source filter select not visible');
-    }
+    await expect(filter).toBeVisible();
+    await filter.selectOption('gmail');
+    await pageA.waitForTimeout(800);
+    await expect(filter).toHaveValue('gmail');
+    await filter.selectOption('');
+    await expect(filter).toHaveValue('');
   });
 
   test('memory card Edit → Cancel (non-mutating)', async ({ pageA }) => {
@@ -67,10 +67,18 @@ test.describe('memory', () => {
         .locator('xpath=ancestor::div[contains(@class,"card")][1]')
         .getByRole('button', { name: 'Edit' });
     }
-    test.skip(
-      !(await editBtn.isVisible().catch(() => false)),
-      'no editable memory/rule present — set E2E_DATABASE_URL to seed one (see seed.mjs)',
-    );
+    // When the DB seeded a card, the precondition is PROVISIONED — so a missing Edit button is a
+    // defect and must fail. Only the unseeded run may skip. Previously both paths ran through one
+    // instantaneous `isVisible()`, so a seeded run whose button painted a tick late skipped
+    // instead of failing, and the skip budget absorbed it silently.
+    if (dbEnabled) {
+      await expect(editBtn, 'seeded memory card has no Edit button').toBeVisible();
+    } else {
+      test.skip(
+        !(await editBtn.isVisible().catch(() => false)),
+        'no editable memory/rule present — set E2E_DATABASE_URL to seed one (see seed.mjs)',
+      );
+    }
 
     await editBtn.click();
     const cancel = pageA.getByRole('button', { name: 'Cancel' }).first();
@@ -93,10 +101,15 @@ test.describe('memory', () => {
       cardScope = seeded.locator('xpath=ancestor::div[contains(@class,"card")][1]');
     }
     const hideBtn = cardScope.getByRole('button', { name: 'Hide from recall' }).first();
-    test.skip(
-      !(await hideBtn.isVisible().catch(() => false)),
-      'no "Hide from recall" button present — set E2E_DATABASE_URL to seed a memory (see seed.mjs)',
-    );
+    // Same rule as Edit → Cancel above: a provisioned card must assert, only an unseeded run skips.
+    if (dbEnabled) {
+      await expect(hideBtn, 'seeded memory card has no "Hide from recall" button').toBeVisible();
+    } else {
+      test.skip(
+        !(await hideBtn.isVisible().catch(() => false)),
+        'no "Hide from recall" button present — set E2E_DATABASE_URL to seed a memory (see seed.mjs)',
+      );
+    }
 
     await hideBtn.click();
     const useBtn = cardScope.getByRole('button', { name: 'Use for recall' }).first();

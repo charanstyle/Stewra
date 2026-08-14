@@ -284,11 +284,21 @@ failed, and the fourteen were invisible — `list` prints a dash per skip, thous
 no reason and no total. Eight of them were Today tests skipping on a run that had a database
 configured and could have provisioned what they needed.
 
-`E2E_MAX_SKIPS=<n>` turns the census into an assertion: over budget fails the run. Unset means report
-only — a default ceiling nobody chose would just get raised the first time it bit. The main suite's
-budget is pinned in the tracked `.env.e2e` (`E2E_MAX_SKIPS=6` — the sign-up, runner-session and
-re-consent-banner tests across the two browser profiles, each conditional by design); a real
-environment variable still wins, which is how CI holds the commerce suite to `0`.
+`E2E_MAX_SKIPS=<n>` turns the census into an assertion, and it is an EXACT one rather than a ceiling:
+the run fails when there are more skips than the budget, and also when there are fewer. Unset means
+report only — a default nobody chose would just get raised the first time it bit.
+
+The second half is the one that earns its keep. A ceiling only ever catches the run that breaches it,
+so every skip you successfully provision away quietly turns into slack, and the next regression to
+reintroduce a skip lands inside that slack and goes green. This suite lived that: the budget sat at
+`6` while the true figure was `4`, two free regressions wide, and no run ever said so. Being under
+budget now fails with the one-line edit spelled out in the message — one red run at the moment the
+good news arrives, in exchange for a number that can never drift above reality.
+
+The main suite's budget is pinned in the tracked `.env.e2e` (`E2E_MAX_SKIPS=4` — the sign-up and
+re-consent-banner tests across the two browser profiles, each conditional by design). It assumes a
+paired, online runner; without one the two runner-session tests skip again and the budget is `6`. A
+real environment variable still wins, which is how CI holds the commerce suite to `0`.
 
 > The reporter fails the run by returning `{ status: 'failed' }` from `onEnd()`. Setting
 > `process.exitCode` there is silently discarded — Playwright computes the exit code from the

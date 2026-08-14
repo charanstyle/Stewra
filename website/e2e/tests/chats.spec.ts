@@ -36,10 +36,11 @@ test.describe('chats', () => {
     await pageB.getByPlaceholder('Type a message').waitFor({ timeout: 12000 });
     await pageA.waitForTimeout(1500);
 
-    // presence: A's row for B should show an online dot now that B is connected. Timing-sensitive
-    // in the original (marked info, not a hard fail) — kept as a diagnostic here too.
-    const dot = await pageA.getByTestId('presence-dot').first().isVisible().catch(() => false);
-    console.log(`[chats] online presence dot for a connected peer visible=${dot}`);
+    // Presence: A's row for B must show an online dot now that B is connected. The original marked
+    // this info-only because it was timing-sensitive — but the fix for timing-sensitive is a
+    // retrying assertion, not a report nobody reads. `expect(locator)` polls until the timeout, so
+    // a dot that arrives on the next presence broadcast passes and a dot that never arrives fails.
+    await expect(pageA.getByTestId('presence-dot').first()).toBeVisible({ timeout: 15000 });
 
     // unread: B sends; A's list should surface an unread badge + preview live — this IS a hard
     // requirement in the original (either the badge or a live preview must appear).
