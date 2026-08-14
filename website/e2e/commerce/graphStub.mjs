@@ -26,6 +26,21 @@ const state = {
   phoneStatus: 'CONNECTED',
   /** The PIN this stub accepts at `/register`. Any other PIN is rejected the way Meta rejects one. */
   pin: '123456',
+  /**
+   * What Meta answers when a template is submitted. `APPROVED` by default — Meta really does
+   * approve some templates instantly, and it is the only answer that lets a spec mint a sendable
+   * template without waiting on an approval pipeline this stub does not model. A spec exercising
+   * the pending or rejected paths sets this before submitting.
+   */
+  templateStatus: 'APPROVED',
+  /**
+   * Templates submitted through `POST /{waba}/message_templates`, keyed by WABA id so the list
+   * edge answers per account — the backend's sync marks anything missing from the list `unknown`,
+   * and a global list would let one spec's templates leak into another spec's account.
+   */
+  templatesByWaba: {},
+  /** Serial for provider template ids, so each submission gets a distinct, id-shaped one. */
+  templateSerial: 0,
   /** Every call the backend made, so a spec can assert what did and did not reach Meta. */
   calls: [],
   /** Counts outbound sends, so each reply comes back with a distinct provider message id. */
@@ -62,6 +77,7 @@ export async function startGraphStub({ appId, appSecret }) {
           if (patch.wabaId !== undefined) state.wabaId = patch.wabaId;
           if (patch.phoneStatus !== undefined) state.phoneStatus = patch.phoneStatus;
           if (patch.pin !== undefined) state.pin = patch.pin;
+          if (patch.templateStatus !== undefined) state.templateStatus = patch.templateStatus;
           if (patch.resetCalls === true) state.calls = [];
           json(res, 200, { ok: true });
         });
@@ -120,6 +136,52 @@ export async function startGraphStub({ appId, appSecret }) {
       return;
     }
 
+    // The template edge, all three verbs. The backend treats Meta as the owner of these objects —
+    // its local rows are a mirror kept honest by the very list served here — so the stub has to
+    // actually keep what was submitted: a create that answered 200 and then vanished from the list
+    // would make the next sync mark the template `unknown` and unsendable mid-test.
+    if (pathname.endsWith('/message_templates')) {
+      const wabaId = pathname.slice(0, -'/message_templates'.length).replace(/\/$/, '');
+
+      if (req.method === 'POST') {
+        let raw = '';
+        req.on('data', (chunk) => {
+          raw += chunk;
+        });
+        req.on('end', () => {
+          const body = JSON.parse(raw);
+          state.templateSerial += 1;
+          const record = {
+            id: `tmpl-e2e-${state.templateSerial}`,
+            name: body.name,
+            language: body.language,
+            // Frozen at submission time: a later state change applies to later submissions, the way
+            // Meta's verdict on one template does not rewrite its verdict on another.
+            status: state.templateStatus,
+            category: body.category,
+            components: body.components ?? [],
+          };
+          const list = state.templatesByWaba[wabaId] ?? [];
+          list.push(record);
+          state.templatesByWaba[wabaId] = list;
+          json(res, 200, { id: record.id, status: record.status, category: record.category });
+        });
+        return;
+      }
+
+      if (req.method === 'DELETE') {
+        const list = state.templatesByWaba[wabaId] ?? [];
+        state.templatesByWaba[wabaId] = list.filter((t) => t.name !== query['name']);
+        json(res, 200, { success: true });
+        return;
+      }
+
+      // The list read the sync walks. No `paging` cursor — everything fits on one page here, and
+      // the backend treats its absence as "the list is complete", which it is.
+      json(res, 200, { data: state.templatesByWaba[wabaId] ?? [] });
+      return;
+    }
+
     if (pathname.endsWith('/messages')) {
       // The wamid shape matters: the backend stores it as the provider message id and the inbox
       // renders whatever came back, so a placeholder that is not id-shaped would hide a bug.
@@ -141,8 +203,11 @@ export async function startGraphStub({ appId, appSecret }) {
       return;
     }
 
-    // A bare `GET /{waba-id}` — the display metadata read.
-    json(res, 200, { id: pathname, name: 'Acme Coffee' });
+    // A bare `GET /{waba-id}` — the display metadata read. `currency` matters: it becomes the
+    // account's billing currency, which selects the rate card every template send is priced
+    // against — and an account that never reported one has every billable send refused under the
+    // no-unpriceable-spend rule, which would make broadcasts untestable rather than test them.
+    json(res, 200, { id: pathname, name: 'Acme Coffee', currency: 'USD' });
   });
 
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
