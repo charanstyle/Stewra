@@ -20,6 +20,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { startGraphStub } from './graphStub.mjs';
+import { startMailSink } from './mailSink.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..', '..', '..');
@@ -120,11 +121,7 @@ function tag(child, label) {
  * one column is the smallest honest shortcut: the account, its password hash and its tokens are
  * all real and minted by the real endpoints.
  */
-async function createVerifiedUser(apiUrl, databaseUrl) {
-  const stamp = `${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
-  const email = `qa-commerce+${stamp}@stewra.test`;
-  const password = `Qa!${stamp}A1`;
-
+async function createVerifiedUser(apiUrl, databaseUrl, { email, password }) {
   const res = await fetch(`${apiUrl}/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -169,6 +166,16 @@ export async function startCommerceStack() {
   const verifyToken = randomBytes(16).toString('hex');
 
   const graph = await startGraphStub({ appId, appSecret });
+  const mail = await startMailSink();
+
+  // Minted BEFORE the backend boots, because the address goes into its environment twice over: the
+  // QA account is also this install's platform operator (INSTALL_ADMIN_EMAILS below), and that list
+  // is read once at startup.
+  const stamp = `${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
+  const qaUser = {
+    email: `qa-commerce+${stamp}@stewra.test`,
+    password: `Qa!${stamp}A1`,
+  };
 
   const apiPort = await freePort();
   const webPort = await freePort();
@@ -189,13 +196,28 @@ export async function startCommerceStack() {
       META_COMMERCE_CONFIG_ID: configId,
       META_COMMERCE_VERIFY_TOKEN: verifyToken,
       META_COMMERCE_GRAPH_BASE_URL: graph.origin,
+      // The org-invite email leaves through the backend's real SMTP transport, and a failed
+      // delivery revokes the invite by design — so the stack provides a real listener rather than
+      // letting every invite die against whatever `.env.test` points at. See mailSink.mjs.
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: String(mail.port),
+      // The QA account doubles as the install's platform operator. Rate cards and spend caps are
+      // granted from `/platform/*` — surfaces that belong to whoever carries the Meta bill, with no
+      // org-facing UI — and without them every billable send is refused, which would leave the
+      // broadcast and template-send paths permanently untestable. Overrides `.env.test`'s list: its
+      // fixture addresses have no registered accounts in this stack anyway.
+      INSTALL_ADMIN_EMAILS: qaUser.email,
+      // The suite waits on real queue progress (imports, broadcast dispatch and send). The default
+      // 5s poll is tuned for production patience, not for a test that sits inside a 120s budget
+      // with three queue hops in it.
+      COMMERCE_WORKER_POLL_MS: '500',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   tag(backend, 'api');
   await waitForHttp(`${apiUrl}/health`, 'backend', backend);
 
-  const user = await createVerifiedUser(apiUrl, databaseUrl);
+  const user = await createVerifiedUser(apiUrl, databaseUrl, qaUser);
 
   const website = spawn(
     'npx',
@@ -221,6 +243,7 @@ export async function startCommerceStack() {
       website.kill('SIGTERM');
       backend.kill('SIGTERM');
       await graph.close();
+      await mail.close();
     },
   };
 }
