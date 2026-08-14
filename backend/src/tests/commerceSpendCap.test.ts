@@ -698,3 +698,111 @@ describe('the two surfaces', () => {
     expect((await broadcastService.get(t.orgId, broadcastId)).status).toBe('completed');
   });
 });
+
+/**
+ * The ledger is append-only, and it still has to let a message be deleted.
+ *
+ * 052 refused every UPDATE, and gave `message_id` an ON DELETE SET NULL. SET NULL is an UPDATE, so
+ * the two rules cancelled: every rated message became undeletable, and the failure arrived from
+ * inside somebody else's DELETE with nothing pointing back at the money. It surfaced as a teardown
+ * error in `commerceTemplates`, which reads like a test problem and was not one — an org with any
+ * send in it could not be removed. 058 opens exactly one hole: clearing a link to a parent that is
+ * going away. This keeps that hole one hole wide.
+ */
+describe('spend ledger append-only', () => {
+  it('lets a rated message be deleted, and keeps the money that was booked against it', async () => {
+    const t = await tenant();
+    await spendCapRepository.setCap({
+      orgId: t.orgId,
+      currency: CUR,
+      limitMicros: 1_000_000n,
+      grantedByUserId: t.userId,
+      note: 'unlink test',
+    });
+    await contact(t);
+    await drainJobs(t.orgId, 25);
+    await schedule(t, 'Delete me afterwards');
+    await drainJobs(t.orgId);
+
+    // A real send, so a real entry — not a hand-built row that could differ from what the code writes.
+    const entry = await db
+      .selectFrom('commerce_spend_ledger')
+      .select(['id', 'message_id', 'kind', 'amount_micros'])
+      .where('org_id', '=', t.orgId)
+      .where('message_id', 'is not', null)
+      .executeTakeFirst();
+    if (entry === undefined) {
+      throw new Error('no ledger entry carried a message_id — the fixture sent nothing, so this proves nothing');
+    }
+    const messageId = entry.message_id;
+
+    await db.deleteFrom('commerce_messages').where('id', '=', messageId).execute();
+
+    const after = await db
+      .selectFrom('commerce_spend_ledger')
+      .select(['id', 'message_id', 'kind', 'amount_micros'])
+      .where('id', '=', entry.id)
+      .executeTakeFirstOrThrow();
+    // The link is gone; the evidence is not. Amount and kind are what the invoice is built from, so
+    // an "unlink" that quietly zeroed either would be the worse bug of the two.
+    expect(after.message_id).toBeNull();
+    expect(after.amount_micros).toBe(entry.amount_micros);
+    expect(after.kind).toBe(entry.kind);
+  });
+
+  it('still refuses to restate an amount', async () => {
+    const t = await tenant();
+    await spendCapRepository.setCap({
+      orgId: t.orgId,
+      currency: CUR,
+      limitMicros: 500_000n,
+      grantedByUserId: t.userId,
+      note: 'immutability test',
+    });
+
+    const entry = await db
+      .selectFrom('commerce_spend_ledger')
+      .select(['id', 'amount_micros'])
+      .where('org_id', '=', t.orgId)
+      .executeTakeFirstOrThrow();
+
+    // Raw SQL on purpose. Kysely's generated types already refuse this edit, which is a good first
+    // line and no line at all against psql, a migration, or a future column becoming writable. The
+    // claim being tested is the database's, so it is made to the database directly.
+    const error = await sql`UPDATE commerce_spend_ledger SET amount_micros = 1 WHERE id = ${entry.id}`
+      .execute(db)
+      .catch((e: unknown) => e);
+    expect(String(error)).toContain('append-only');
+
+    const after = await db
+      .selectFrom('commerce_spend_ledger')
+      .select('amount_micros')
+      .where('id', '=', entry.id)
+      .executeTakeFirstOrThrow();
+    expect(after.amount_micros).toBe(entry.amount_micros);
+  });
+
+  it('still refuses to delete an entry outright', async () => {
+    const t = await tenant();
+    await spendCapRepository.setCap({
+      orgId: t.orgId,
+      currency: CUR,
+      limitMicros: 500_000n,
+      grantedByUserId: t.userId,
+      note: 'deletion test',
+    });
+
+    const entry = await db
+      .selectFrom('commerce_spend_ledger')
+      .select('id')
+      .where('org_id', '=', t.orgId)
+      .executeTakeFirstOrThrow();
+
+    const error = await db
+      .deleteFrom('commerce_spend_ledger')
+      .where('id', '=', entry.id)
+      .execute()
+      .catch((e: unknown) => e);
+    expect(String(error)).toContain('DELETE is not permitted');
+  });
+});

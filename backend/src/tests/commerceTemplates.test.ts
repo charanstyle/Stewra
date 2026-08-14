@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import bcrypt from 'bcryptjs';
+import { sql } from 'kysely';
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 // Type-only, so they are erased and do NOT load these modules before the environment below is set.
 import type { db as dbType, closeDb as closeDbType } from '../database/index.js';
@@ -200,6 +201,21 @@ afterAll(async () => {
     await vault.delete(ref);
   }
   if (createdOrgs.length > 0) {
+    // The money tables first, and the ledger with its trigger lifted. Two different rules are in
+    // play and both are working as intended: 058 lets a *message* delete clear the ledger's
+    // message_id, which is why the delete below no longer explodes — but deleting the entries
+    // themselves is still refused, and an org delete cascades into exactly that. Destroying the
+    // evidence trail for money should be hard, so the harness says out loud that it is lifting the
+    // rule for fixture cleanup rather than the schema quietly permitting it. Same pattern, same
+    // reason, as commerceSpendCap's teardown.
+    await db.transaction().execute(async (trx) => {
+      await sql`ALTER TABLE commerce_spend_ledger DISABLE TRIGGER stewra_commerce_spend_ledger_append_only`.execute(trx);
+      await trx.deleteFrom('commerce_spend_ledger').where('org_id', 'in', createdOrgs).execute();
+      await sql`ALTER TABLE commerce_spend_ledger ENABLE TRIGGER stewra_commerce_spend_ledger_append_only`.execute(trx);
+    });
+    await db.deleteFrom('commerce_spend_periods').where('org_id', 'in', createdOrgs).execute();
+    await db.deleteFrom('commerce_spend_caps').where('org_id', 'in', createdOrgs).execute();
+    await db.deleteFrom('commerce_message_costs').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('commerce_messages').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('commerce_conversations').where('org_id', 'in', createdOrgs).execute();
     await db.deleteFrom('commerce_contacts').where('org_id', 'in', createdOrgs).execute();
