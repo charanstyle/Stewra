@@ -298,8 +298,12 @@ async function main(): Promise<void> {
     }
 
     // ── 4. Start a Claude Code session on the cloud runner, and steer it ─────────────────────────
-    const web = ioc(BASE.replace(/\/api$/, ''), {
-      path: '/socket.io',
+    // Socket.IO wants the ORIGIN as the URL and the proxy prefix folded into `path` — the same
+    // derivation the website does in `resolveSocketTarget()`. Stripping `/api` from the URL but
+    // leaving the default `/socket.io` path would hand the upgrade to the website container.
+    const baseUrl = new URL(BASE);
+    const web = ioc(baseUrl.origin, {
+      path: `${baseUrl.pathname.replace(/\/+$/, '')}/socket.io/`,
       auth: { token: jwt },
       transports: ['websocket'],
       reconnection: false,
@@ -365,7 +369,7 @@ async function main(): Promise<void> {
     await sleep(3000);
     const followUp = await api('POST', `/runner/sessions/${started.sessionId}/prompt`, {
       token: jwt,
-      body: { prompt: 'Also mention the filename you created in your confirmation.' },
+      body: { text: 'Also mention the filename you created in your confirmation.' },
     });
     check(
       `follow-up prompt accepted into the running session (${followUp.status})`,
