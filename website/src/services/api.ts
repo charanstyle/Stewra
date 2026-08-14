@@ -84,6 +84,7 @@ import type {
   SetEmailOverWhatsappRequest,
   SetEmailOverWhatsappResponse,
   // Commerce plane
+  GetOrgBillingResponse,
   ListOrgsResponse,
   CreateOrgRequest,
   CreateOrgResponse,
@@ -559,6 +560,10 @@ export const api = {
   // in these paths is a routing detail, not the authorization: passing someone else's returns 404.
 
   listOrgs: (): Promise<ListOrgsResponse> => request('/orgs'),
+
+  /** The org's own view of its plan and, more usefully day to day, whether it owes anything. */
+  getOrgBilling: (orgId: string): Promise<GetOrgBillingResponse> =>
+    request(`/orgs/${orgId}/billing`),
 
   createOrg: (body: CreateOrgRequest): Promise<CreateOrgResponse> =>
     request('/orgs', { method: 'POST', body }),

@@ -12,6 +12,7 @@ import { segmentRepository } from '../repositories/segmentRepository.js';
 import { audienceService } from './audienceService.js';
 import { countryCallingCode } from './callingCodes.js';
 import { spendCapService } from './spendCapService.js';
+import { dunningService } from './dunningService.js';
 import { templateService } from './templateService.js';
 import { config } from '../../config/unifiedConfig.js';
 import {
@@ -107,6 +108,13 @@ class BroadcastService {
     // refusal happens now, at the person who can do something about it. Advisory only — the send
     // handler reserves the real money per recipient; this cannot pass anything that one refuses.
     await spendCapService.assertHeadroom(params.orgId, account.billingCurrency);
+
+    // ...and the other half of the same question. Headroom asks whether this org is allowed to
+    // spend more; this asks whether it has paid for what it already spent. A cap granted once keeps
+    // working forever, so without this a client can stop paying and keep sending on our money
+    // indefinitely. Same position in the flow, and for the same reason: refuse at the person who
+    // can settle it, not at a job that will pause silently three minutes later.
+    await dunningService.assertNotDelinquent(params.orgId);
 
     // Existence checks double as tenancy checks — both lookups are org-scoped.
     await audienceService.getSegment(params.orgId, params.segmentId);
@@ -218,6 +226,10 @@ class BroadcastService {
     if (account !== null) {
       await spendCapService.assertHeadroom(orgId, account.billingCurrency);
     }
+    // Same argument as the cap's, one line up: a past-due pause ends by paying, not by asking
+    // again. Outside the null check because delinquency is a property of the ORG, not of the
+    // channel account — an org with no resolvable account still owes what it owes.
+    await dunningService.assertNotDelinquent(orgId);
 
     const resumed = await broadcastRepository.transition({
       orgId,

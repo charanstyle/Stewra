@@ -13,6 +13,7 @@ import type {
 import { BaseController } from '../../controllers/baseController.js';
 import { billingService } from '../services/billingService.js';
 import { paymentService } from '../services/paymentService.js';
+import { dunningService } from '../services/dunningService.js';
 import { orgContext } from '../middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 import { AuthenticationError } from '../../utils/errors.js';
@@ -93,7 +94,10 @@ class BillingController extends BaseController {
     try {
       const { orgId } = orgContext(req);
       const subscription = await billingService.activeSubscription(orgId);
-      const response: GetOrgBillingResponse = { subscription };
+      // Returned on the plan endpoint rather than its own, so a client cannot render "you are on
+      // the Growth plan" without also having been handed the fact that the last invoice is unpaid.
+      const delinquency = await dunningService.delinquency(orgId);
+      const response: GetOrgBillingResponse = { subscription, delinquency };
       this.handleSuccess(res, response);
     } catch (error) {
       this.handleError(error, res, 'BillingController.orgBilling');

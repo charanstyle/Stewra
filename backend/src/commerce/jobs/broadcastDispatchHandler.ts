@@ -7,6 +7,7 @@ import { jobRepository } from '../repositories/jobRepository.js';
 import { segmentRepository } from '../repositories/segmentRepository.js';
 import { audienceService } from '../services/audienceService.js';
 import { spendCapService } from '../services/spendCapService.js';
+import { dunningService } from '../services/dunningService.js';
 import { templateService } from '../services/templateService.js';
 import { logger } from '../../utils/logger.js';
 import { NotFoundError, ValidationError } from '../../utils/errors.js';
@@ -102,6 +103,30 @@ class BroadcastDispatchHandler implements JobHandler {
       logger.info('commerce: broadcast paused at dispatch by spend cap', {
         orgId: job.orgId,
         broadcastId,
+      });
+      return { kind: 'done' };
+    }
+
+    // The dunning gate, in the same place and with the same shape. A campaign scheduled while the
+    // grace window was still open can reach dispatch after it has closed, so the check has to
+    // happen here too and not only at create. No retry enqueued, for the identical reason: an
+    // unpaid invoice does not become paid by waiting, and resume re-checks this exact predicate.
+    if (await dunningService.isDelinquent(job.orgId)) {
+      const standing = await dunningService.delinquency(job.orgId);
+      const reason =
+        `An invoice has been unpaid for ${standing.daysOutstanding} days, past the ` +
+        `${standing.graceDays}-day grace period. Settle it, then resume.`;
+      await broadcastRepository.transition({
+        orgId: job.orgId,
+        broadcastId,
+        from: ['scheduled', 'running'],
+        to: 'paused',
+        lastError: reason,
+      });
+      logger.info('commerce: broadcast paused at dispatch by past-due invoice', {
+        orgId: job.orgId,
+        broadcastId,
+        daysOutstanding: standing.daysOutstanding,
       });
       return { kind: 'done' };
     }

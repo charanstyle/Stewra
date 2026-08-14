@@ -8,6 +8,7 @@ import { jobRepository } from '../repositories/jobRepository.js';
 import { channelAccountService } from '../services/channelAccountService.js';
 import { consentService } from '../services/consentService.js';
 import { spendCapService } from '../services/spendCapService.js';
+import { dunningService } from '../services/dunningService.js';
 import { buildSender } from '../services/senders/index.js';
 import { WhatsappSendRefusedError } from '../services/senders/whatsappCloudSender.js';
 import { renderTemplateBody } from '../services/templateBody.js';
@@ -89,7 +90,11 @@ class BroadcastSendHandler implements JobHandler {
       );
       if (
         account0 === null ||
-        !(await spendCapService.hasHeadroom(job.orgId, account0.billingCurrency))
+        !(await spendCapService.hasHeadroom(job.orgId, account0.billingCurrency)) ||
+        // A past-due pause is un-resumable by a retry for exactly the reason the cap's is: the
+        // condition does not clear by waiting, and un-pausing here would put the campaign back into
+        // a state the next batch has to pause it out of again.
+        (await dunningService.isDelinquent(job.orgId))
       ) {
         return { kind: 'done' };
       }

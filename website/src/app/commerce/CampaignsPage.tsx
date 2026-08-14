@@ -6,6 +6,7 @@ import type {
   ChannelAccount,
   CommerceBroadcast,
   CommerceCostSummary,
+  CommerceDelinquency,
   CommerceJob,
   CommerceJobStatus,
   CommerceSegment,
@@ -50,6 +51,11 @@ function nowLocal(): string {
  */
 export default function CampaignsPage(): React.JSX.Element {
   const { memberships, orgId, setOrgId, role, loadError } = useCommerceOrg();
+
+  // Billing standing, on the page where sending happens rather than on a billing page nobody opens.
+  // A campaign refused with 402 at the moment someone hits Schedule is a bad way to learn that an
+  // invoice is overdue; the grace window exists precisely so the warning arrives before the stop.
+  const [delinquency, setDelinquency] = useState<CommerceDelinquency | null>(null);
 
   const [accounts, setAccounts] = useState<ReadonlyArray<ChannelAccount>>([]);
   const [templates, setTemplates] = useState<ReadonlyArray<MessageTemplate>>([]);
@@ -121,6 +127,29 @@ export default function CampaignsPage(): React.JSX.Element {
     setOpenBroadcastId(null);
     void loadAll(orgId);
   }, [orgId, loadAll]);
+
+  // Billing standing is fetched on its own rather than inside loadAll: it is `admin`-gated, and a
+  // 403 for a viewer must not blank the campaigns page. A failure here leaves the banner absent —
+  // which is the one place a quiet miss is right, since the enforcement lives at the API and the
+  // banner is only ever the courtesy that precedes it.
+  useEffect(() => {
+    if (orgId === null) {
+      setDelinquency(null);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .getOrgBilling(orgId)
+      .then((res) => {
+        if (!cancelled) setDelinquency(res.delinquency);
+      })
+      .catch(() => {
+        if (!cancelled) setDelinquency(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId]);
 
   // Keep the variable inputs in lockstep with the chosen template's declared count.
   useEffect(() => {
@@ -336,6 +365,30 @@ export default function CampaignsPage(): React.JSX.Element {
 
         {(error ?? loadError) !== null && <div className={styles.error}>{error ?? loadError}</div>}
         {notice !== null && <div className={styles.notice}>{notice}</div>}
+
+        {delinquency !== null && delinquency.state !== 'current' && (
+          <div
+            className={
+              delinquency.state === 'delinquent' ? styles.error : styles.warning
+            }
+          >
+            {delinquency.state === 'delinquent' ? (
+              <>
+                <strong>Sending is paused for unpaid invoices.</strong> An invoice has been
+                outstanding for {delinquency.daysOutstanding} days, past the{' '}
+                {delinquency.graceDays}-day grace period. New broadcasts are refused and running
+                ones pause until it is settled.
+              </>
+            ) : (
+              <>
+                <strong>An invoice is outstanding.</strong> It has been{' '}
+                {delinquency.daysOutstanding}{' '}
+                {delinquency.daysOutstanding === 1 ? 'day' : 'days'}; sending stops after{' '}
+                {delinquency.graceDays}. Settling it before then keeps campaigns running.
+              </>
+            )}
+          </div>
+        )}
 
         {memberships.length > 1 && (
           <section className={styles.card}>

@@ -898,9 +898,36 @@ export interface SetSubscriptionResponse {
   readonly subscription: CommerceSubscriptionView | null;
 }
 
+/**
+ * Where an org stands on paying, derived rather than stored.
+ *
+ * There is no `past_due` invoice status and deliberately so: a status would need a job to flip it,
+ * and a job that stops running would leave every delinquent org reading as current — the failure
+ * would grant free credit silently, which is the worst direction for this particular mistake to
+ * fail in. So the state is computed from what is already immutable: an invoice that has issued and
+ * has not been paid or voided, measured against `issuedAt`.
+ *
+ * - `current` — nothing outstanding.
+ * - `warning` — something is unpaid but still inside the grace window. Sending is unaffected; this
+ *   exists so the UI can say so before anything stops.
+ * - `delinquent` — past the grace window. Billable sending is refused.
+ */
+export type CommerceDelinquencyState = 'current' | 'warning' | 'delinquent';
+
+export interface CommerceDelinquency {
+  readonly state: CommerceDelinquencyState;
+  /** Days since the oldest unpaid issued invoice was issued. 0 when `state` is `current`. */
+  readonly daysOutstanding: number;
+  /** How many days of grace the policy allows, so the UI can say "3 days left" without hardcoding it. */
+  readonly graceDays: number;
+  /** Every issued-and-unpaid invoice, oldest first. Empty when `state` is `current`. */
+  readonly outstandingInvoiceIds: readonly string[];
+}
+
 /** GET /orgs/:orgId/billing — the org's own view of what plan it is on, if any. */
 export interface GetOrgBillingResponse {
   readonly subscription: CommerceSubscriptionView | null;
+  readonly delinquency: CommerceDelinquency;
 }
 
 /** GET /orgs/:orgId/invoices — newest period first, every status. */
