@@ -1,6 +1,7 @@
 // Sentry must be the FIRST import so it instruments everything loaded afterwards.
 import './instrument.js';
 
+import * as Sentry from '@sentry/node';
 import { createServer, type Server } from 'node:http';
 import { Server as SocketIOServer } from 'socket.io';
 import { createApp } from './app.js';
@@ -60,7 +61,11 @@ async function main(): Promise<void> {
             logger.error('Error during shutdown', {
               error: err instanceof Error ? err.message : String(err),
             });
-            process.exit(1);
+            // Flush before exiting: Sentry's transport is async, so `process.exit` would otherwise
+            // discard the event that was just queued. A dirty shutdown is how connection leaks and
+            // half-written state start, and it is invisible if the report never leaves the process.
+            Sentry.captureException(err, { tags: { surface: 'shutdown' } });
+            void Sentry.flush(2000).then(() => process.exit(1));
           });
       });
     });
@@ -74,5 +79,8 @@ main().catch((err: unknown) => {
   logger.error('Fatal error during startup', {
     error: err instanceof Error ? err.message : String(err),
   });
-  process.exit(1);
+  // The single most important event this process can send: it refused to start, so there is no
+  // /health to scrape and no request log to read. Flushed for the same reason as the shutdown path.
+  Sentry.captureException(err, { tags: { surface: 'startup' } });
+  void Sentry.flush(2000).then(() => process.exit(1));
 });

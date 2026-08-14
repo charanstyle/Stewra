@@ -10,6 +10,7 @@ import type {
   RegisterResponse,
   User,
 } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { config } from '../config/unifiedConfig.js';
 import { logger } from '../utils/logger.js';
 import { AuthenticationError, ConflictError, NotFoundError } from '../utils/errors.js';
@@ -101,6 +102,13 @@ export class AuthService {
     try {
       await emailVerificationService.issue(user.id, user.email);
     } catch (error) {
+      // Not failing registration is right — the account exists and is audited. But the user is now
+      // sitting on a verify screen waiting for a mail that will never arrive, and until this capture
+      // existed the only trace was a log line on a box nobody tails.
+      Sentry.captureException(error, {
+        tags: { surface: 'registration', step: 'verification_email' },
+        extra: { userId: user.id },
+      });
       logger.error('Failed to send verification email at registration', {
         userId: user.id,
         error: error instanceof Error ? error.message : String(error),

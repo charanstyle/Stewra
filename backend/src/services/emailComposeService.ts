@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ConversationTurn, ModelMessage } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { modelClient } from '../agent-host/modelClient.js';
 import { logger } from '../utils/logger.js';
 
@@ -104,6 +105,10 @@ class EmailComposeService {
     try {
       raw = await runStructured(messages);
     } catch (error) {
+      // Returning null conflates "the model found no intent" with "the model call threw". The first is
+      // normal; the second is an outage that makes the email tool quietly stop existing for everyone.
+      // The behaviour stays (a plain reply is the safe turn); the capture is what tells the two apart.
+      Sentry.captureException(error, { tags: { surface: 'email_compose', step: 'intent_extraction' } });
       logger.warn('email-intent extraction failed; falling back to normal reply', {
         err: String(error),
       });

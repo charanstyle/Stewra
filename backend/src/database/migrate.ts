@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import type { Kysely} from 'kysely';
 import { sql } from 'kysely';
+import * as Sentry from '@sentry/node';
 import { db, closeDb } from './index.js';
 import type { Database } from './types.js';
 import * as m001 from './migrations/001_users.js';
@@ -172,6 +173,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     })
     .catch(async (err: unknown) => {
       logger.error('migration failed', { error: err instanceof Error ? err.message : String(err) });
+      Sentry.captureException(err, { tags: { surface: 'migrate' } });
+      // Sentry's transport is async: `process.exit` on the next line would discard the event it just
+      // queued. Flushing first is what makes a failed deploy migration actually reach anyone.
+      await Sentry.flush(2000);
       await closeDb();
       process.exit(1);
     });

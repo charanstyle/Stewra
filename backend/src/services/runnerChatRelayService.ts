@@ -4,6 +4,7 @@ import type {
   RunnerSessionDonePayload,
   StewraReplyEvent,
 } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { messageRepository } from '../repositories/messageRepository.js';
 import { emitToConversation } from '../websocket/emitter.js';
 import { whatsappBridgeService } from './whatsappBridgeService.js';
@@ -145,6 +146,12 @@ class RunnerChatRelayService {
         await whatsappBridgeService.sendUnsolicitedSelfChat(origin.userId, text);
       }
     } catch (err: unknown) {
+      // This catch is the end of the line for a message the runner produced: it is not retried and the
+      // user is never told it existed. Silence here reads as "the runner had nothing to say".
+      Sentry.captureException(err, {
+        tags: { surface: 'runner_chat_relay' },
+        extra: { conversationId: origin.conversationId, userId: origin.userId },
+      });
       logger.warn('runner chat relay failed', { err: String(err), conversationId: origin.conversationId });
     }
   }

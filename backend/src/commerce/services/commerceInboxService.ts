@@ -175,6 +175,7 @@ class CommerceInboxService {
         status: 'failed',
         failureReason: reason,
       });
+      // capture-ok: re-thrown below, and BaseController.handleError captures it once at the edge.
       logger.error('commerce: outbound reply failed', {
         orgId: params.orgId,
         conversationId: params.conversationId,
@@ -350,6 +351,7 @@ class CommerceInboxService {
         status: 'failed',
         failureReason: reason,
       });
+      // capture-ok: re-thrown below, and BaseController.handleError captures it once at the edge.
       logger.error('commerce: outbound template send failed', {
         orgId: params.orgId,
         conversationId: params.conversationId,

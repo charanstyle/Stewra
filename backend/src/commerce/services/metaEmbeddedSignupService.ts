@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ChannelAccount } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import type { ChannelAccountMeta } from '../../database/types.js';
 import {
   channelAccountRepository,
@@ -267,6 +268,12 @@ class MetaEmbeddedSignupService {
       // The row was not written, so nothing references this secret. Leaving it would be an orphaned
       // credential at rest — worse than the failure the client is about to be shown.
       await vault.delete(credentialRef).catch((cleanupError: unknown) => {
+        // A live secret left at rest that nothing references. The comment above calls it worse than the
+        // failure being shown to the client, so it gets an alert rather than a log line.
+        Sentry.captureException(cleanupError, {
+          tags: { plane: 'commerce', step: 'orphaned_credential_cleanup' },
+          extra: { orgId: params.orgId },
+        });
         logger.error('commerce: failed to remove an orphaned credential after a failed connect', {
           orgId: params.orgId,
           error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
@@ -327,6 +334,8 @@ class MetaEmbeddedSignupService {
         'This number is connected for receiving but is not registered for sending. Meta rejected ' +
         `the registration PIN: ${describeGraphFailure(error)}`;
       await channelAccountRepository.markError(params.channelAccountId, detail);
+      // capture-ok: Meta rejecting a user-entered PIN is a client error, surfaced as a ValidationError
+      // the user can act on. Paging on it would bury the faults that actually need someone.
       logger.warn('commerce: phone number registration rejected', {
         channelAccountId: params.channelAccountId,
         error: detail,

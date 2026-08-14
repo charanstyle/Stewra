@@ -4,6 +4,7 @@ import type {
   NormalizedInboundMessage,
   NormalizedTemplateEvent,
 } from './inbound/types.js';
+import * as Sentry from '@sentry/node';
 import { consentService } from './consentService.js';
 import { costRatingService } from './costRatingService.js';
 import { templateService } from './templateService.js';
@@ -100,6 +101,12 @@ class CommerceInboundService {
           providerMessageId: message.providerMessageId,
         });
       } catch (error) {
+        // The block above says this is "reported"; until now nothing reported it. A dropped STOP means
+        // the next campaign messages someone who asked it not to — a compliance fault, not a hiccup.
+        Sentry.captureException(error, {
+          tags: { plane: 'commerce', surface: 'inbound_webhook', step: 'consent_keyword' },
+          extra: { orgId: account.orgId, contactId, providerMessageId: message.providerMessageId },
+        });
         logger.error('commerce webhook: failed to apply inbound consent keyword', {
           orgId: account.orgId,
           contactId,
@@ -128,6 +135,12 @@ class CommerceInboundService {
         optedOutJustNow: keywordConsent?.state === 'opted_out',
       });
     } catch (error) {
+      // Same as the keyword pass above: the comment already argues this must be reported, and this is
+      // what does the reporting. A lost opt-in silently shrinks every future campaign's audience.
+      Sentry.captureException(error, {
+        tags: { plane: 'commerce', surface: 'inbound_webhook', step: 'entry_point_consent' },
+        extra: { orgId: account.orgId, contactId, providerMessageId: message.providerMessageId },
+      });
       logger.error('commerce webhook: failed to record an entry-point consent', {
         orgId: account.orgId,
         contactId,

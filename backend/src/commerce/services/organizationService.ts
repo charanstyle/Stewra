@@ -131,6 +131,7 @@ class OrganizationService {
       });
     } catch (error) {
       await organizationRepository.revokeInvite(params.orgId, created.invite.id);
+      // capture-ok: re-thrown below, and BaseController.handleError captures it once at the edge.
       logger.error('commerce: invite email failed to send; invite revoked', {
         orgId: params.orgId,
         inviteId: created.invite.id,

@@ -72,6 +72,14 @@ jobs:
       - name: Plane boundaries (dependency-cruiser)
         run: npm run boundaries
 
+      # Fail-fast gates. Both existed as scripts and neither was wired to anything, which made them
+      # opt-in audits nobody was obliged to run — the same failure mode they exist to catch. They are
+      # here rather than in `lint` so a finding names itself in the job list instead of arriving as one
+      # more eslint line. `scan:fallbacks` catches configuration that guesses a target;
+      # `scan:error-capture` catches errors that are logged and then never reported to anyone.
+      - name: Fail-fast gates (no guessed defaults, no swallowed errors)
+        run: npm run scan
+
       # Every value is a CI-local throwaway shaped to pass unifiedConfig validation — the suite never
       # reaches Google or SMTP. Contract: backend/.env.test.example.
       - name: Write backend/.env.test

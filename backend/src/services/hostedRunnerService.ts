@@ -419,6 +419,14 @@ class HostedRunnerService {
         container === undefined ? 'failed' : toContainerStatus(container.status);
       if (actual === row.device.containerStatus) continue;
       if (container === undefined) {
+        // The reconcile corrects the row and moves on, so this drift never surfaces anywhere else — and
+        // a device the user believes they own with no container behind it is exactly what reconcile
+        // exists to catch. No exception here, so the message is the event.
+        Sentry.captureMessage('hosted-runner: reconcile found a device row with no container', {
+          level: 'error',
+          tags: { surface: 'hosted_runner', step: 'reconcile' },
+          extra: { deviceId: row.device.id, userId: row.userId },
+        });
         logger.error('hosted-runner: reconcile found a device row with no container', {
           deviceId: row.device.id,
           userId: row.userId,

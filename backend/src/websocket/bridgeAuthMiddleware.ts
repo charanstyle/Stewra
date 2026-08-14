@@ -1,4 +1,5 @@
 import type { ExtendedError } from 'socket.io';
+import * as Sentry from '@sentry/node';
 import { whatsappPersonalService } from '../services/whatsappPersonalService.js';
 import { logger } from '../utils/logger.js';
 import type { BridgeHandshakeSocketLike } from './bridgeTypes.js';
@@ -46,6 +47,9 @@ export function bridgeAuthMiddleware(
       next();
     })
     .catch((error: unknown) => {
+      // Note the split above: an unknown or revoked token is `logger.debug`, because that is normal.
+      // Reaching THIS branch means the lookup itself threw, which is not — so it is the one that alerts.
+      Sentry.captureException(error, { tags: { surface: 'bridge_auth' } });
       logger.error('bridge auth failed', {
         error: error instanceof Error ? error.message : String(error),
       });

@@ -159,6 +159,13 @@ class TransactionSyncService {
   ): Promise<void> {
     const accountId = accountIdByPlaidId.get(t.accountId);
     if (accountId === undefined) {
+      // "Skipped loudly" per the docblock — but loudly into a log file is quietly. This is money going
+      // missing from a user's view of their own finances, so it gets an alert.
+      Sentry.captureMessage('transactionSync: transaction references an unknown account, skipping', {
+        level: 'error',
+        tags: { surface: 'transaction_sync' },
+        extra: { connectionId: connection.id, plaidTransactionId: t.transactionId },
+      });
       logger.error('transactionSync: transaction references an unknown account, skipping', {
         connectionId: connection.id,
         plaidTransactionId: t.transactionId,

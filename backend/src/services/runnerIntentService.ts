@@ -8,6 +8,7 @@ import type {
   RunnerSession,
 } from '@stewra/shared-types';
 import { RUNNER_HARNESS_IDS } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { config } from '../config/unifiedConfig.js';
 import { modelClient } from '../agent-host/modelClient.js';
 import { messageRepository } from '../repositories/messageRepository.js';
@@ -215,6 +216,9 @@ class RunnerIntentService {
     try {
       raw = await runStructured(messages);
     } catch (error) {
+      // Same shape as the commerce classifier: `null` cannot distinguish "no intent" from "the model
+      // call threw", and a persistent throw makes the whole runner surface look unused rather than broken.
+      Sentry.captureException(error, { tags: { surface: 'runner_intent', step: 'classification' } });
       logger.warn('runner-intent classification failed; falling back to normal reply', {
         err: String(error),
       });
@@ -401,6 +405,12 @@ class RunnerIntentService {
         reply: `Started on ${proposal.deviceName}. I'll let you know here if it needs you, or when it's done.`,
       };
     } catch (error) {
+      // The user is told "something went wrong"; that phrasing is all they can act on, and it is not
+      // something they can report usefully. This is the copy of the fault that has the cause in it.
+      Sentry.captureException(error, {
+        tags: { surface: 'runner_intent', step: 'start_session' },
+        extra: { userId, deviceName: proposal.deviceName },
+      });
       logger.warn('runner-intent failed to start proposed session', { err: String(error), userId });
       return { started: false, reply: 'Something went wrong starting that session. Please try again.' };
     }
@@ -444,6 +454,13 @@ class RunnerIntentService {
       const fallback = allow ? 'Approved — carrying on.' : 'Denied — I told it not to.';
       return { reply: modelReply.trim().length > 0 ? modelReply.trim() : fallback, proposal: null };
     } catch (error) {
+      // A permission answer that never reached the session leaves an agent blocked on a prompt the user
+      // believes they already answered. The reply guesses at "it may have already moved on"; this
+      // records what actually happened.
+      Sentry.captureException(error, {
+        tags: { surface: 'runner_intent', step: 'permission_decision' },
+        extra: { userId, sessionId: pending.sessionId, promptId: pending.promptId },
+      });
       logger.warn('runner-intent permission decision failed', { err: String(error), userId });
       return {
         reply: 'I couldn\'t deliver that answer to the session — it may have already moved on.',

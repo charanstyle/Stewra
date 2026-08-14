@@ -140,6 +140,12 @@ export function registerRunnerHandler(socket: RunnerSocketLike): void {
   // only fire if something is wired wrong — and a runner whose device we cannot name is one we cannot
   // revoke or address. It gets no events.
   if (deviceId === undefined) {
+    // Same wiring fault as bridgeHandler's door check, and the same reason it must page rather than log.
+    Sentry.captureMessage('runner: connection without a device id; refusing', {
+      level: 'error',
+      tags: { surface: 'runner_handler' },
+      extra: { userId, socketId: socket.id },
+    });
     logger.error('runner: connection without a device id; refusing', { userId, socketId: socket.id });
     socket.disconnect();
     return;

@@ -1,4 +1,5 @@
 import type { ConversationTurn, ProposedCommerceReply } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -108,6 +109,13 @@ class TurnIntentRegistry {
         const outcome = await handler.handle(request);
         if (outcome !== null) return outcome;
       } catch (error) {
+        // Falling through is right — the docblock above explains why nothing can have been sent — but a
+        // handler that throws on every turn is invisible from the outside: the user just gets a plain
+        // reply and assumes the feature does not exist.
+        Sentry.captureException(error, {
+          tags: { surface: 'turn_intent', handler: handler.name },
+          extra: { userId: request.userId },
+        });
         logger.warn('turn-intent handler failed; falling through to the next reply path', {
           handler: handler.name,
           userId: request.userId,

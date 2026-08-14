@@ -10,6 +10,7 @@ import {
   SUGGESTION_PUSH_BODY,
   SUGGESTION_PUSH_TITLE,
 } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { config } from '../config/unifiedConfig.js';
 import { logger } from '../utils/logger.js';
 
@@ -217,6 +218,8 @@ class FcmPushService {
       // 404 = the token is no longer registered (app uninstalled / token rotated). Prune it.
       return res.status === 404 ? 'unregistered' : 'failed'; // fallback-ok: a member of the declared result union
     } catch (error) {
+      // 'failed' is returned to a caller that does not retry, so this is where the notification ends.
+      Sentry.captureException(error, { tags: { surface: 'push', provider: 'fcm', context } });
       logger.warn(`FCM ${context} push failed`, {
         error: error instanceof Error ? error.message : String(error),
       });

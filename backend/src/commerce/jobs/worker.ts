@@ -81,6 +81,13 @@ class CommerceWorker {
       // A kind this build does not know. Retrying cannot teach it one, so this is terminal — and it
       // is `failed` rather than `dead`, because nothing was actually attempted.
       await jobRepository.markTerminal(job.id, 'failed', `no handler registered for kind '${job.kind}'`);
+      // A build/deploy mismatch: rows are being enqueued that this build cannot drain. No exception
+      // exists to capture, so the message is the event.
+      Sentry.captureMessage('commerce worker: no handler for job kind', {
+        level: 'error',
+        tags: { plane: 'commerce', jobKind: job.kind },
+        extra: { jobId: job.id, orgId: job.orgId },
+      });
       logger.error('commerce worker: no handler for job kind', {
         jobId: job.id,
         orgId: job.orgId,
