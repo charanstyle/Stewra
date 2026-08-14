@@ -1,4 +1,5 @@
 import { Redis } from 'ioredis';
+import * as Sentry from '@sentry/node';
 import { config } from '../config/unifiedConfig.js';
 import { logger } from '../utils/logger.js';
 
@@ -15,6 +16,10 @@ export function createRedisClient(): Redis {
     lazyConnect: false,
   });
   client.on('error', (err: Error) => {
+    // Redis is a hard dependency of the realtime layer and of the fail-closed rate limiter, so an error
+    // here is never cosmetic. Sentry groups by fingerprint, so a storm arrives as one issue with a
+    // count rather than as noise.
+    Sentry.captureException(err, { tags: { surface: 'redis' } });
     logger.error('redis client error', { error: err.message });
   });
   return client;

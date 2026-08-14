@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BRIDGE_SERVER_EVENTS } from '@stewra/shared-types';
 import type { BridgeSendAck, BridgeSendPayload } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import type { BridgeNamespaceLike } from './bridgeTypes.js';
 import { bridgeUserRoom } from './bridgeTypes.js';
 import { logger } from '../utils/logger.js';
@@ -58,6 +59,15 @@ export async function dispatchToBridge(
     // A timeout means the bridge never confirmed — but it may well have sent the message anyway. So we
     // do NOT retry: the outbox records a failed attempt and a visible error instead. Sending the same
     // message twice is worse than sending it late, both for the recipient and for the account.
+    // `findDevice` already returned a CONNECTED socket, so this is a bridge that is attached and not
+    // answering — not an offline laptop. Deliberately not retried (see above), which makes this the
+    // only record that a message may or may not have gone out. `catch {}` binds nothing, so the
+    // message is the event.
+    Sentry.captureMessage('bridge: send ack timed out', {
+      level: 'warning',
+      tags: { surface: 'bridge_emit' },
+      extra: { userId, deviceId, outboxId: payload.outboxId },
+    });
     logger.warn('bridge: send ack timed out', { userId, deviceId, outboxId: payload.outboxId });
     return { deviceId, ack: { ok: false, error: 'ack_timeout' } };
   }

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { BroadcastRecipient, CommerceJob } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import type { JobHandler, JobOutcome } from './types.js';
 import { broadcastRepository } from '../repositories/broadcastRepository.js';
 import { channelAccountRepository } from '../repositories/channelAccountRepository.js';
@@ -404,6 +405,12 @@ class BroadcastSendHandler implements JobHandler {
 
       const reason = error instanceof Error ? error.message : String(error);
       await broadcastRepository.noteSendingError(params.recipient.id, reason);
+      // Nothing downstream re-raises this — the job settles and the run continues — so this capture is
+      // the only thing that tells anyone a recipient's outcome is genuinely unknown.
+      Sentry.captureException(error, {
+        tags: { plane: 'commerce', job: 'broadcast_send' },
+        extra: { orgId: params.orgId, broadcastId: params.broadcast.id, recipientId: params.recipient.id },
+      });
       logger.error('commerce: broadcast send outcome unknown', {
         orgId: params.orgId,
         broadcastId: params.broadcast.id,

@@ -1,4 +1,5 @@
 import type { ExtendedError } from 'socket.io';
+import * as Sentry from '@sentry/node';
 import { runnerService } from '../services/runnerService.js';
 import { logger } from '../utils/logger.js';
 import type { RunnerHandshakeSocketLike } from './runnerTypes.js';
@@ -47,6 +48,9 @@ export function runnerAuthMiddleware(
       next();
     })
     .catch((error: unknown) => {
+      // As in bridgeAuthMiddleware: a revoked token is `logger.debug` and expected; a throw in the
+      // lookup is neither, and is what this reports.
+      Sentry.captureException(error, { tags: { surface: 'runner_auth' } });
       logger.error('runner auth failed', {
         error: error instanceof Error ? error.message : String(error),
       });

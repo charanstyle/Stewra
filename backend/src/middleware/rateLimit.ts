@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import * as Sentry from '@sentry/node';
 import { redis } from '../services/redisClient.js';
 import { RateLimitError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
@@ -53,6 +54,9 @@ export function rateLimit(options: RateLimitOptions) {
         // moment an attacker would most like it gone. Redis is already a hard dependency of this app (the
         // realtime layer requires it), so a Redis outage is an outage regardless; taking these routes
         // down with it is the honest behaviour, not an extra cost.
+        // Failing closed is correct and already documented above — but it means real users are being
+        // turned away. That is an outage, and an outage nobody is told about is the whole problem.
+        Sentry.captureException(error, { tags: { surface: 'rate_limit' }, extra: { key: options.key } });
         logger.error('rate limiter unavailable; refusing request', {
           key: options.key,
           error: error instanceof Error ? error.message : String(error),

@@ -10,6 +10,7 @@ import {
   SUGGESTION_PUSH_BODY,
   SUGGESTION_PUSH_TITLE,
 } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { config } from '../config/unifiedConfig.js';
 import { logger } from '../utils/logger.js';
 
@@ -150,6 +151,12 @@ class ExpoPushService {
       try {
         tickets = await expo.sendPushNotificationsAsync(messages);
       } catch (error) {
+        // `continue` drops an entire batch of notifications on the floor. The users in it are simply
+        // never told, and nothing else in the system notices.
+        Sentry.captureException(error, {
+          tags: { surface: 'push', provider: 'expo' },
+          extra: { batchSize: group.length },
+        });
         logger.warn('expo push send failed; skipping this batch', { err: String(error) });
         continue;
       }

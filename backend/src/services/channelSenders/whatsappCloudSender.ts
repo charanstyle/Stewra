@@ -1,4 +1,5 @@
 import type { MessagingChannel } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import type { ChannelSender } from './types.js';
 import { config } from '../../config/unifiedConfig.js';
 import { logger } from '../../utils/logger.js';
@@ -117,6 +118,9 @@ class WhatsappCloudSender implements ChannelSender {
         typing_indicator: { type: 'text' },
       });
     } catch (error) {
+      // Cosmetic on its own, but this call carries the read receipt too, and it is the first thing to
+      // fail when the token or the number registration has gone bad — an early warning worth having.
+      Sentry.captureException(error, { tags: { surface: 'whatsapp_send', step: 'typing_indicator' } });
       logger.warn('whatsapp typing indicator failed; continuing', {
         error: error instanceof Error ? error.message : String(error),
       });

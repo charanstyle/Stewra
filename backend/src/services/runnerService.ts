@@ -8,6 +8,7 @@ import type {
   RunnerWorkspace,
   StartRunnerPairingResponse,
 } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { config } from '../config/unifiedConfig.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
 import { runnerDeviceRepository } from '../repositories/runnerDeviceRepository.js';
@@ -173,6 +174,16 @@ class RunnerService {
       } else if (hosted !== null) {
         // Nothing here can reach the provisioner, and nothing will sweep it either (the reconcile timer
         // is off with the feature). This is the one case that needs a human, so it says so by name.
+        // The comment above says this case "needs a human, so it says so by name" — but it only said so
+        // to a log file. No exception exists here, so the message IS the event.
+        Sentry.captureMessage(
+          'runner: revoked a hosted device while hosted runners are DISABLED; its container must be removed by hand',
+          {
+            level: 'error',
+            tags: { surface: 'runner', step: 'revoke_hosted' },
+            extra: { userId, deviceId, containerName: `stewra-runner-${deviceId}` },
+          },
+        );
         logger.error(
           'runner: revoked a hosted device while hosted runners are DISABLED; its container must be removed by hand',
           { userId, deviceId, containerName: `stewra-runner-${deviceId}` },

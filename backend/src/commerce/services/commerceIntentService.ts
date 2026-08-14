@@ -6,6 +6,7 @@ import type {
   ProposedCommerceReply,
 } from '@stewra/shared-types';
 import { roleMeetsMinimum } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { config } from '../../config/unifiedConfig.js';
 import { modelClient } from '../../agent-host/modelClient.js';
 import type {
@@ -226,6 +227,9 @@ class CommerceIntentService implements TurnIntentHandler, CommerceProposalExecut
     } catch (error) {
       // Recovery is correct and narrow: the turn falls back to an ordinary conversational reply and
       // nothing is executed. The cause is recorded rather than hidden.
+      // The recovery is right; the silence was not. Without this, a model outage degrades every
+      // commerce turn to small talk and looks, from outside, exactly like nobody using the feature.
+      Sentry.captureException(error, { tags: { plane: 'commerce', step: 'intent_classification' } });
       logger.warn('commerce-intent classification failed; falling back to a normal reply', {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -525,6 +529,7 @@ class CommerceIntentService implements TurnIntentHandler, CommerceProposalExecut
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       await settle(messageId, { ...proposal, status: 'failed', failureReason: reason });
+      // capture-ok: re-thrown below, and BaseController.handleError captures it once at the edge.
       logger.warn('commerce: reply failed to send', {
         orgId: proposal.orgId,
         conversationId: proposal.conversationId,

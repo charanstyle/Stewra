@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { channelAccountRepository } from '../repositories/channelAccountRepository.js';
 import type { ChannelAccountRow } from '../repositories/channelAccountRepository.js';
 import { jobRepository } from '../repositories/jobRepository.js';
@@ -123,6 +124,12 @@ class ChannelTokenService {
       // than two for the same fault.
       const detail = 'Stored credential is missing or unreadable. Reconnect this account.';
       await channelAccountRepository.markError(row.id, detail);
+      // A background sweep: it returns 'failed' and nobody is watching a screen, so without this the
+      // account silently stops working until a client complains.
+      Sentry.captureException(error, {
+        tags: { plane: 'commerce', sweep: 'credential_expiry' },
+        extra: { channelAccountId: row.id, orgId: row.orgId },
+      });
       logger.error('commerce: credential could not be read during the expiry sweep', {
         channelAccountId: row.id,
         orgId: row.orgId,
@@ -137,6 +144,12 @@ class ChannelTokenService {
     } catch (error) {
       // The existing token is still valid until its deadline, so nothing is marked broken here. The
       // deadline the client is already being shown is what carries this case.
+      // The deadline the client is shown carries the case for THEM; this carries it for us. A refusal
+      // to extend means the account dies on a known date unless someone acts before it.
+      Sentry.captureException(error, {
+        tags: { plane: 'commerce', sweep: 'credential_expiry' },
+        extra: { channelAccountId: row.id, orgId: row.orgId, expiresAt: row.credentialExpiresAt },
+      });
       logger.warn('commerce: Meta refused to extend a channel credential', {
         channelAccountId: row.id,
         orgId: row.orgId,

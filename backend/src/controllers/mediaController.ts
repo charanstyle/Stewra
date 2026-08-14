@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import type { Request, Response } from 'express';
+import * as Sentry from '@sentry/node';
 import { BaseController } from './baseController.js';
 import { mediaService } from '../services/mediaService.js';
 import { NotFoundError } from '../utils/errors.js';
@@ -38,6 +39,9 @@ class MediaController extends BaseController {
       const stream = createReadStream(absPath);
       // After headers are sent a JSON error is impossible; log and tear down the socket instead.
       stream.on('error', (err: unknown) => {
+        // Headers are already out, so `handleError` can never see this one — the socket is destroyed and
+        // the client sees a truncated body. This capture is the only report of that.
+        Sentry.captureException(err, { tags: { surface: 'media_stream' }, extra: { assetId: id } });
         logger.error('media stream failed', { assetId: id, err: String(err) });
         res.destroy();
       });

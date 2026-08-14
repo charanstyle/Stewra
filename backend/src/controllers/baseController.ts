@@ -12,7 +12,21 @@ export abstract class BaseController {
   }
 
   protected handleError(error: unknown, res: Response, context: string): void {
-    Sentry.captureException(error);
+    // Everything is still reported — but a 400 from a bad request body is not the same event as a
+    // 500, and until now they arrived identically. That is not merely noisy: an alert rule that
+    // fires on a steady drizzle of validation errors is one people learn to ignore, and the real
+    // fault then lands in a stream nobody reads. So client errors go at `warning`: they stop
+    // paging, and they stay searchable, which is the half that matters when 400s on one route
+    // suddenly multiply after a deploy.
+    //
+    // A non-AppError has no status of its own; it becomes the 500 rendered below, so it is an
+    // error by definition.
+    const statusCode = error instanceof AppError ? error.statusCode : 500;
+    Sentry.captureException(error, {
+      level: statusCode >= 500 ? 'error' : 'warning',
+      tags: { surface: 'controller', http_status: String(statusCode) },
+      extra: { context },
+    });
 
     if (error instanceof AppError) {
       const details =

@@ -1,5 +1,6 @@
 import { stat } from 'node:fs/promises';
 import type { Conversation, ConversationTurn, Message } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { agentRuntime } from '../agent-host/agentHost.js';
 import { config } from '../config/unifiedConfig.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
@@ -211,6 +212,9 @@ class StewraConversationService {
       });
       return mediaService.urlFor(asset);
     } catch (err: unknown) {
+      // Returning null degrades to text, which is the right user experience — and also an invisible
+      // one. A dead TTS backend would present as "voice replies just stopped happening".
+      Sentry.captureException(err, { tags: { surface: 'stewra_tts' }, extra: { conversationId } });
       logger.warn('tts synthesis failed; returning text-only reply', {
         conversationId,
         err: String(err),

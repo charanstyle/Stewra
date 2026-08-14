@@ -1,6 +1,7 @@
 import { randomInt } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { PASSWORD_RESET_CODE_LENGTH, PASSWORD_RESET_MIN_PASSWORD_LENGTH } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { config } from '../config/unifiedConfig.js';
 import { RateLimitError, ValidationError } from '../utils/errors.js';
 import { passwordResetRepository } from '../repositories/passwordResetRepository.js';
@@ -60,6 +61,12 @@ export class PasswordResetService {
       await emailService.sendPasswordResetCode(user.email, code, config.passwordReset.ttlMinutes);
     } catch (error) {
       // A send failure must not leak existence via an error response; log for triage and stay generic.
+      // Staying generic to the caller is right (it must not leak whether the address exists); staying
+      // generic to US is not. A locked-out user has no other way to tell anyone.
+      Sentry.captureException(error, {
+        tags: { surface: 'password_reset', step: 'reset_email' },
+        extra: { userId: user.id },
+      });
       logger.error('Failed to send password reset email', {
         userId: user.id,
         error: error instanceof Error ? error.message : String(error),

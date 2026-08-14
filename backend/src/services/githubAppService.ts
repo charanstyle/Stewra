@@ -6,6 +6,7 @@ import type {
   GithubRepoInfo,
   LinkGithubInstallationResponse,
 } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import { config } from '../config/unifiedConfig.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
 import { githubAppInstallationRepository } from '../repositories/githubAppInstallationRepository.js';
@@ -247,6 +248,13 @@ class GithubAppService {
     } catch (error) {
       // The row still goes: the user asked Stewra to forget the link, and a GitHub hiccup must not pin
       // it. The installation, if it survives, dies lazily at the next 404. Logged, never silent.
+      // Unlinking locally anyway is the right call for the user. But an installation that survives on
+      // GitHub is a live grant against their account that our records say is gone — exactly the kind
+      // of divergence that must not be discovered months later.
+      Sentry.captureException(error, {
+        tags: { surface: 'github_app', step: 'delete_installation' },
+        extra: { userId, installationId: installation.installationId },
+      });
       logger.warn('github-app: could not delete installation on GitHub; unlinking locally anyway', {
         userId,
         installationId: installation.installationId,

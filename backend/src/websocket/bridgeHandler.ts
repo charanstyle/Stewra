@@ -64,6 +64,13 @@ export function registerBridgeHandler(socket: BridgeSocketLike): void {
   // only fire if something is wired wrong — and a bridge whose device we cannot name is a bridge we cannot
   // revoke. It gets no events, not the benefit of the doubt.
   if (deviceId === undefined) {
+    // The comment above is explicit that this "can only fire if something is wired wrong". A wiring
+    // fault that only ever writes a log line is one that ships.
+    Sentry.captureMessage('bridge: connection without a device id; refusing', {
+      level: 'error',
+      tags: { surface: 'bridge_handler' },
+      extra: { userId, socketId: socket.id },
+    });
     logger.error('bridge: connection without a device id; refusing', { userId, socketId: socket.id });
     socket.disconnect();
     return;

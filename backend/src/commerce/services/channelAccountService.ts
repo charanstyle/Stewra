@@ -45,6 +45,7 @@ class ChannelAccountService {
     } catch (error) {
       const detail = 'Stored credential is missing or unreadable. Reconnect this account.';
       await channelAccountRepository.markError(row.id, detail);
+      // capture-ok: rethrown as ServiceUnavailableError, and BaseController.handleError captures it.
       logger.error('commerce: channel account credential could not be read', {
         channelAccountId: row.id,
         orgId: row.orgId,

@@ -10,6 +10,7 @@ import type {
   RunnerStartSessionAck,
   RunnerStartSessionPayload,
 } from '@stewra/shared-types';
+import * as Sentry from '@sentry/node';
 import type { RunnerNamespaceLike, RunnerRemoteSocketLike } from './runnerTypes.js';
 import { runnerUserRoom } from './runnerTypes.js';
 import { logger } from '../utils/logger.js';
@@ -60,6 +61,12 @@ export async function startSessionOnRunner(
   try {
     raw = await target.timeout(START_SESSION_ACK_TIMEOUT_MS).emitWithAck(RUNNER_SERVER_EVENTS.START_SESSION, payload);
   } catch {
+    // A connected runner that will not acknowledge a start. See bridgeEmitter for the same reasoning.
+    Sentry.captureMessage('runner: start-session ack timed out', {
+      level: 'warning',
+      tags: { surface: 'runner_emit', op: 'start_session' },
+      extra: { userId, deviceId, sessionId: payload.sessionId },
+    });
     logger.warn('runner: start-session ack timed out', { userId, deviceId, sessionId: payload.sessionId });
     return { accepted: false, error: 'ack_timeout' };
   }
@@ -135,6 +142,12 @@ async function gitActionOnRunner(
   try {
     raw = await target.timeout(GIT_ACTION_ACK_TIMEOUT_MS).emitWithAck(event, payload);
   } catch {
+    // As above: connected, addressed, and silent.
+    Sentry.captureMessage('runner: git-action ack timed out', {
+      level: 'warning',
+      tags: { surface: 'runner_emit', op: 'git_action' },
+      extra: { userId, deviceId, event },
+    });
     logger.warn('runner: git-action ack timed out', { userId, deviceId, event });
     return { ok: false, error: 'ack_timeout' };
   }
