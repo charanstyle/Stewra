@@ -1,7 +1,14 @@
 # Stewra TURN — a dedicated coturn instance on `home`
 
-Stewra runs its **own** coturn container (`stewra-coturn`, defined in `docker-compose.prod.yml`). It does
-**not** share, and does not modify, the `rankrise-coturn` that also runs on `home`.
+Stewra runs its **own** coturn container (`stewra-coturn`, defined in `docker-compose.coturn.yml`). It
+does **not** share, and does not modify, the `rankrise-coturn` that also runs on `home`.
+
+> **This is the one Stewra service that did not move to stewra-server** (2026-08-14): the router's
+> port-forwards for 3481 + the relay range point at `home`, and the relay's candidates are that
+> machine's addresses. It deploys from `docker-compose.coturn.yml` in `/media/WDHD/docker/stewra`.
+> The `TURN_SECRET` / `TURN_URLS` pair in `stewra.env` on **stewra-server** must stay byte-identical
+> to this instance's `TURN_STATIC_AUTH_SECRET` / advertised URLs on **home** — the backend mints the
+> HMAC credentials there, coturn validates them here; rotating one without the other kills calls.
 
 ## Why a dedicated instance (not a realm on the shared coturn)
 

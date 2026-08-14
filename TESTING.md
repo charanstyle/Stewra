@@ -221,7 +221,7 @@ npm test -w @stewra/provisioner
 # b) a remote daemon over SSH (what to use when the dev machine has none). Forward the socket, then
 #    point the suite at the local end. Test containers are created on THAT host — they are uniquely
 #    named per run and removed in afterAll, but be deliberate about which host you pick.
-ssh -nNT -L /tmp/stewra-docker.sock:/var/run/docker.sock home &
+ssh -nNT -L /tmp/stewra-docker.sock:/var/run/docker.sock stewra-server &
 DOCKER_SOCKET=/tmp/stewra-docker.sock npm test -w @stewra/provisioner
 
 # c) on the deploy host itself, where the socket is already local
@@ -479,7 +479,8 @@ only what this run provisioned.
 > (the `runner/HOSTED.md` prerequisites plus a real GitHub App) — all checks passed. The iptables
 > egress fence is still outside what this REST-level driver can claim; it is covered separately by
 > `deploy/hosted-runner/assert-fence-in-container.sh`, run on the provisioner host against a live
-> runner container (github.com reachable; the host's LAN sshd, tailnet Postgres, and the bridge
+> runner container (github.com reachable; the host's LAN sshd, a real tailnet listener
+> (FENCE_TAILNET_PROBE_PORT in network.env — loki on stewra-server), and the bridge
 > gateway all blocked — every "blocked" target a real listening service, so a pass means the rules
 > bite, not that a dead address timed out).
 

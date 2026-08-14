@@ -1,0 +1,51 @@
+# Stewra's TURN/STUN relay — the ONE piece of this stack that stays on `home`.
+#
+# Split out of docker-compose.prod.yml when the rest of the stack (backend, redis, website) moved
+# to stewra-server (2026-08-14). Not a stylistic split — a required one:
+#
+#   * coturn must stay here. Its relay candidates are the WAN address in TURN_EXTERNAL_IP (./.env),
+#     which stewra.env repeats to the backend as TURN_URLS, and the router's port-forward for
+#     3481 + relay 49202-49250 points at THIS machine. Moving the container without moving the
+#     forward would break every WebRTC call.
+#   * It could not simply be left in docker-compose.prod.yml behind a profile. Compose profiles do
+#     NOT defer variable interpolation: a profiled-off service whose command contains ${VAR:?...}
+#     still aborts `docker compose config` when VAR is unset. So a stewra-server copy of the prod
+#     file that still declared coturn would demand TURN_STATIC_AUTH_SECRET on a host that has no
+#     business holding it. Deleting the service is the only way to stop requiring the secret there.
+#
+# The service definition below is byte-for-byte the one that was in docker-compose.prod.yml — same
+# project (`stewra`), same service key (`coturn`), same container_name. That is deliberate: compose
+# keys a container's identity on project+service and recreates only when the resolved config hash
+# changes, so adopting the ALREADY-RUNNING stewra-coturn across this file move costs zero downtime.
+# The comments differ freely; they are not part of the hash. Verified before/after:
+#   docker compose -f docker-compose.prod.yml   config --hash=coturn   # before the split
+#   docker compose -f docker-compose.coturn.yml config --hash=coturn   # after — must match
+#
+# Usage on home, from /media/WDHD/docker/stewra:
+#   docker compose -f docker-compose.coturn.yml up -d
+#   docker compose -f docker-compose.coturn.yml ps
+#
+# Secrets still come from ./.env (TURN_STATIC_AUTH_SECRET, TURN_EXTERNAL_IP) and are never
+# committed. The SAME secret is TURN_SECRET in stewra.env on stewra-server — the backend mints
+# matching HMAC credentials there, and coturn validates them here. Rotating one means rotating both.
+
+name: stewra
+
+services:
+  # Stewra's OWN coturn (TURN/STUN) — deliberately NOT the shared rankrise-coturn, which runs in
+  # use-auth-secret mode with a single global secret (a second realm there couldn't have its own
+  # secret). This instance has a distinct realm, secret, ports (3481 / relay 49202-49250), and never
+  # touches RankRise/TrueTalk. network_mode: host mirrors rankrise so relay candidates use the real
+  # LAN IP. The secret + public IP are injected on the command line (never committed). Gated by
+  # CALLS_ENABLED in stewra.env on the app side.
+  coturn:
+    image: coturn/coturn:latest
+    container_name: stewra-coturn
+    restart: unless-stopped
+    network_mode: host
+    command: >-
+      -c /etc/coturn/turnserver.conf
+      --static-auth-secret=${TURN_STATIC_AUTH_SECRET:?set TURN_STATIC_AUTH_SECRET in ./.env}
+      --external-ip=${TURN_EXTERNAL_IP:?set TURN_EXTERNAL_IP in ./.env}
+    volumes:
+      - ./deploy/coturn/turnserver-stewra.conf:/etc/coturn/turnserver.conf:ro
