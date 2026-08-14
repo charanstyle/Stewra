@@ -1,0 +1,24 @@
+# The Today tab — briefing + nudges + the one heavy "Refresh" action.
+#
+# Assumes a signed-in session (run after login.yaml). The QA user has a Google account
+# connected, so after a recompute a briefing card must exist: this flow taps Refresh and
+# waits for `today-briefing` rather than settling for "the tab rendered". The wait is long
+# because Refresh is deliberately the heavy path — it syncs mail (and bank, when connected)
+# and rebuilds the briefing server-side before the card can appear.
+appId: com.stewra.app
+---
+- runFlow: lib/goto-chats.yaml
+- tapOn:
+    id: "tab-today"
+# The greeting proves the Today screen itself rendered (its text is time-of-day dependent,
+# so match the shared prefix).
+- extendedWaitUntil:
+    visible:
+      text: "Good .*"
+    timeout: 15000
+- tapOn:
+    id: "today-recompute"
+- extendedWaitUntil:
+    visible:
+      id: "today-briefing"
+    timeout: 120000

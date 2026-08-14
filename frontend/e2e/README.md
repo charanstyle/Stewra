@@ -112,6 +112,10 @@ use the first conversation in the list.
 | `flows/login.yaml` | Sign in with env creds; lands on the Chats tab (token valid + verified). |
 | `flows/send-message.yaml` | Open a thread, type into the composer, Send; the bubble echoes the text. |
 | `flows/call-smoke.yaml` | Tap **Start voice call**; the call screen appears and **End call** ends it. Caller side only — see below. |
+| `flows/today.yaml` | Open the Today tab, tap **Refresh**; a briefing card appears (server-side sync + rebuild ran). |
+| `flows/activity.yaml` | Settings → Activity; at least one feed row renders (today's recompute guarantees one). |
+| `flows/connections.yaml` | Settings shows the QA user's connected Google account and the connect button (not tapped — OAuth lives in the browser, covered by the web suite). |
+| `flows/pause.yaml` | Toggle **Pause Stewra** on, relaunch, assert the switch re-reads checked from the server; toggle off and assert the resume persisted the same way. |
 | `flows/logout.yaml` | Tap the header **Log out**; app returns to **Sign in** (guards the logout hardening). |
 | `flows/full.yaml` | Runs all four in order. |
 | `flows/optional/runner-session.yaml` | Opt-in — the in-chat "Run coding agent" card. See below. |
