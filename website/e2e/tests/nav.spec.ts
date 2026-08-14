@@ -40,13 +40,11 @@ test.describe('nav', () => {
         `chats=${chatsLink} talk=${talkLink} contacts=${contactsLink}`,
     ).toBe(true);
 
-    // custom header affordances that DO exist on home — diagnostic only.
-    const learned = await pageA
-      .getByRole('link', { name: /What I.?ve learned/i })
-      .isVisible()
-      .catch(() => false);
-    const signout = await pageA.getByRole('button', { name: 'Sign out' }).isVisible().catch(() => false);
-    console.log(`[nav] home custom header buttons: "What I've learned"=${learned}, "Sign out"=${signout}`);
+    // Custom header affordances that DO exist on home. "DO exist" is a claim, so it is asserted:
+    // as a diagnostic `isVisible()` it could report their disappearance but never fail on it, and
+    // Sign out is the user's only way back out of the app.
+    await expect(pageA.getByRole('link', { name: /What I.?ve learned/i })).toBeVisible();
+    await expect(pageA.getByRole('button', { name: 'Sign out' })).toBeVisible();
   });
 
   test('AppNav links navigate correctly (click-through)', async ({ pageA }) => {

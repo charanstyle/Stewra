@@ -284,15 +284,48 @@ failed, and the fourteen were invisible — `list` prints a dash per skip, thous
 no reason and no total. Eight of them were Today tests skipping on a run that had a database
 configured and could have provisioned what they needed.
 
-`E2E_MAX_SKIPS=<n>` turns the census into an assertion: over budget fails the run. Unset means report
-only — a default ceiling nobody chose would just get raised the first time it bit. The main suite's
-budget is pinned in the tracked `.env.e2e` (`E2E_MAX_SKIPS=6` — the sign-up, runner-session and
-re-consent-banner tests across the two browser profiles, each conditional by design); a real
-environment variable still wins, which is how CI holds the commerce suite to `0`.
+`E2E_MAX_SKIPS=<n>` turns the census into an assertion, and it is an EXACT one rather than a ceiling:
+the run fails when there are more skips than the budget, and also when there are fewer. Unset means
+report only — a default nobody chose would just get raised the first time it bit.
+
+The second half is the one that earns its keep. A ceiling only ever catches the run that breaches it,
+so every skip you successfully provision away quietly turns into slack, and the next regression to
+reintroduce a skip lands inside that slack and goes green. This suite lived that: the budget sat at
+`6` while the true figure was `4`, two free regressions wide, and no run ever said so. Being under
+budget now fails with the one-line edit spelled out in the message — one red run at the moment the
+good news arrives, in exchange for a number that can never drift above reality.
+
+The main suite's budget is pinned in the tracked `.env.e2e` (`E2E_MAX_SKIPS=4` — the sign-up and
+re-consent-banner tests across the two browser profiles, each conditional by design). It assumes a
+paired, online runner; without one the two runner-session tests skip again and the budget is `6`. A
+real environment variable still wins, which is how CI holds the commerce suite to `0`.
 
 > The reporter fails the run by returning `{ status: 'failed' }` from `onEnd()`. Setting
 > `process.exitCode` there is silently discarded — Playwright computes the exit code from the
 > aggregated result *after* reporters finish. Verified, not assumed.
+>
+> That exit code is easy to lose again from the outside: `npm run test:e2e | tail` reports the exit
+> status of `tail`, so an over-budget run reads as a pass. Do not pipe the suite when the result is
+> what you are after.
+
+A plain `npm run test:e2e` on a laptop skips **22**, not 6 — sixteen of them only because
+`E2E_DATABASE_URL` is unset, which is not something `.env.e2e` may hold (it is tracked; see its
+header). `npm run test:e2e:seeded` closes that gap: `website/e2e/with-prod-db.sh` brings up the ssh
+tunnel, reads `DATABASE_URL` off the deploy host, rewrites it onto the local forward, **probes that
+the database answers through it**, and execs the command with `E2E_DATABASE_URL` exported — so the
+secret is never written to a file or a shell history. With no arguments it runs the whole main
+suite; with arguments it runs those instead:
+
+```bash
+npm run test:e2e:seeded                                       # 22 skips → 6, the pinned budget
+./with-prod-db.sh npx playwright test tests/today.spec.ts     # or one spec
+```
+
+Every precondition is asserted and any failure stops the run — there is no local-database fallback,
+because a run that cannot reach the real store must fail loudly rather than turn back into the
+sixteen silent skips the script exists to remove. The remaining 6 are the ones no script can
+provision: sign-up (permanently creates an account), a paired online runner, and a connection that
+actually needs re-consent.
 
 ### Provisioned preconditions — `seed.mjs`
 

@@ -97,14 +97,9 @@ test.describe('call', () => {
 
     // mute toggle
     await pageA.locator('button[title="Mute"]').click();
-    const unmuteShown = await pageA
-      .locator('button[title="Unmute"]')
-      .isVisible()
-      .catch(() => false);
-    expect(unmuteShown, `unmute visible=${unmuteShown}`).toBe(true);
-    if (unmuteShown) {
-      await pageA.locator('button[title="Unmute"]').click();
-    }
+    await expect(pageA.locator('button[title="Unmute"]')).toBeVisible();
+    await pageA.locator('button[title="Unmute"]').click();
+    await expect(pageA.locator('button[title="Mute"]')).toBeVisible();
     await pageA.waitForTimeout(1200);
     await pageA.locator('button[title="Hang up"]').click();
     await pageA
@@ -125,11 +120,11 @@ test.describe('call', () => {
       .getByText(/Ringing…|Connecting…|Connected/)
       .waitFor({ state: 'hidden', timeout: 12000 })
       .catch(() => {});
-    const stillInCall = await pageA
-      .getByText(/Ringing…|Connected/)
-      .isVisible()
-      .catch(() => false);
-    expect(stillInCall, `stillInCall=${stillInCall}`).toBe(false);
+    // `toBeHidden` retries and throws. The previous shape was the dangerous direction of this
+    // anti-pattern: `false` was the PASS value, so `.catch(() => false)` turned any error in the
+    // visibility query itself into a green test — and the instantaneous `isVisible()` reported
+    // "not in call" the moment before the CallScreen would have been found still up.
+    await expect(pageA.getByText(/Ringing…|Connected/)).toBeHidden();
   });
 
   test('VIDEO call: ring → answer → connect → camera toggle → hang up → markers', async ({
@@ -145,20 +140,16 @@ test.describe('call', () => {
     await pageB.getByText('Connected', { exact: true }).waitFor({ timeout: 20000 });
 
     // camera toggle (video-only control)
+    // The camera toggle is not optional in a VIDEO call: CallScreen.tsx renders it under
+    // `{isVideo && ...}`, and this test is inside a connected video call. The old `isVisible()`
+    // guard sampled the DOM instantly and, on a control that had not painted yet, took the else
+    // branch and passed — so a video call that lost its camera button entirely stayed green.
     const camBtn = pageA.locator('button[title="Turn camera off"]');
-    if (await camBtn.isVisible().catch(() => false)) {
-      await camBtn.click();
-      const camOn = await pageA
-        .locator('button[title="Turn camera on"]')
-        .isVisible()
-        .catch(() => false);
-      expect(camOn, `flipped=${camOn}`).toBe(true);
-      if (camOn) {
-        await pageA.locator('button[title="Turn camera on"]').click();
-      }
-    } else {
-      console.log('[call] camera toggle control not visible');
-    }
+    await expect(camBtn).toBeVisible();
+    await camBtn.click();
+    await expect(pageA.locator('button[title="Turn camera on"]')).toBeVisible();
+    await pageA.locator('button[title="Turn camera on"]').click();
+    await expect(camBtn).toBeVisible();
     await pageA.waitForTimeout(1200);
     await pageA.locator('button[title="Hang up"]').click();
     await pageA
@@ -166,13 +157,10 @@ test.describe('call', () => {
       .waitFor({ state: 'hidden', timeout: 10000 })
       .catch(() => {});
     await pageA.getByText(/Video call started/i).last().waitFor({ timeout: 8000 });
-    const endedShown = await pageA
-      .getByText(/Video call ended/i)
-      .last()
-      .waitFor({ timeout: 8000 })
-      .then(() => true)
-      .catch(() => false);
-    console.log(`[call] video call ended marker shown=${endedShown}`);
+    // The inline "ended" marker is the user-visible record that the call was torn down cleanly.
+    // Converting a boolean nobody asserted into a real wait: `waitFor` already throws on timeout,
+    // so the `.then(true).catch(false)` around it existed only to discard that failure.
+    await expect(pageA.getByText(/Video call ended/i).last()).toBeVisible({ timeout: 8000 });
   });
 
   test(`AUDIO call connects reliably across ${RELIABILITY_ATTEMPTS} fresh-context attempts`, async ({

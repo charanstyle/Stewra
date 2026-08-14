@@ -6,7 +6,7 @@ import { config } from '../config.mjs';
 const nonce = (): string => Math.random().toString(36).slice(2, 8);
 
 test.describe('stewra', () => {
-  test('text → thinking → assistant reply (+ Play voice)', async ({ pageA }) => {
+  test('text → thinking → assistant reply', async ({ pageA }) => {
     await pageA.goto(`${WEB}/stewra`, { waitUntil: 'domcontentloaded' });
     const input = pageA.getByPlaceholder('…or type a message');
     await input.waitFor({ timeout: 15000 });
@@ -36,12 +36,11 @@ test.describe('stewra', () => {
     const after = await pageA.getByTestId('stewra-turn').count();
     expect(after, `assistant turns ${before} → ${after}`).toBeGreaterThan(before);
 
-    const playVoice = await pageA
-      .getByRole('button', { name: 'Play voice' })
-      .first()
-      .isVisible()
-      .catch(() => false);
-    console.log(`[stewra] assistant reply exposes "Play voice": visible=${playVoice}`);
+    // The "Play voice" probe that used to sit here has been removed rather than promoted to an
+    // assertion. StewraPage.tsx renders that button only `{message.audioUrl && ...}`, and a reply
+    // to a TYPED question has no guaranteed audio — so the check could neither fail honestly nor
+    // be made to. A log that cannot distinguish working from broken is worse than no check: it
+    // reads, in the report, as coverage of a feature nothing is actually testing.
   });
 
   test('hold-to-talk voice → transcribed user turn + reply', async ({ pageA }) => {
@@ -71,14 +70,23 @@ test.describe('stewra', () => {
       { timeout: 60000 },
     );
     const after = await pageA.getByTestId('stewra-user-turn').count();
-    const transcript = (await pageA.getByTestId('stewra-user-turn').last().innerText().catch(() => ''))
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 80);
     expect(after, `user turns ${before} → ${after}`).toBeGreaterThan(before);
-    console.log(
-      `[stewra] voice recorded → transcribed → new user turn; transcript="${transcript}"` +
-        (config.audioFile ? '' : ' (fake mic: non-verbal audio, pipeline still exercised)'),
-    );
+
+    // The transcript's CONTENT is only provable when a real utterance was fed to the fake mic.
+    // Chromium's default fake device emits a tone, so speech-to-text legitimately returns nothing
+    // and asserting non-empty text would fail for a reason that is not a defect. That makes this a
+    // genuine precondition, so it is written as one — gated and named — instead of the previous
+    // unconditional console.log, which reported an empty transcript and a working one identically.
+    const transcript = (await pageA.getByTestId('stewra-user-turn').last().innerText())
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (config.audioFile) {
+      expect(transcript, 'E2E_AUDIO_FILE is set, so speech-to-text must produce real words').not.toBe('');
+    } else {
+      console.log(
+        `[stewra] voice pipeline exercised; transcript content NOT asserted — set E2E_AUDIO_FILE ` +
+          `(16 kHz mono WAV of real speech) to make it provable. transcript="${transcript.slice(0, 80)}"`,
+      );
+    }
   });
 });

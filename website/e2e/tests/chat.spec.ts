@@ -53,9 +53,11 @@ test.describe('chat', () => {
     await composer.fill('');
     expect(typing, `typingIndicator=${typing}`).toBe(true);
 
-    // timestamps present on bubbles — info-only, per TESTIDS.md.
-    const stamped = await pageA.getByTestId('message-timestamp').first().isVisible().catch(() => false);
-    console.log(`[chat] message timestamps rendered: timestamp element visible=${stamped}`);
+    // Timestamps on bubbles. This thread has just had two messages asserted into it, so a bubble
+    // — and therefore its timestamp — must exist by now; there is no data condition left to be
+    // lenient about. The previous `isVisible()` + log resolved instantly against the DOM and
+    // reported `false` rather than waiting, so it could never fail.
+    await expect(pageA.getByTestId('message-timestamp').first()).toBeVisible();
   });
 
   test('Back button returns to list', async ({ pageA, convId }) => {

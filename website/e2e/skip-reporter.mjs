@@ -38,24 +38,28 @@ export default class SkipReporter {
   // the process exit code from the aggregated result AFTER reporters finish, so assigning
   // `process.exitCode` here is silently discarded — verified, not assumed.
   onEnd() {
+    // NOTE: zero skips reports and then falls THROUGH to the budget check rather than returning here.
+    // An early return would exempt the single most important case from the ratchet below — everything
+    // provisioned, budget still stale — which is precisely the state that leaves the most room for a
+    // regression to skip in unnoticed. (It did exempt it, briefly, until a run with a deliberately
+    // wrong budget went green and said so.)
     if (this.skipped.length === 0) {
       console.log(`\n[skips] none — all ${this.total} tests ran.`);
-      return undefined;
-    }
+    } else {
+      /** @type {Map<string, string[]>} */
+      const byReason = new Map();
+      for (const s of this.skipped) {
+        const titles = byReason.get(s.reason) ?? [];
+        titles.push(s.title);
+        byReason.set(s.reason, titles);
+      }
 
-    /** @type {Map<string, string[]>} */
-    const byReason = new Map();
-    for (const s of this.skipped) {
-      const titles = byReason.get(s.reason) ?? [];
-      titles.push(s.title);
-      byReason.set(s.reason, titles);
-    }
-
-    console.log(`\n[skips] ${this.skipped.length}/${this.total} tests did not run:`);
-    for (const [reason, titles] of byReason) {
-      console.log(`  • ${reason}  (${titles.length})`);
-      for (const t of titles) {
-        console.log(`      ${t}`);
+      console.log(`\n[skips] ${this.skipped.length}/${this.total} tests did not run:`);
+      for (const [reason, titles] of byReason) {
+        console.log(`  • ${reason}  (${titles.length})`);
+        for (const t of titles) {
+          console.log(`      ${t}`);
+        }
       }
     }
 
@@ -74,6 +78,23 @@ export default class SkipReporter {
       console.error(
         `\n[skips] FAILED: ${this.skipped.length} skipped, E2E_MAX_SKIPS=${max}. ` +
           `Provision the missing preconditions above rather than raising the budget.`,
+      );
+      return { status: 'failed' };
+    }
+    // EXACT, not a ceiling — a RATCHET. This is the half that was missing, and it is the half that
+    // matters over time: a ceiling only ever catches the run that breaches it, so every skip you
+    // successfully provision away silently becomes slack, and the next regression to reintroduce a
+    // skip lands inside that slack and passes. This suite has already been there — the budget sat at
+    // 6 while the true figure was 4, two free regressions wide, and nothing in the run said so.
+    //
+    // So being UNDER budget fails too, and the fix is a one-line edit the message spells out. It costs
+    // exactly one red run at the moment the good news arrives, and in exchange the number can never
+    // drift above reality again.
+    if (this.skipped.length < max) {
+      console.error(
+        `\n[skips] FAILED: only ${this.skipped.length} skipped but E2E_MAX_SKIPS=${max}, so the budget ` +
+          `is ${max - this.skipped.length} wider than reality — room a future regression could skip in ` +
+          `unnoticed. Lower E2E_MAX_SKIPS to ${this.skipped.length}.`,
       );
       return { status: 'failed' };
     }
