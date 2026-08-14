@@ -1,8 +1,8 @@
 // E2E configuration loader.
 //
 // Never hardcodes URLs or credentials: values come from environment variables (preferred,
-// CI-friendly) or the single `.env.e2e` at the repo root (tracked in git by owner decision,
-// QA credentials only — production secrets go in env vars; shared
+// CI-friendly) or the single `.env.e2e` at the repo root (gitignored — only the template is
+// tracked; QA credentials only — production secrets go in env vars; shared
 // with the Maestro mobile suite). Real env vars win over the file. Required values are
 // validated up front and throw loudly if absent, so a run can never silently target the
 // wrong host or authenticate as the wrong user.

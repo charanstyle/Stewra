@@ -20,12 +20,18 @@ backed by fast unit suites underneath.
 
 ## One shared credentials file
 
-Both UI suites read a single **`.env.e2e` at the repo root** (template: `.env.e2e.example`; tracked in git by owner decision 2026-08-13 — QA credentials only, never production secrets).
+Both UI suites read a single **`.env.e2e` at the repo root** (template: `.env.e2e.example`).
+It is **gitignored** — only the template is tracked. It briefly was tracked (2026-08-13 → 2026-08-14,
+"so the credentials cannot be lost"); that is reversed. These accounts log in to production and one
+keeps a runner paired, so a password in git turns repo read access into a live session, and git
+history keeps it after the file is removed. The recovery story is the template plus
+`website/e2e/bootstrap-qa-users.mjs`, not a second copy on every clone.
+
 Copy it once and fill in the two QA users; real environment variables override the file, so CI can
 inject the same names without a file.
 
 ```bash
-cp .env.e2e.example .env.e2e     # tracked: QA creds only — production secrets stay in env vars
+cp .env.e2e.example .env.e2e && chmod 600 .env.e2e   # gitignored; production secrets stay in env vars
 # fill: E2E_WEB_URL, E2E_USER_A_EMAIL/PASSWORD, E2E_USER_B_EMAIL/PASSWORD, E2E_CONTACT_NAME
 ```
 
@@ -295,7 +301,7 @@ reintroduce a skip lands inside that slack and goes green. This suite lived that
 budget now fails with the one-line edit spelled out in the message — one red run at the moment the
 good news arrives, in exchange for a number that can never drift above reality.
 
-The main suite's budget is pinned in the tracked `.env.e2e` (`E2E_MAX_SKIPS=4` — the sign-up and
+The main suite's budget is pinned in the (gitignored) `.env.e2e` (`E2E_MAX_SKIPS=4` — the sign-up and
 re-consent-banner tests across the two browser profiles, each conditional by design). It assumes a
 paired, online runner; without one the two runner-session tests skip again and the budget is `6`. A
 real environment variable still wins, which is how CI holds the commerce suite to `0`.
@@ -309,8 +315,10 @@ real environment variable still wins, which is how CI holds the commerce suite t
 > what you are after.
 
 A plain `npm run test:e2e` on a laptop skips **22**, not 6 — sixteen of them only because
-`E2E_DATABASE_URL` is unset, which is not something `.env.e2e` may hold (it is tracked; see its
-header). `npm run test:e2e:seeded` closes that gap: `website/e2e/with-prod-db.sh` brings up the ssh
+`E2E_DATABASE_URL` is unset, which is not something `.env.e2e` may hold — untracking the file did
+not change that. It is a **production** credential, and the point of `with-prod-db.sh` is that it
+never touches disk or shell history at all; a gitignored file is still a plaintext copy sitting in a
+working tree that gets backed up, synced, and searched. `npm run test:e2e:seeded` closes that gap: `website/e2e/with-prod-db.sh` brings up the ssh
 tunnel, reads `DATABASE_URL` off the deploy host, rewrites it onto the local forward, **probes that
 the database answers through it**, and execs the command with `E2E_DATABASE_URL` exported — so the
 secret is never written to a file or a shell history. With no arguments it runs the whole main
