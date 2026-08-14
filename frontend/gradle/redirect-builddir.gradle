@@ -40,12 +40,29 @@ if (!base) {
         'This checkout is on exFAT (fskit), where Gradle build outputs are silently corrupted.')
 }
 
+// Detects React Native codegen libraries, whose build directories must ALSO stay on exFAT for the
+// same reason as the root project: both the autolinking CMake (Android-autolinking.cmake, which
+// add_subdirectory's gesture-handler's codegen JNI) and each library's own C++ include paths
+// hardcode <libraryDir>/android/build/generated/source/codegen/jni — paths derived from the
+// library's location, not from Gradle's buildDirectory. Redirect one of these and its codegen
+// lands in STEWRA_BUILD_DIR while the compiler keeps looking under the library, failing with
+// "add_subdirectory given source ... not an existing directory" or "Props.h file not found"
+// (seen live with gesture-handler, rnscreens, safeareacontext and rnsvg). The fskit risk is
+// accepted for these projects; a corrupted build here fails loudly and a retry re-generates.
+def isCodegenLibrary = { project ->
+    def pkg = new File(project.projectDir.parentFile, 'package.json')
+    return pkg.isFile() && pkg.text.contains('"codegenConfig"')
+}
+
 gradle.beforeProject { project ->
     // The ROOT project is deliberately left on exFAT. expo-modules-autolinking writes
     // autolinking.json under the root project's build directory, and :app reads it back during
     // configuration through a path derived independently of this override — so redirecting the root
     // breaks autolinking before a single task runs. Only subprojects move.
     if (project == project.rootProject) {
+        return
+    }
+    if (isCodegenLibrary(project)) {
         return
     }
     // ":react-native-webrtc" -> "react-native-webrtc"; ":packages:foo" -> "packages_foo".
