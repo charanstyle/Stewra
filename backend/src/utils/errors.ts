@@ -48,6 +48,24 @@ export class ForbiddenError extends AppError {
   }
 }
 
+/**
+ * The account owes money, and that is the only reason this is refused.
+ *
+ * Separate from ForbiddenError on purpose: 403 says "you may not", 402 says "you may, once this is
+ * settled", and the two want different words in front of a user and different handling in a client.
+ * It carries a `code` for the same reason ForbiddenError does — a caller has to tell this refusal
+ * apart from the spend cap's, since one clears by paying and the other by being granted headroom.
+ */
+export class PaymentRequiredError extends AppError {
+  readonly statusCode = 402;
+  readonly code: string;
+
+  constructor(message: string, code = 'PAYMENT_REQUIRED') {
+    super(message);
+    this.code = code;
+  }
+}
+
 /** Too many attempts / too soon — used for the verify lockout and the resend cooldown. */
 export class RateLimitError extends AppError {
   readonly statusCode = 429;

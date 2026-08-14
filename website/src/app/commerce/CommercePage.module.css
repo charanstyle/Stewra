@@ -247,6 +247,16 @@
   margin-bottom: 12px;
 }
 
+/* Between .notice and .error: something needs attention but nothing has stopped yet. */
+.warning {
+  background: rgba(255, 183, 77, 0.12);
+  border: 1px solid var(--warning);
+  color: var(--warning);
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
 .notice {
   background: rgba(76, 175, 80, 0.12);
   border: 1px solid var(--success);

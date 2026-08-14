@@ -523,6 +523,8 @@ export type {
   SetSubscriptionRequest,
   SetSubscriptionResponse,
   GetOrgBillingResponse,
+  CommerceDelinquency,
+  CommerceDelinquencyState,
   ListInvoicesResponse,
   GetInvoiceResponse,
   MarkInvoicePaidRequest,
