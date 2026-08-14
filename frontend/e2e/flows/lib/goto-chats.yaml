@@ -3,22 +3,30 @@
 # Every flow that expects the Chats list has to tolerate being chained after one that ended inside a
 # conversation or on the call screen. This used to be `pressKey: Back`, which works on Android
 # (hardware back) but is a no-op on iOS — the flow stayed on the conversation screen and the next
-# `assertVisible: "Chats"` failed on a perfectly healthy app.
+# assertion failed on a perfectly healthy app.
 #
 # Relaunching is the platform-independent way to get to the navigator root. Note the absence of
 # `clearState`: this must keep the signed-in session, unlike login.yaml which deliberately clears it.
+#
+# "At the navigator root" is detected by the Chats tab's testID, not the text "Chats": the app lands
+# on the Today tab, where "Chats" exists only as a tab-bar label, and iOS composes tab labels into
+# "Chats, tab, 2 of 6" — a full-string text match never hits it. The testID surfaces as a plain
+# resource-id on both platforms.
 appId: com.stewra.app
 ---
 - runFlow:
     when:
-      notVisible: "Chats"
+      notVisible:
+        id: "tab-chats"
     commands:
       - launchApp
       # A relaunch re-evaluates the JS bundle and re-fetches the conversation list, so give it the
       # same cold-start budget login.yaml gives the sign-in screen.
       - extendedWaitUntil:
-          visible: "Chats"
+          visible:
+            id: "tab-chats"
           timeout: 30000
-- assertVisible: "Chats"
+- assertVisible:
+    id: "tab-chats"
 - tapOn:
     id: "tab-chats"

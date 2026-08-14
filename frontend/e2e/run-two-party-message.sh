@@ -112,8 +112,10 @@ verify_device "$B_OS" "$B_ID"
 # Nonce the payloads so a passing assertion can only be THIS run's message — a fixed string would
 # still be on screen from a previous run and would pass without anything being delivered.
 NONCE="$$-$(date +%s)"
-MSG_AB="maestro A→B ${NONCE}"
-MSG_BA="maestro B→A ${NONCE}"
+# ASCII only: Maestro's Android inputText refuses non-ASCII (mobile-dev-inc/maestro#146),
+# so "A→B" with a real arrow aborts the send before anything is typed.
+MSG_AB="maestro A to B ${NONCE}"
+MSG_BA="maestro B to A ${NONCE}"
 
 run_flow() { # <device-id> <flow> [--env K=V ...]
   local id="$1" flow="$2"; shift 2

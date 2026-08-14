@@ -1,0 +1,18 @@
+# Settings → Connections — the connected-sources card.
+#
+# Assumes a signed-in session. The QA user has a Google account connected, so a
+# `settings-connection-row` must render alongside the "connect another" button. The connect
+# button is asserted visible but NOT tapped: it opens a system consent alert and then the
+# external browser for Google OAuth, which Maestro cannot drive — the web suite owns the
+# full connect journey.
+appId: com.stewra.app
+---
+- runFlow: lib/goto-chats.yaml
+# Regex covers Android's plain "Settings" tab label and iOS's composed "Settings, tab, 6 of 6".
+- tapOn: "Settings(, tab, .*)?"
+- extendedWaitUntil:
+    visible:
+      id: "settings-connect-google"
+    timeout: 15000
+- assertVisible:
+    id: "settings-connection-row"

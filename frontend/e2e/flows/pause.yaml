@@ -1,0 +1,57 @@
+# The global "Pause Stewra" kill switch — on, verified, then OFF again.
+#
+# Assumes a signed-in session. The switch's checked state is the screen's only indicator, so
+# that is what is asserted, in both directions. The relaunch between toggle-on and the checked
+# assertion matters: the switch re-reads `prefs.pauseAll` from the server on mount, so a
+# checked switch after relaunch proves the pause PERSISTED server-side, not just that the
+# thumb moved locally.
+#
+# This flow must leave the QA account UNPAUSED — a lingering pause makes the briefing
+# recompute refuse for every other suite sharing the account. The final off-toggle and its
+# assertion are part of the test, not cleanup: resume must round-trip exactly like pause. Run
+# this AFTER today.yaml so a mid-flow failure can't starve that flow's recompute.
+appId: com.stewra.app
+---
+- runFlow: lib/goto-chats.yaml
+# The Settings tab has no testID; the regex covers Android's plain "Settings" label AND iOS's
+# composed "Settings, tab, 6 of 6" accessibility text (Maestro text matches are full-string).
+- tapOn: "Settings(, tab, .*)?"
+- extendedWaitUntil:
+    visible:
+      id: "settings-pause-switch"
+    timeout: 15000
+- assertVisible:
+    id: "settings-pause-switch"
+    checked: false
+- tapOn:
+    id: "settings-pause-switch"
+# Relaunch and re-read: the checked state now comes from the server.
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "tab-chats"
+    timeout: 30000
+- tapOn: "Settings(, tab, .*)?"
+- extendedWaitUntil:
+    visible:
+      id: "settings-pause-switch"
+    timeout: 15000
+- assertVisible:
+    id: "settings-pause-switch"
+    checked: true
+# Resume, and prove the resume persisted the same way.
+- tapOn:
+    id: "settings-pause-switch"
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "tab-chats"
+    timeout: 30000
+- tapOn: "Settings(, tab, .*)?"
+- extendedWaitUntil:
+    visible:
+      id: "settings-pause-switch"
+    timeout: 15000
+- assertVisible:
+    id: "settings-pause-switch"
+    checked: false

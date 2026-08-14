@@ -1,0 +1,21 @@
+# Settings → Activity — the plain-language feed of everything Stewra has done.
+#
+# Assumes a signed-in session. Run after today.yaml: the recompute there guarantees at least
+# one audit row ("Refreshed your daily briefing"), so an empty feed here is a real failure,
+# not a cold account — the assertion is on a concrete `activity-row`, never on the screen
+# merely mounting.
+appId: com.stewra.app
+---
+- runFlow: lib/goto-chats.yaml
+# Regex covers Android's plain "Settings" tab label and iOS's composed "Settings, tab, 6 of 6".
+- tapOn: "Settings(, tab, .*)?"
+- extendedWaitUntil:
+    visible:
+      id: "settings-activity-link"
+    timeout: 15000
+- tapOn:
+    id: "settings-activity-link"
+- extendedWaitUntil:
+    visible:
+      id: "activity-row"
+    timeout: 20000

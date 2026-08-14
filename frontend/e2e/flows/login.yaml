@@ -24,9 +24,14 @@ appId: com.stewra.app
     visible: "Sign in"
     timeout: 30000
     optional: true
+# Signed-in detection is by the Chats tab's testID, not its label: since the Today tab became the
+# landing screen, "Chats" only appears as a tab-bar label, and iOS composes those into
+# "Chats, tab, 2 of 6" — a full-string text match never hits it. The testID surfaces as a plain
+# resource-id on both platforms.
 - runFlow:
     when:
-      visible: "Chats"
+      visible:
+        id: "tab-chats"
     commands:
       - tapOn:
           id: "logout-btn"
@@ -78,8 +83,27 @@ appId: com.stewra.app
       - tapOn:
           text: "Not Now"
           optional: true
-# Landing on the Chats tab proves the token was issued and the user is verified.
+# Android has the same trap with different chrome: Google Password Manager raises a "Save password
+# to Google Password Manager" bottom sheet after the submit, and it covers the whole app — every
+# later assertion (and even the NEXT flow's "Sign in" wait, since the sheet outlives clearState's
+# target) fails behind it. Its dismiss button is "Not now" (lowercase n, unlike iOS's "Not Now").
+# Optional twice over, like the iOS branch: GPM suppresses the sheet once "never save" is
+# remembered, and QA devices may have the autofill service disabled entirely.
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - extendedWaitUntil:
+          visible:
+            text: "Not now"
+          timeout: 8000
+          optional: true
+      - tapOn:
+          text: "Not now"
+          optional: true
+# Landing on the main tab bar proves the token was issued and the user is verified. Matched by
+# testID for the same iOS tab-label reason as the signed-in branch above.
 - extendedWaitUntil:
     visible:
-      text: "Chats"
+      id: "tab-chats"
     timeout: 20000
