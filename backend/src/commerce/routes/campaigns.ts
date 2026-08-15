@@ -145,6 +145,31 @@ router.get('/billing', requireAuth, verified, requireOrgMember('admin'), (req, r
   void billingController.orgBilling(req, res);
 });
 
+// Card capture is the one WRITE an org may make about its own billing, and it is not a write about
+// price: it says where to send the bill this org has already agreed. Same `admin` gate as the
+// reads. Two steps because the card goes to the provider, not to us — the first hands the browser
+// a client secret, the second is the server going back to the provider to ask what was actually
+// attached rather than believing what the browser reports.
+router.post(
+  '/billing/payment-method/setup',
+  requireAuth,
+  verified,
+  requireOrgMember('admin'),
+  (req, res) => {
+    void billingController.startPaymentMethodSetup(req, res);
+  },
+);
+
+router.post(
+  '/billing/payment-method',
+  requireAuth,
+  verified,
+  requireOrgMember('admin'),
+  (req, res) => {
+    void billingController.confirmPaymentMethod(req, res);
+  },
+);
+
 router.get('/invoices', requireAuth, verified, requireOrgMember('admin'), (req, res) => {
   void billingController.listInvoices(req, res);
 });

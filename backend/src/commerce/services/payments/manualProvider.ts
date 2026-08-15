@@ -18,8 +18,22 @@ class ManualProvider implements PaymentProvider {
     return Promise.resolve(params.existingCustomerRef ?? `manual:${params.orgId}`);
   }
 
-  startPaymentMethodSetup(): Promise<{ clientSecret: null }> {
-    return Promise.resolve({ clientSecret: null });
+  startPaymentMethodSetup(): Promise<{ clientSecret: null; setupRef: null }> {
+    return Promise.resolve({ clientSecret: null, setupRef: null });
+  }
+
+  finishPaymentMethodSetup(): Promise<{ paymentMethodRef: string }> {
+    // Unreachable through the service, which refuses the whole flow on a manual install — and a
+    // throw rather than a null so that if it ever DOES become reachable, it says so instead of
+    // quietly storing a payment method that does not exist.
+    return Promise.reject(
+      new ValidationError('Validation failed', [
+        {
+          field: 'provider',
+          message: 'This install settles offline; there is no card setup to finish.',
+        },
+      ]),
+    );
   }
 
   chargeInvoice(): Promise<ChargeOutcome> {

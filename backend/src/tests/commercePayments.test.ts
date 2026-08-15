@@ -81,6 +81,9 @@ process.env['META_COMMERCE_GRAPH_BASE_URL'] = 'http://127.0.0.1:9';
 process.env['COMMERCE_BILLING_PROVIDER'] = 'stripe';
 process.env['STRIPE_SECRET_KEY'] = `sk_test_${randomBytes(16).toString('hex')}`;
 process.env['STRIPE_WEBHOOK_SECRET'] = WEBHOOK_SECRET;
+// Required at boot alongside the other two: the billing page cannot capture a card without it, so
+// a Stripe deploy missing it is broken in a way that only shows up in front of a customer.
+process.env['STRIPE_PUBLISHABLE_KEY'] = `pk_test_${randomBytes(16).toString('hex')}`;
 process.env['STRIPE_API_BASE_URL'] = stripeOrigin;
 
 const database = (await import('../database/index.js')) as {

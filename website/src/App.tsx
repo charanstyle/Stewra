@@ -30,6 +30,7 @@ const CommercePage = lazy(() => import('./app/commerce/CommercePage'));
 const AudiencePage = lazy(() => import('./app/commerce/AudiencePage'));
 const CampaignsPage = lazy(() => import('./app/commerce/CampaignsPage'));
 const TeamPage = lazy(() => import('./app/commerce/TeamPage'));
+const BillingPage = lazy(() => import('./app/commerce/BillingPage'));
 const InviteAcceptPage = lazy(() => import('./app/commerce/InviteAcceptPage'));
 const PrivacyPage = lazy(() => import('./app/legal/PrivacyPage'));
 const TermsPage = lazy(() => import('./app/legal/TermsPage'));
@@ -149,6 +150,14 @@ export default function App(): React.JSX.Element {
               element={
                 <ProtectedRoute>
                   <TeamPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/commerce/billing"
+              element={
+                <ProtectedRoute>
+                  <BillingPage />
                 </ProtectedRoute>
               }
             />

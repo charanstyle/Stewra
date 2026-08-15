@@ -85,6 +85,11 @@ import type {
   SetEmailOverWhatsappResponse,
   // Commerce plane
   GetOrgBillingResponse,
+  StartPaymentMethodSetupResponse,
+  ConfirmPaymentMethodRequest,
+  ConfirmPaymentMethodResponse,
+  ListInvoicesResponse,
+  GetInvoiceResponse,
   ListOrgsResponse,
   CreateOrgRequest,
   CreateOrgResponse,
@@ -564,6 +569,26 @@ export const api = {
   /** The org's own view of its plan and, more usefully day to day, whether it owes anything. */
   getOrgBilling: (orgId: string): Promise<GetOrgBillingResponse> =>
     request(`/orgs/${orgId}/billing`),
+
+  /** Open a card-capture flow. The secret it returns goes to Stripe's script, never anywhere else. */
+  startPaymentMethodSetup: (orgId: string): Promise<StartPaymentMethodSetupResponse> =>
+    request(`/orgs/${orgId}/billing/payment-method/setup`, { method: 'POST' }),
+
+  /**
+   * Tell the server the setup is done. Only the SETUP's id is sent — the server asks Stripe which
+   * card that setup actually attached, because this page could claim any identifier it liked.
+   */
+  confirmPaymentMethod: (
+    orgId: string,
+    body: ConfirmPaymentMethodRequest,
+  ): Promise<ConfirmPaymentMethodResponse> =>
+    request(`/orgs/${orgId}/billing/payment-method`, { method: 'POST', body }),
+
+  listOrgInvoices: (orgId: string): Promise<ListInvoicesResponse> =>
+    request(`/orgs/${orgId}/invoices`),
+
+  getOrgInvoice: (orgId: string, invoiceId: string): Promise<GetInvoiceResponse> =>
+    request(`/orgs/${orgId}/invoices/${invoiceId}`),
 
   createOrg: (body: CreateOrgRequest): Promise<CreateOrgResponse> =>
     request('/orgs', { method: 'POST', body }),

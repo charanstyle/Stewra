@@ -7,6 +7,8 @@ import type {
   ListInvoicesResponse,
   ListPlansResponse,
   MarkInvoicePaidResponse,
+  StartPaymentMethodSetupResponse,
+  ConfirmPaymentMethodResponse,
   SetSubscriptionResponse,
   UpsertPlanResponse,
 } from '@stewra/shared-types';
@@ -55,6 +57,12 @@ const setSubscriptionSchema = z
 
 const invoiceParamsSchema = z.object({
   invoiceId: z.string().uuid(),
+});
+
+// The setup's own id and nothing else. A payment-method id here would let any org admin name a
+// card that is not theirs; the server reads the method back from the provider instead.
+const confirmPaymentMethodSchema = z.object({
+  setupRef: z.string().min(1).max(255),
 });
 
 const markPaidSchema = z.object({
@@ -118,10 +126,38 @@ class BillingController extends BaseController {
       // Returned on the plan endpoint rather than its own, so a client cannot render "you are on
       // the Growth plan" without also having been handed the fact that the last invoice is unpaid.
       const delinquency = await dunningService.delinquency(orgId);
-      const response: GetOrgBillingResponse = { subscription, delinquency };
+      const paymentMethod = await paymentService.paymentMethodState(orgId);
+      const response: GetOrgBillingResponse = { subscription, delinquency, paymentMethod };
       this.handleSuccess(res, response);
     } catch (error) {
       this.handleError(error, res, 'BillingController.orgBilling');
+    }
+  }
+
+  /** POST /orgs/:orgId/billing/payment-method/setup */
+  async startPaymentMethodSetup(req: Request, res: Response): Promise<void> {
+    try {
+      const { orgId } = orgContext(req);
+      const started = await paymentService.startPaymentMethodSetup(orgId);
+      const response: StartPaymentMethodSetupResponse = started;
+      this.handleSuccess(res, response);
+    } catch (error) {
+      this.handleError(error, res, 'BillingController.startPaymentMethodSetup');
+    }
+  }
+
+  /** POST /orgs/:orgId/billing/payment-method */
+  async confirmPaymentMethod(req: Request, res: Response): Promise<void> {
+    try {
+      const { orgId } = orgContext(req);
+      const body = parse(confirmPaymentMethodSchema, req.body);
+      await paymentService.confirmPaymentMethod(orgId, body.setupRef);
+      const response: ConfirmPaymentMethodResponse = {
+        paymentMethod: await paymentService.paymentMethodState(orgId),
+      };
+      this.handleSuccess(res, response);
+    } catch (error) {
+      this.handleError(error, res, 'BillingController.confirmPaymentMethod');
     }
   }
 

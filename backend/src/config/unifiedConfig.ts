@@ -366,6 +366,11 @@ const EnvSchema = z.object({
   // Signs the Stripe-Signature header on /webhooks/payments ('whsec_…'). Without it an event
   // cannot be told apart from anyone who guessed the URL.
   STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  // The PUBLISHABLE key ('pk_…'), which the billing page hands to Stripe's own script so the card
+  // is entered into Stripe's iframe and never reaches this server. Public by design — it is served
+  // to the browser — and useless for creating a charge, which is why it is a separate variable
+  // from the secret above rather than something derived from it.
+  STRIPE_PUBLISHABLE_KEY: z.string().optional(),
   // API origin. Overridable so the charge path can be driven end-to-end against a local stand-in
   // in tests, same reasoning as META_COMMERCE_GRAPH_BASE_URL.
   STRIPE_API_BASE_URL: z.string().url().default('https://api.stripe.com'),
@@ -566,7 +571,9 @@ if (env.META_COMMERCE_ENABLED) {
 // forged "it's paid" POST. A billing deploy that discovers this at the first charge has already
 // issued invoices it cannot collect — strictly worse than not booting.
 if (env.COMMERCE_BILLING_PROVIDER === 'stripe') {
-  const missing = (['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] as const).filter((k) => !env[k]);
+  const missing = (
+    ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_PUBLISHABLE_KEY'] as const
+  ).filter((k) => !env[k]);
   if (missing.length > 0) {
     throw new Error(`COMMERCE_BILLING_PROVIDER=stripe requires: ${missing.join(', ')}`);
   }
@@ -760,6 +767,8 @@ export type CommerceBillingConfig =
   | { readonly provider: 'manual' }
   | {
       readonly provider: 'stripe';
+      /** Served to the browser on purpose; it cannot create a charge. */
+      readonly publishableKey: string;
       readonly secretKey: string;
       readonly webhookSecret: string;
       readonly apiBaseUrl: string;
@@ -769,12 +778,17 @@ function readCommerceBillingConfig(): CommerceBillingConfig {
   if (env.COMMERCE_BILLING_PROVIDER !== 'stripe') return { provider: 'manual' };
   // The post-parse guard above already refused to boot without these; this re-reads them as a type
   // narrowing that cannot be satisfied by a placeholder. If it ever throws, the guard has a hole.
-  const { STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET } = env;
-  if (STRIPE_SECRET_KEY === undefined || STRIPE_WEBHOOK_SECRET === undefined) {
+  const { STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PUBLISHABLE_KEY } = env;
+  if (
+    STRIPE_SECRET_KEY === undefined ||
+    STRIPE_WEBHOOK_SECRET === undefined ||
+    STRIPE_PUBLISHABLE_KEY === undefined
+  ) {
     throw new Error('COMMERCE_BILLING_PROVIDER=stripe but its credentials are not all set');
   }
   return {
     provider: 'stripe',
+    publishableKey: STRIPE_PUBLISHABLE_KEY,
     secretKey: STRIPE_SECRET_KEY,
     webhookSecret: STRIPE_WEBHOOK_SECRET,
     apiBaseUrl: env.STRIPE_API_BASE_URL,

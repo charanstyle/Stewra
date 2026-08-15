@@ -42,7 +42,14 @@ export function stripeAmount(amountMicros: bigint, currency: string): bigint {
 }
 
 const customerSchema = z.object({ id: z.string().min(1) });
-const setupIntentSchema = z.object({ client_secret: z.string().min(1) });
+const setupIntentSchema = z.object({ client_secret: z.string().min(1), id: z.string().min(1) });
+/** The read-back shape: everything `finishPaymentMethodSetup` has to interrogate before trusting. */
+const setupIntentReadSchema = z.object({
+  id: z.string().min(1),
+  status: z.string().min(1),
+  customer: z.string().nullish(),
+  payment_method: z.string().nullish(),
+});
 const paymentIntentSchema = z.object({
   id: z.string().min(1),
   status: z.string().min(1),
@@ -70,12 +77,15 @@ function billing(): { secretKey: string; webhookSecret: string; apiBaseUrl: stri
 
 /** One form-encoded call to Stripe's API. Non-2xx returns the parsed error text, never a guess. */
 async function stripeRequest<S extends z.ZodTypeAny>(params: {
+  /** POST for everything that changes something; GET only to read an object back. */
+  method?: 'POST' | 'GET';
   path: string;
   body: Readonly<Record<string, string>>;
   idempotencyKey?: string;
   schema: S;
 }): Promise<{ ok: true; data: z.infer<S> } | { ok: false; error: string }> {
   const cfg = billing();
+  const method = params.method ?? 'POST';
   const headers: Record<string, string> = {
     authorization: `Bearer ${cfg.secretKey}`,
     'content-type': 'application/x-www-form-urlencoded',
@@ -84,11 +94,11 @@ async function stripeRequest<S extends z.ZodTypeAny>(params: {
     // The wire-level half of the port's idempotency promise: Stripe dedupes on this header.
     headers['idempotency-key'] = params.idempotencyKey;
   }
-  const response = await fetch(`${cfg.apiBaseUrl}${params.path}`, {
-    method: 'POST',
-    headers,
-    body: new URLSearchParams(params.body).toString(),
-  });
+  const init: RequestInit =
+    method === 'GET'
+      ? { method, headers }
+      : { method, headers, body: new URLSearchParams(params.body).toString() };
+  const response = await fetch(`${cfg.apiBaseUrl}${params.path}`, init);
   const text = await response.text();
   if (!response.ok) {
     const parsed = errorSchema.safeParse(JSON.parse(text));
@@ -122,14 +132,54 @@ class StripeProvider implements PaymentProvider {
     return result.data.id;
   }
 
-  async startPaymentMethodSetup(params: { customerRef: string }): Promise<{ clientSecret: string }> {
+  async startPaymentMethodSetup(
+    params: { customerRef: string },
+  ): Promise<{ clientSecret: string; setupRef: string }> {
     const result = await stripeRequest({
       path: '/v1/setup_intents',
       body: { customer: params.customerRef, 'payment_method_types[]': 'card' },
       schema: setupIntentSchema,
     });
     if (!result.ok) throw new Error(`Stripe refused to start payment-method setup: ${result.error}`);
-    return { clientSecret: result.data.client_secret };
+    return { clientSecret: result.data.client_secret, setupRef: result.data.id };
+  }
+
+  async finishPaymentMethodSetup(params: {
+    setupRef: string;
+    customerRef: string;
+  }): Promise<{ paymentMethodRef: string }> {
+    const result = await stripeRequest({
+      method: 'GET',
+      path: `/v1/setup_intents/${encodeURIComponent(params.setupRef)}`,
+      body: {},
+      schema: setupIntentReadSchema,
+    });
+    if (!result.ok) {
+      throw new ValidationError('Validation failed', [
+        { field: 'setupRef', message: `Stripe would not read that setup: ${result.error}` },
+      ]);
+    }
+    // All three questions, each its own refusal. The customer check is the one that matters most:
+    // without it an admin of org A could finish a setup belonging to org B and attach their card.
+    if (result.data.status !== 'succeeded') {
+      throw new ValidationError('Validation failed', [
+        {
+          field: 'setupRef',
+          message: `That card setup is ${result.data.status}, not succeeded; nothing has been saved.`,
+        },
+      ]);
+    }
+    if (result.data.customer !== params.customerRef) {
+      throw new ValidationError('Validation failed', [
+        { field: 'setupRef', message: 'That card setup belongs to a different customer.' },
+      ]);
+    }
+    if (result.data.payment_method === null || result.data.payment_method === undefined) {
+      throw new ValidationError('Validation failed', [
+        { field: 'setupRef', message: 'That card setup captured no payment method.' },
+      ]);
+    }
+    return { paymentMethodRef: result.data.payment_method };
   }
 
   async chargeInvoice(params: {

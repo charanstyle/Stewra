@@ -29,11 +29,30 @@ export interface PaymentProvider {
   /**
    * Begin the provider's own payment-method capture flow for a customer. The `clientSecret` is
    * what a front end hands to the provider's SDK; `null` means the provider has no such flow
-   * (manual — there is nothing to set up).
+   * (manual — there is nothing to set up). `setupRef` is this setup's provider-side id, which is
+   * the ONLY thing the browser is trusted to hand back — see below.
    */
   startPaymentMethodSetup(params: {
     customerRef: string;
-  }): Promise<{ clientSecret: string | null }>;
+  }): Promise<{ clientSecret: string | null; setupRef: string | null }>;
+
+  /**
+   * Read back a finished setup and return the payment method it actually captured.
+   *
+   * This exists because the browser must never be believed about which card to charge. The
+   * obvious shape — the page confirms the setup, then POSTs the payment-method id it got back —
+   * lets any authenticated caller name any identifier they like, and the one that eventually gets
+   * charged is somebody else's. So the client hands back only the setup's own id, and the server
+   * asks the provider three questions: did this setup succeed, does it belong to THIS customer,
+   * and what method did it attach. Anything less than all three answers throws.
+   *
+   * The same rule the store adapters follow for a purchase receipt, for the same reason: what the
+   * client sends is a hint about where to look, never the fact itself.
+   */
+  finishPaymentMethodSetup(params: {
+    setupRef: string;
+    customerRef: string;
+  }): Promise<{ paymentMethodRef: string }>;
 
   /**
    * Collect one issued invoice. `amountMicros` is bigint micros of `currency`; the adapter owns

@@ -295,7 +295,8 @@ export default function CommercePage(): React.JSX.Element {
           Your businesses, the numbers they message from, and everything customers have said. Manage
           contacts and consent on <Link to="/commerce/audience">Audience</Link>; templates,
           broadcasts and costs on <Link to="/commerce/campaigns">Campaigns</Link>; members and
-          invites on <Link to="/commerce/team">Team</Link>.
+          invites on <Link to="/commerce/team">Team</Link>; your plan, card and invoices on{' '}
+          <Link to="/commerce/billing">Billing</Link>.
         </p>
 
         {error !== null && <div className={styles.error}>{error}</div>}

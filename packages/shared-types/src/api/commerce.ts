@@ -22,6 +22,7 @@ import type {
   CommerceSpendCap,
   CommerceSpendUsage,
   CommerceBillingCollector,
+  CommercePaymentProvider,
   CommerceSubscriptionView,
   MessagePricingCategory,
   RateUnit,
@@ -933,9 +934,47 @@ export interface CommerceDelinquency {
 }
 
 /** GET /orgs/:orgId/billing — the org's own view of what plan it is on, if any. */
+/**
+ * Everything the billing page needs to decide between "add a card" and "card on file" — and
+ * nothing about the card itself. No last four, no brand, no expiry: the card is entered into the
+ * provider's own iframe and this server has never seen it, which is exactly the property worth
+ * keeping. What is stored here is an opaque reference the provider understands.
+ */
+export interface CommercePaymentMethodState {
+  /** Which provider this install collects through. `manual` means there is no card flow at all. */
+  readonly provider: CommercePaymentProvider;
+  /** True once a method has been captured through the provider's flow and stored. */
+  readonly stored: boolean;
+  /** The provider's browser-side key, or null when the provider has no browser flow. */
+  readonly publishableKey: string | null;
+}
+
 export interface GetOrgBillingResponse {
   readonly subscription: CommerceSubscriptionView | null;
   readonly delinquency: CommerceDelinquency;
+  readonly paymentMethod: CommercePaymentMethodState;
+}
+
+/**
+ * POST /orgs/:orgId/billing/payment-method/setup — begin card capture.
+ *
+ * The `clientSecret` goes straight to the provider's script. `setupRef` is what the page hands
+ * back when the customer is done, and is deliberately the ONLY thing it may hand back: the server
+ * reads the resulting payment method from the provider rather than believing the browser about
+ * which card to charge.
+ */
+export interface StartPaymentMethodSetupResponse {
+  readonly clientSecret: string;
+  readonly setupRef: string;
+}
+
+/** POST /orgs/:orgId/billing/payment-method — finish capture; the server verifies with the provider. */
+export interface ConfirmPaymentMethodRequest {
+  readonly setupRef: string;
+}
+
+export interface ConfirmPaymentMethodResponse {
+  readonly paymentMethod: CommercePaymentMethodState;
 }
 
 /** GET /orgs/:orgId/invoices — newest period first, every status. */
