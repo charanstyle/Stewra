@@ -63,6 +63,7 @@ import * as m056 from './migrations/056_money_store.js';
 import * as m057 from './migrations/057_global_pause.js';
 import * as m058 from './migrations/058_spend_ledger_unlink.js';
 import * as m059 from './migrations/059_commerce_subscription_collector.js';
+import * as m060 from './migrations/060_commerce_store_subscriptions.js';
 import { logger } from '../utils/logger.js';
 
 interface Migration {
@@ -131,6 +132,7 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '057_global_pause', up: m057.up },
   { name: '058_spend_ledger_unlink', up: m058.up },
   { name: '059_commerce_subscription_collector', up: m059.up },
+  { name: '060_commerce_store_subscriptions', up: m060.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

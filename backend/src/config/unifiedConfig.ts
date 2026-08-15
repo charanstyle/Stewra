@@ -375,6 +375,24 @@ const EnvSchema = z.object({
   // in tests, same reasoning as META_COMMERCE_GRAPH_BASE_URL.
   STRIPE_API_BASE_URL: z.string().url().default('https://api.stripe.com'),
 
+  // ── App Store subscriptions (migration 060) ───────────────────────────────────────────────────
+  // The in-app half of the platform fee: Apple sells the $213 listing, Apple charges the card, and
+  // this install only ever OBSERVES the result. Enabling makes the four below required at boot —
+  // an App Store deploy that discovers a missing key when a customer's renewal notification
+  // arrives has already lost the event, and Apple stops retrying after a day.
+  APPLE_STORE_ENABLED: z.coerce.boolean().default(false),
+  APPLE_STORE_BUNDLE_ID: z.string().optional(),
+  APPLE_STORE_ISSUER_ID: z.string().optional(),
+  APPLE_STORE_KEY_ID: z.string().optional(),
+  // The In-App Purchase key (.p8) contents, PEM. Newlines may be written as literal \n.
+  APPLE_STORE_PRIVATE_KEY: z.string().optional(),
+  // WHICH LEDGER. Not discovered, not retried across: sandbox purchases are free, and an install
+  // that would accept either grants real entitlements to testers.
+  APPLE_STORE_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
+  // Origin override, so the notification and lookup paths can be driven end-to-end against a local
+  // stand-in in tests — same reasoning as STRIPE_API_BASE_URL.
+  APPLE_STORE_API_BASE_URL: z.string().url().optional(),
+
   // ── WhatsApp PERSONAL (experimental companion device, via the user-hosted Stewra Bridge) ──────────
   // A SECOND, separate, opt-in channel. Everything above is Meta's sanctioned Cloud API; everything here
   // is the unofficial path, where the user links their OWN WhatsApp account and CAN be permanently
@@ -570,6 +588,20 @@ if (env.META_COMMERCE_ENABLED) {
 // charge can be created; without the webhook secret /webhooks/payments cannot tell Stripe from a
 // forged "it's paid" POST. A billing deploy that discovers this at the first charge has already
 // issued invoices it cannot collect — strictly worse than not booting.
+if (env.APPLE_STORE_ENABLED) {
+  const missing = (
+    [
+      'APPLE_STORE_BUNDLE_ID',
+      'APPLE_STORE_ISSUER_ID',
+      'APPLE_STORE_KEY_ID',
+      'APPLE_STORE_PRIVATE_KEY',
+    ] as const
+  ).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`APPLE_STORE_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+}
+
 if (env.COMMERCE_BILLING_PROVIDER === 'stripe') {
   const missing = (
     ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'STRIPE_PUBLISHABLE_KEY'] as const
@@ -763,6 +795,61 @@ function readMetaCommerceConfig(): MetaCommerceConfig {
  * callers narrow on `provider` first, and in the `stripe` branch every credential is a real,
  * non-optional string. There is no way to hold a half-configured Stripe.
  */
+/**
+ * The App Store subscription integration — a discriminated union for the same reason the Stripe
+ * and Meta ones are: callers narrow on `enabled` first, and once they have, every credential is a
+ * real string. There is no way to hold a half-configured App Store.
+ *
+ * `environment` is explicit rather than discovered. Apple's documented client behaviour is to try
+ * production and retry against sandbox on a particular 404, and that is precisely the shape this
+ * codebase refuses: an install would silently accept whichever ledger answered, and a tester's
+ * free sandbox purchase would grant a real entitlement. One install, one ledger, chosen at boot.
+ */
+export type AppleStoreConfig =
+  | { readonly enabled: false }
+  | {
+      readonly enabled: true;
+      readonly bundleId: string;
+      readonly issuerId: string;
+      readonly keyId: string;
+      /** The .p8 contents, PEM. Signs the App Store Server API token; never leaves this process. */
+      readonly privateKey: string;
+      readonly environment: 'sandbox' | 'production';
+      readonly apiBaseUrl: string;
+    };
+
+/** Apple's two ledgers have two origins. Derived from `environment`, never sniffed at runtime. */
+const APPLE_STORE_BASE_URLS: Record<'sandbox' | 'production', string> = {
+  sandbox: 'https://api.storekit-sandbox.itunes.apple.com',
+  production: 'https://api.storekit.itunes.apple.com',
+};
+
+function readAppleStoreConfig(): AppleStoreConfig {
+  if (!env.APPLE_STORE_ENABLED) return { enabled: false };
+  // The post-parse guard above already refused to boot without these; this re-reads them as a type
+  // narrowing that cannot be satisfied by a placeholder. If it ever throws, the guard has a hole.
+  const { APPLE_STORE_BUNDLE_ID, APPLE_STORE_ISSUER_ID, APPLE_STORE_KEY_ID, APPLE_STORE_PRIVATE_KEY } =
+    env;
+  if (
+    APPLE_STORE_BUNDLE_ID === undefined ||
+    APPLE_STORE_ISSUER_ID === undefined ||
+    APPLE_STORE_KEY_ID === undefined ||
+    APPLE_STORE_PRIVATE_KEY === undefined
+  ) {
+    throw new Error('APPLE_STORE_ENABLED=true but its credentials are not all set');
+  }
+  return {
+    enabled: true,
+    bundleId: APPLE_STORE_BUNDLE_ID,
+    issuerId: APPLE_STORE_ISSUER_ID,
+    keyId: APPLE_STORE_KEY_ID,
+    // Stored in env with literal \n so it survives a one-line env file; restored here.
+    privateKey: APPLE_STORE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    environment: env.APPLE_STORE_ENVIRONMENT,
+    apiBaseUrl: env.APPLE_STORE_API_BASE_URL ?? APPLE_STORE_BASE_URLS[env.APPLE_STORE_ENVIRONMENT],
+  };
+}
+
 export type CommerceBillingConfig =
   | { readonly provider: 'manual' }
   | {
@@ -1045,6 +1132,7 @@ export const config = {
   metaCommerce: readMetaCommerceConfig(),
   /** How invoices are collected. `manual` records money; only `stripe` moves it. */
   commerceBilling: readCommerceBillingConfig(),
+  appleStore: readAppleStoreConfig(),
   commerceWorker: {
     pollMs: env.COMMERCE_WORKER_POLL_MS,
     batchSize: env.COMMERCE_WORKER_BATCH_SIZE,

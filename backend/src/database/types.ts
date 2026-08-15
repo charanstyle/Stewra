@@ -1387,6 +1387,44 @@ export interface CommercePlanVersionsTable {
 }
 
 /**
+ * An App Store or Play subscription this install has OBSERVED (migration 060). Every column is
+ * written from the store's own API response — never from what an app reported — and the row is
+ * refreshed as that store's notifications arrive.
+ */
+export interface CommerceStoreSubscriptionsTable {
+  id: Generated<string>;
+  org_id: string;
+  store: ColumnType<'apple' | 'google', 'apple' | 'google', never>;
+  environment: ColumnType<'sandbox' | 'production', 'sandbox' | 'production', never>;
+  product_id: string;
+  /** Apple `originalTransactionId` / Google purchase token. Unique per store. */
+  store_subscription_ref: ColumnType<string, string, never>;
+  latest_transaction_ref: ColumnType<string | null, string | null | undefined, string | null>;
+  status: 'active' | 'grace_period' | 'on_hold' | 'paused' | 'expired' | 'revoked';
+  current_period_end: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  auto_renewing: boolean;
+  subscription_id: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/**
+ * Every store notification delivered, deduped on the store's own id for it (migration 060).
+ * Append-only by trigger — what a store told us is evidence, not workpaper.
+ */
+export interface CommerceStoreNotificationsTable {
+  id: Generated<string>;
+  store: 'apple' | 'google';
+  /** Apple `notificationUUID` / Pub/Sub `messageId`. The replay guard. */
+  notification_ref: string;
+  notification_type: string;
+  subtype: ColumnType<string | null, string | null | undefined, never>;
+  store_subscription_ref: ColumnType<string | null, string | null | undefined, never>;
+  applied: boolean;
+  received_at: CreatedAt;
+}
+
+/**
  * An org's tenure on one plan version (migration 053). At most one row per org has a NULL
  * `ended_at` (partial unique); assigning a new plan ends the old row and inserts a fresh one.
  */
@@ -1572,4 +1610,6 @@ export interface Database {
   commerce_payment_attempts: CommercePaymentAttemptsTable;
   commerce_billing_periods: CommerceBillingPeriodsTable;
   commerce_billing_customers: CommerceBillingCustomersTable;
+  commerce_store_subscriptions: CommerceStoreSubscriptionsTable;
+  commerce_store_notifications: CommerceStoreNotificationsTable;
 }
