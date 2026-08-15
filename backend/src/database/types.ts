@@ -1396,6 +1396,13 @@ export interface CommerceSubscriptionsTable {
   plan_version_id: string;
   started_at: ColumnType<Date, Date | undefined, never>;
   ended_at: ColumnType<Date | null, Date | null | undefined, Date>;
+  /**
+   * Who bills this fee (migration 059) — part of the frozen agreement, so never updated in place.
+   * Required on insert: the column's backfill default was dropped so that an insert which forgets
+   * to say who collects fails at the database rather than defaulting into Stewra billing someone
+   * the App Store is already charging.
+   */
+  collector: ColumnType<'stewra_stripe' | 'apple' | 'google', 'stewra_stripe' | 'apple' | 'google', never>;
   note: string;
   created_by_user_id: ColumnType<string | null, string | null | undefined, never>;
   created_at: CreatedAt;

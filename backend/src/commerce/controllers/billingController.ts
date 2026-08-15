@@ -10,6 +10,7 @@ import type {
   SetSubscriptionResponse,
   UpsertPlanResponse,
 } from '@stewra/shared-types';
+import { COMMERCE_BILLING_COLLECTORS } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { billingService } from '../services/billingService.js';
 import { paymentService } from '../services/paymentService.js';
@@ -26,11 +27,31 @@ const upsertPlanSchema = z.object({
   note: z.string().min(1).max(2000),
 });
 
-const setSubscriptionSchema = z.object({
-  orgId: z.string().uuid(),
-  planId: z.string().uuid().nullable(),
-  note: z.string().min(1).max(2000),
-});
+const setSubscriptionSchema = z
+  .object({
+    orgId: z.string().uuid(),
+    planId: z.string().uuid().nullable(),
+    // No `.default()`. Whoever puts an org on a plan states who bills it; guessing here bills a
+    // customer twice or never, and both failures are silent for a month.
+    collector: z.enum(COMMERCE_BILLING_COLLECTORS).nullable(),
+    note: z.string().min(1).max(2000),
+  })
+  .superRefine((body, ctx) => {
+    if (body.planId !== null && body.collector === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['collector'],
+        message: 'collector is required when subscribing to a plan',
+      });
+    }
+    if (body.planId === null && body.collector !== null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['collector'],
+        message: 'collector must be null when ending a subscription — nobody collects nothing',
+      });
+    }
+  });
 
 const invoiceParamsSchema = z.object({
   invoiceId: z.string().uuid(),

@@ -52,6 +52,7 @@ const { rateCardRepository } = await import('../commerce/repositories/rateCardRe
 const { spendCapRepository } = await import('../commerce/repositories/spendCapRepository.js');
 const { jobRepository } = await import('../commerce/repositories/jobRepository.js');
 const { billingService } = await import('../commerce/services/billingService.js');
+const { invoiceRepository } = await import('../commerce/repositories/invoiceRepository.js');
 const { costRatingService } = await import('../commerce/services/costRatingService.js');
 const { messageCostBackfillHandler } = await import(
   '../commerce/jobs/messageCostBackfillHandler.js'
@@ -89,13 +90,22 @@ const FEE = 5_000_000n;
 const OPERATOR_EMAIL = 'billing-admin@stewra.test';
 
 const now = new Date();
-/** First of last month / this month, UTC — the period this suite closes and the one it must not. */
+/**
+ * First of last month / this month, UTC. Both are billable now that the fee is charged in advance —
+ * the current month is the normal case and a past one is a catch-up. NEXT_MONTH is the one the
+ * service must refuse.
+ */
 const LAST_MONTH = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
   .toISOString()
   .slice(0, 10);
 const THIS_MONTH = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
   .toISOString()
   .slice(0, 10);
+const NEXT_MONTH = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
+  .toISOString()
+  .slice(0, 10);
+/** The exact first instant of last month — a subscription running when the period opened. */
+const START_OF_LAST_MONTH = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
 /** A timestamp safely inside last month. */
 const MID_LAST_MONTH = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15, 12));
 
@@ -222,8 +232,19 @@ async function ageIntoLastMonth(messageId: string): Promise<void> {
   await sql`UPDATE commerce_message_costs SET priced_at = ${MID_LAST_MONTH} WHERE message_id = ${messageId}`.execute(db);
 }
 
-/** Fee accrues for the month a subscription overlaps — backdate the start so last month counts. */
+/**
+ * A subscription already running when last month BEGAN — the shape that owes last month's fee.
+ *
+ * Deliberately the exact first instant of the period rather than something comfortably earlier:
+ * the billing rule is `startedAt <= periodStart`, and this pins the boundary. An off-by-one that
+ * made it strictly-less-than would hand a free month to every client who signed on a 1st.
+ */
 async function backdateSubscription(orgId: string): Promise<void> {
+  await sql`UPDATE commerce_subscriptions SET started_at = ${START_OF_LAST_MONTH} WHERE org_id = ${orgId}`.execute(db);
+}
+
+/** A subscription that began PART-WAY through last month — owes nothing for it. */
+async function startSubscriptionMidLastMonth(orgId: string): Promise<void> {
   await sql`UPDATE commerce_subscriptions SET started_at = ${MID_LAST_MONTH} WHERE org_id = ${orgId}`.execute(db);
 }
 
@@ -424,16 +445,32 @@ describe('the catalog', () => {
     createdPlans.push(created.plan.id);
 
     const t = await tenant();
-    const set = await request(app)
+
+    // Who collects has no default anywhere in the stack. Subscribing without saying is a 400, not
+    // a quiet assumption that Stewra bills them — the wrong guess here double-charges a customer
+    // the App Store is already charging, and nobody notices for a month.
+    const noCollector = await request(app)
       .put('/platform/billing/subscriptions')
       .set('Authorization', bearer(operatorId))
       .send({ orgId: t.orgId, planId: created.plan.id, note: 'signed order form' });
+    expect(noCollector.status).toBe(400);
+
+    const set = await request(app)
+      .put('/platform/billing/subscriptions')
+      .set('Authorization', bearer(operatorId))
+      .send({
+        orgId: t.orgId,
+        planId: created.plan.id,
+        collector: 'stewra_stripe',
+        note: 'signed order form',
+      });
     expect(set.status).toBe(200);
     expect(set.body.data.subscription).toMatchObject({
       planName: name,
       planVersion: 1,
       platformFeeMicros: FEE.toString(),
       currency: CUR,
+      collector: 'stewra_stripe',
     });
 
     // A new version after subscribing changes nothing for this org until an operator moves them.
@@ -462,7 +499,7 @@ describe('the catalog', () => {
     const cleared = await request(app)
       .put('/platform/billing/subscriptions')
       .set('Authorization', bearer(operatorId))
-      .send({ orgId: t.orgId, planId: null, note: 'churned' });
+      .send({ orgId: t.orgId, planId: null, collector: null, note: 'churned' });
     expect(cleared.status).toBe(200);
     expect(cleared.body.data.subscription).toBeNull();
     const history = await db
@@ -476,7 +513,7 @@ describe('the catalog', () => {
 });
 
 describe('the close', () => {
-  it('closes a complete month into an issued, immutable invoice: pass-through plus the flat fee', async () => {
+  it('bills a month into an issued, immutable invoice carrying the flat fee ALONE — never the messages', async () => {
     const t = await tenant();
     const created = await billingService.upsertPlan({
       name: `Issued ${randomUUID().slice(0, 8)}`,
@@ -489,6 +526,7 @@ describe('the close', () => {
     await billingService.setSubscription({
       orgId: t.orgId,
       planId: created.plan.id,
+      collector: 'stewra_stripe',
       note: 'signed',
       createdByUserId: operatorId,
     });
@@ -510,15 +548,25 @@ describe('the close', () => {
     expect(job).not.toBeNull();
     await drainJobs(t.orgId);
 
+    // Two messages were sent and RATED in this period, and none of that money is on the document.
+    // Meta bills the client's own card for them; a pass-through line here would be the same
+    // charge collected twice.
     const rows = await invoicesOf(t.orgId);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       currency: CUR,
       status: 'issued',
-      total_micros: (2n * RATE + FEE).toString(),
+      total_micros: FEE.toString(),
     });
+    const priced = await db
+      .selectFrom('commerce_message_costs')
+      .select(['amount_micros'])
+      .where('org_id', '=', t.orgId)
+      .where('state', '=', 'rated')
+      .execute();
+    expect(priced).toHaveLength(2); // the money exists, and is simply not ours to bill
 
-    // The org reads its bill over HTTP: both lines, each explaining itself.
+    // The org reads its bill over HTTP: one line, explaining itself.
     const list = await request(app).get(`/orgs/${t.orgId}/invoices`).set('Authorization', t.auth);
     expect(list.status).toBe(200);
     expect(list.body.data.invoices).toHaveLength(1);
@@ -526,16 +574,20 @@ describe('the close', () => {
       .get(`/orgs/${t.orgId}/invoices/${rows[0]?.id}`)
       .set('Authorization', t.auth);
     expect(detail.status).toBe(200);
-    const lines = detail.body.data.lines as Array<{ kind: string; quantity: number; amountMicros: string }>;
-    expect(lines).toHaveLength(2);
-    expect(lines.find((l) => l.kind === 'message_costs')).toMatchObject({
-      quantity: 2,
-      amountMicros: (2n * RATE).toString(),
-    });
-    expect(lines.find((l) => l.kind === 'platform_fee')).toMatchObject({
+    const lines = detail.body.data.lines as Array<{
+      kind: string;
+      quantity: number;
+      amountMicros: string;
+      description: string;
+    }>;
+    expect(lines).toHaveLength(1);
+    expect(lines.find((l) => l.kind === 'message_costs')).toBeUndefined();
+    expect(lines[0]).toMatchObject({
+      kind: 'platform_fee',
       quantity: 1,
       amountMicros: FEE.toString(),
     });
+    expect(lines[0]?.description).toMatch(/in advance/);
 
     // An outsider cannot read it.
     const outsider = await tenant();
@@ -549,7 +601,7 @@ describe('the close', () => {
     expect(rerun.outcome).toBe('already_closed');
     const after = await invoicesOf(t.orgId);
     expect(after).toHaveLength(1);
-    expect(after[0]?.total_micros).toBe((2n * RATE + FEE).toString());
+    expect(after[0]?.total_micros).toBe(FEE.toString());
 
     // And the document is immutable at the database, not by convention.
     await expect(
@@ -561,84 +613,63 @@ describe('the close', () => {
     ).rejects.toThrow(/immutable after issue/);
   });
 
-  it('an unpriced message holds every invoice of its period at draft until the backfill heals it', async () => {
+  it('unpriced and unrateable messages hold nothing back, and re-rating one never moves an issued invoice', async () => {
     const t = await tenant();
+    const created = await billingService.upsertPlan({
+      name: `Unheld ${randomUUID().slice(0, 8)}`,
+      platformFeeMicros: FEE.toString(),
+      currency: CUR,
+      note: 'flat',
+      createdByUserId: operatorId,
+    });
+    createdPlans.push(created.plan.id);
+    await billingService.setSubscription({
+      orgId: t.orgId,
+      planId: created.plan.id,
+      collector: 'stewra_stripe',
+      note: 'signed',
+      createdByUserId: operatorId,
+    });
+    await backdateSubscription(t.orgId);
+
+    // Three messages, one of each kind that used to hold a period open: priced, awaiting a
+    // receipt, and refused by the rater (country 44 has no price on the live card).
     const rated = await sentMessage(t);
     await rateAsMarketing(t, rated);
     await ageIntoLastMonth(rated.messageId);
-    // Went out, no receipt yet: `billable` NULL, status sent — the honest "Meta has not said".
-    const silent = await sentMessage(t);
+    const silent = await sentMessage(t); // billable NULL — the honest "Meta has not said"
     await ageIntoLastMonth(silent.messageId);
-
-    const first = await billingService.closePeriod({ orgId: t.orgId, periodStart: LAST_MONTH });
-    expect(first.outcome).toBe('still_open');
-    const drafts = await invoicesOf(t.orgId);
-    expect(drafts).toHaveLength(1);
-    expect(drafts[0]?.status).toBe('draft');
-    const draftRow = await db
-      .selectFrom('commerce_invoices')
-      .select(['unpriced_messages'])
-      .where('id', '=', drafts[0]?.id ?? '')
+    const unpriceable = await sentMessage(t, '44');
+    await rateAsMarketing(t, unpriceable);
+    await ageIntoLastMonth(unpriceable.messageId);
+    const refused = await db
+      .selectFrom('commerce_message_costs')
+      .select(['state'])
+      .where('message_id', '=', unpriceable.messageId)
       .executeTakeFirstOrThrow();
-    expect(draftRow.unpriced_messages).toBe(1);
+    expect(refused.state).toBe('unrated_no_rate');
 
-    // The receipt lands (late), the backfill prices it — into the OPEN month, by design.
+    // Every one of those used to hold the document at draft. None can now: there is no message
+    // money on the invoice for them to make wrong, so it issues on the first attempt.
+    const result = await billingService.closePeriod({ orgId: t.orgId, periodStart: LAST_MONTH });
+    expect(result.outcome).toBe('closed');
+    const rows = await invoicesOf(t.orgId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'issued', total_micros: FEE.toString() });
+    const held = await db
+      .selectFrom('commerce_invoices')
+      .select(['unrated_billable', 'unpriced_messages'])
+      .where('id', '=', rows[0]?.id ?? '')
+      .executeTakeFirstOrThrow();
+    expect(held).toMatchObject({ unrated_billable: 0, unpriced_messages: 0 });
+
+    // Rating still works and still matters — it is what the client's own Meta bill is reconciled
+    // against. The operator loads the corrected card and the backfill prices the stragglers.
     await db
       .updateTable('commerce_messages')
       .set({ billable: true, pricing_category: 'marketing', status: 'delivered' })
       .where('id', '=', silent.messageId)
       .execute();
-    const outcome = await messageCostBackfillHandler.handle(
-      jobFor(t.orgId, 'message_cost_backfill', {}),
-    );
-    expect(outcome.kind).toBe('done');
-    const healed = await db
-      .selectFrom('commerce_message_costs')
-      .select(['state', 'amount_micros', 'priced_at'])
-      .where('message_id', '=', silent.messageId)
-      .executeTakeFirstOrThrow();
-    expect(healed).toMatchObject({ state: 'rated', amount_micros: RATE.toString() });
-    expect(healed.priced_at.toISOString().slice(0, 7)).toBe(THIS_MONTH.slice(0, 7));
-
-    // Now the period is complete — and the issued invoice carries LAST month's money only.
-    const second = await billingService.closePeriod({ orgId: t.orgId, periodStart: LAST_MONTH });
-    expect(second.outcome).toBe('closed');
-    const issued = await invoicesOf(t.orgId);
-    expect(issued).toHaveLength(1);
-    expect(issued[0]).toMatchObject({ status: 'issued', total_micros: RATE.toString() });
-  });
-
-  it('an unrated message holds its period open, without churning, until the missing rate is loaded', async () => {
-    const t = await tenant();
-    const rated = await sentMessage(t, '1');
-    await rateAsMarketing(t, rated);
-    await ageIntoLastMonth(rated.messageId);
-    // Country 44 has no price on the live card: the rater refuses, on the record.
-    const unpriceable = await sentMessage(t, '44');
-    await rateAsMarketing(t, unpriceable);
-    await ageIntoLastMonth(unpriceable.messageId);
-    const before = await db
-      .selectFrom('commerce_message_costs')
-      .select(['state', 'priced_at'])
-      .where('message_id', '=', unpriceable.messageId)
-      .executeTakeFirstOrThrow();
-    expect(before.state).toBe('unrated_no_rate');
-
-    const first = await billingService.closePeriod({ orgId: t.orgId, periodStart: LAST_MONTH });
-    expect(first.outcome).toBe('still_open');
-
-    // A backfill pass with the rate STILL missing must leave the row exactly where it is — a
-    // rewrite would stamp a fresh priced_at and walk the discrepancy out of the period it belongs to.
-    await messageCostBackfillHandler.handle(jobFor(t.orgId, 'message_cost_backfill', {}));
-    const untouched = await db
-      .selectFrom('commerce_message_costs')
-      .select(['state', 'priced_at'])
-      .where('message_id', '=', unpriceable.messageId)
-      .executeTakeFirstOrThrow();
-    expect(untouched.state).toBe('unrated_no_rate');
-    expect(untouched.priced_at.getTime()).toBe(before.priced_at.getTime());
-
-    // The operator loads the corrected card; the backfill prices the message into the open month.
     const card2 = await rateCardRepository.loadCard({
       currency: CUR,
       effectiveFrom: new Date('2020-06-01T00:00:00Z'),
@@ -650,7 +681,10 @@ describe('the close', () => {
       ],
     });
     createdCards.push(card2.id);
-    await messageCostBackfillHandler.handle(jobFor(t.orgId, 'message_cost_backfill', {}));
+    const outcome = await messageCostBackfillHandler.handle(
+      jobFor(t.orgId, 'message_cost_backfill', {}),
+    );
+    expect(outcome.kind).toBe('done');
     const reRated = await db
       .selectFrom('commerce_message_costs')
       .select(['state', 'amount_micros', 'priced_at'])
@@ -659,12 +693,12 @@ describe('the close', () => {
     expect(reRated).toMatchObject({ state: 'rated', amount_micros: RATE_44.toString() });
     expect(reRated.priced_at.toISOString().slice(0, 7)).toBe(THIS_MONTH.slice(0, 7));
 
-    // The stuck month closes; its invoice carries only the money that was PRICED inside it.
-    const second = await billingService.closePeriod({ orgId: t.orgId, periodStart: LAST_MONTH });
-    expect(second.outcome).toBe('closed');
-    const issued = await invoicesOf(t.orgId);
-    expect(issued).toHaveLength(1);
-    expect(issued[0]).toMatchObject({ status: 'issued', total_micros: RATE.toString() });
+    // And the invoice that was already issued is exactly where it was. This is the property that
+    // matters: money arriving after a bill is closed can no longer disturb the bill, because the
+    // bill never depended on it.
+    const afterBackfill = await invoicesOf(t.orgId);
+    expect(afterBackfill).toHaveLength(1);
+    expect(afterBackfill[0]).toMatchObject({ status: 'issued', total_micros: FEE.toString() });
   });
 
   it('a subscription with no message traffic still bills its flat fee', async () => {
@@ -680,6 +714,7 @@ describe('the close', () => {
     await billingService.setSubscription({
       orgId: t.orgId,
       planId: created.plan.id,
+      collector: 'stewra_stripe',
       note: 'signed',
       createdByUserId: operatorId,
     });
@@ -696,6 +731,93 @@ describe('the close', () => {
       .where('invoice_id', '=', rows[0]?.id ?? '')
       .execute();
     expect(lines.map((l) => l.kind)).toEqual(['platform_fee']);
+  });
+
+  it('a subscription that began mid-period owes nothing for it, and the full fee from the next', async () => {
+    const t = await tenant();
+    const created = await billingService.upsertPlan({
+      name: `Partial ${randomUUID().slice(0, 8)}`,
+      platformFeeMicros: FEE.toString(),
+      currency: CUR,
+      note: 'flat',
+      createdByUserId: operatorId,
+    });
+    createdPlans.push(created.plan.id);
+    await billingService.setSubscription({
+      orgId: t.orgId,
+      planId: created.plan.id,
+      collector: 'stewra_stripe',
+      note: 'signed mid-month',
+      createdByUserId: operatorId,
+    });
+    await startSubscriptionMidLastMonth(t.orgId);
+
+    // Billing in advance and charging a full flat fee for a part-month would take $149 for a
+    // fortnight. The remainder of the signup month is free instead — which keeps every invoice
+    // this system has ever written equal to the plan's exact price, with no proration anywhere.
+    const partial = await billingService.closePeriod({ orgId: t.orgId, periodStart: LAST_MONTH });
+    expect(partial.outcome).toBe('closed');
+    expect(partial.invoices).toHaveLength(0);
+    expect(await invoicesOf(t.orgId)).toHaveLength(0);
+
+    // The next whole month is billed in full, on its first day.
+    const whole = await billingService.closePeriod({ orgId: t.orgId, periodStart: THIS_MONTH });
+    expect(whole.outcome).toBe('closed');
+    const rows = await invoicesOf(t.orgId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'issued', total_micros: FEE.toString() });
+    expect(rows[0]?.period_start.toISOString().slice(0, 10)).toBe(THIS_MONTH);
+  });
+
+  it('an App Store subscription is never invoiced — Apple already charged the customer', async () => {
+    const t = await tenant();
+    const created = await billingService.upsertPlan({
+      name: `Store ${randomUUID().slice(0, 8)}`,
+      platformFeeMicros: FEE.toString(),
+      currency: CUR,
+      note: 'flat',
+      createdByUserId: operatorId,
+    });
+    createdPlans.push(created.plan.id);
+    const sub = await billingService.setSubscription({
+      orgId: t.orgId,
+      planId: created.plan.id,
+      collector: 'apple',
+      note: 'purchased in-app',
+      createdByUserId: operatorId,
+    });
+    expect(sub?.collector).toBe('apple');
+    await backdateSubscription(t.orgId);
+
+    // The subscription is real, the fee is real, and Stewra issues no document for it: the App
+    // Store's receipt is the bill. An invoice here would be the same month charged twice.
+    const result = await billingService.closePeriod({ orgId: t.orgId, periodStart: LAST_MONTH });
+    expect(result.outcome).toBe('closed');
+    expect(result.invoices).toHaveLength(0);
+    expect(await invoicesOf(t.orgId)).toHaveLength(0);
+
+    // The period is still marked closed, so the sweep stops asking about it rather than retrying
+    // an org it will never invoice, forever.
+    const marker = await db
+      .selectFrom('commerce_billing_periods')
+      .select(['status'])
+      .where('org_id', '=', t.orgId)
+      .executeTakeFirstOrThrow();
+    expect(marker.status).toBe('closed');
+
+    // And nothing will try to collect it either: the collection query is scoped to Stewra-billed
+    // orgs, which is the check that actually stands between a store customer and a second charge.
+    const collectable = await invoiceRepository.issuedAwaitingCollection('stripe');
+    expect(collectable.filter((row) => row.orgId === t.orgId)).toHaveLength(0);
+  });
+
+  it('refuses to bill a month that has not started', async () => {
+    const t = await tenant();
+    await expect(
+      billingService.closePeriod({ orgId: t.orgId, periodStart: NEXT_MONTH }),
+    ).rejects.toMatchObject({
+      details: [{ field: 'periodStart', message: expect.stringMatching(/has not started/) }],
+    });
   });
 
   it('releases a reservation whose receipt never came — and still books the charge if one arrives later', async () => {

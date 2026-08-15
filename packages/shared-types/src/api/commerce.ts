@@ -21,6 +21,7 @@ import type {
   CommerceRateCard,
   CommerceSpendCap,
   CommerceSpendUsage,
+  CommerceBillingCollector,
   CommerceSubscriptionView,
   MessagePricingCategory,
   RateUnit,
@@ -890,6 +891,13 @@ export interface SetSubscriptionRequest {
   readonly orgId: string;
   /** The plan to subscribe to, or null to end the current subscription. */
   readonly planId: string | null;
+  /**
+   * Who bills this fee. Required whenever `planId` is non-null, and null only when ending a
+   * subscription (nobody collects nothing). There is no default on purpose: `stewra_stripe` on an
+   * App Store subscriber charges a customer Apple is already charging, and `apple` on a web
+   * subscriber means nobody bills them at all. Both are silent, both are expensive.
+   */
+  readonly collector: CommerceBillingCollector | null;
   /** Why — "signed order form 2026-08", "churned". Required. */
   readonly note: string;
 }

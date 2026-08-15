@@ -561,6 +561,22 @@ export interface CommercePlanVersion {
 }
 
 /**
+ * Who charges the customer for the platform fee (migration 059).
+ *
+ * `stewra_stripe` is the only one where Stewra holds the money relationship: it issues an invoice
+ * and collects it through the payment port. Under `apple` and `google` the STORE sold the
+ * subscription and the store charges the card — its receipt is the bill. Stewra issues no invoice
+ * for those and can never charge them; it holds an observation of somebody else's subscription,
+ * kept current from that store's server notifications.
+ *
+ * This is why the fee is a bigger number in the app: the store's commission is the customer's cost
+ * of buying through the store, and the amount Stewra is left with is the same either way.
+ */
+export const COMMERCE_BILLING_COLLECTORS = ['stewra_stripe', 'apple', 'google'] as const;
+
+export type CommerceBillingCollector = (typeof COMMERCE_BILLING_COLLECTORS)[number];
+
+/**
  * An org's subscription, joined with the plan-version facts a reader actually wants. At most one
  * is active (endedAt null) per org; assigning a new plan ends the old subscription and starts a
  * fresh row, so the history of what an org was on is never overwritten.
@@ -574,6 +590,8 @@ export interface CommerceSubscriptionView {
   readonly planVersion: number;
   readonly platformFeeMicros: string;
   readonly currency: string;
+  /** Who bills this fee. Determines whether an invoice is ever produced for it at all. */
+  readonly collector: CommerceBillingCollector;
   readonly note: string;
   readonly startedAt: ISODateString;
   readonly endedAt: ISODateString | null;
@@ -838,6 +856,7 @@ export const COMMERCE_JOB_KINDS = [
   'contact_import',
   'message_cost_backfill',
   'billing_period_close',
+  'invoice_charge',
 ] as const;
 
 export type CommerceJobKind = (typeof COMMERCE_JOB_KINDS)[number];

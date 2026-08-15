@@ -4,6 +4,7 @@ import { commerceWorker } from '../jobs/worker.js';
 import { enqueueTemplateSyncs } from '../jobs/templateSyncHandler.js';
 import { enqueueMessageCostBackfills } from '../jobs/messageCostBackfillHandler.js';
 import { enqueueBillingPeriodCloses } from '../jobs/billingPeriodCloseHandler.js';
+import { enqueueInvoiceCharges } from '../jobs/invoiceChargeHandler.js';
 import { config } from '../../config/unifiedConfig.js';
 import { logger } from '../../utils/logger.js';
 
@@ -102,7 +103,14 @@ async function templateSync(): Promise<void> {
  */
 const BILLING_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
-/** Queue the cost backfills, then the period closes. Guarded like the other sweeps. */
+/**
+ * Queue the cost backfills, then the period billing, then collection. Guarded like the other
+ * sweeps.
+ *
+ * The order is the money's order and matters on the hour a month turns over: an invoice has to
+ * exist before anything can collect it, so billing runs ahead of collection and the new period's
+ * invoice is charged on the same pass that creates it rather than an hour later.
+ */
 async function billingSweep(): Promise<void> {
   if (billing) {
     logger.info('commerce scheduler: previous billing sweep still running, skipping');
@@ -112,6 +120,7 @@ async function billingSweep(): Promise<void> {
   try {
     await enqueueMessageCostBackfills();
     await enqueueBillingPeriodCloses();
+    await enqueueInvoiceCharges();
   } catch (error) {
     Sentry.captureException(error);
     logger.error('commerce scheduler: billing sweep failed', {

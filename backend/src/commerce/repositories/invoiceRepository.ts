@@ -263,16 +263,55 @@ class InvoiceRepository {
   }
 
   /**
-   * Which (org, month) pairs the hourly sweep should enqueue closes for: every org with activity
-   * in the just-ended month that has no marker yet, plus every marker still `open` from any
-   * earlier month (a period that completed late — the backfill priced its stragglers — closes on
-   * the next sweep instead of never).
+   * Which (org, month) pairs the hourly sweep should enqueue billing for: every org holding a
+   * subscription that overlaps the month and has no marker yet, plus every marker still `open`
+   * from an earlier month.
    *
-   * "Activity" is any of: a cost row priced in the window, a message created in the window, or a
-   * subscription overlapping it — the three things that can put a line or a hold on the document.
+   * A subscription is now the ONLY thing that can put a line on an invoice, so it is the only
+   * thing asked about. This used to also union orgs with messages or cost rows in the window,
+   * because message charges were passed through onto the document; they are billed by Meta
+   * directly to the client now, and selecting those orgs would only produce empty invoices for
+   * people who owe nothing.
+   *
+   * The `open` union is kept even though nothing can produce that state any more: any marker left
+   * open by the previous billing model gets swept up, billed, and closed, rather than sitting
+   * there forever.
    */
+  /**
+   * Issued invoices that are ready for an automatic collection attempt.
+   *
+   * Three conditions, and every one of them is a refusal to charge blind:
+   *
+   *  - `status = 'issued'` — a draft has not claimed to be a bill, and paid/void are over.
+   *  - the org has a stored payment method AT THIS PROVIDER. Without one the charge would fail at
+   *    the port anyway; enqueueing it would only manufacture failed attempts that look like
+   *    declines in the record, which is a different and much more alarming fact.
+   *  - the org's live subscription is Stewra-collected. Belt and braces with `closePeriod`, which
+   *    does not produce these invoices for store-collected orgs in the first place — but this is
+   *    the query that actually reaches for someone's card, and it should be the one that checks.
+   */
+  async issuedAwaitingCollection(
+    provider: string,
+  ): Promise<{ invoiceId: string; orgId: string }[]> {
+    const result = await sql<{ id: string; org_id: string }>`
+      SELECT i.id, i.org_id
+      FROM commerce_invoices i
+      JOIN commerce_billing_customers c
+        ON c.org_id = i.org_id
+       AND c.provider = ${provider}
+       AND c.payment_method_ref IS NOT NULL
+      JOIN commerce_subscriptions s
+        ON s.org_id = i.org_id
+       AND s.ended_at IS NULL
+       AND s.collector = 'stewra_stripe'
+      WHERE i.status = 'issued'
+      ORDER BY i.period_start
+    `.execute(db);
+    return result.rows.map((row) => ({ invoiceId: row.id, orgId: row.org_id }));
+  }
+
   async periodsNeedingClose(params: {
-    /** YYYY-MM-01 of the most recently ENDED month. */
+    /** YYYY-MM-01 of the month to bill — the CURRENT one, since the fee is charged in advance. */
     periodStart: string;
     /** First day of the following month. */
     periodEnd: string;
@@ -280,12 +319,6 @@ class InvoiceRepository {
     const result = await sql<{ org_id: string; period_start: Date }>`
       SELECT org_id, ${params.periodStart}::date AS period_start
       FROM (
-        SELECT org_id FROM commerce_message_costs
-          WHERE priced_at >= ${params.periodStart}::date AND priced_at < ${params.periodEnd}::date
-        UNION
-        SELECT org_id FROM commerce_messages
-          WHERE created_at >= ${params.periodStart}::date AND created_at < ${params.periodEnd}::date
-        UNION
         SELECT org_id FROM commerce_subscriptions
           WHERE started_at < ${params.periodEnd}::date
             AND (ended_at IS NULL OR ended_at > ${params.periodStart}::date)

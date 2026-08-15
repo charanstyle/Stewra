@@ -1,11 +1,12 @@
 import { sql } from 'kysely';
 import type {
+  CommerceBillingCollector,
   CommercePlan,
   CommercePlanVersion,
   CommerceSubscriptionView,
 } from '@stewra/shared-types';
 import { db } from '../../database/index.js';
-import { NotFoundError } from '../../utils/errors.js';
+import { NotFoundError, ValidationError } from '../../utils/errors.js';
 
 /**
  * The catalog (migration 053). Plans are names; versions are the immutable numbers; a subscription
@@ -53,6 +54,7 @@ const subscriptionSelect = [
   'commerce_subscriptions.org_id as org_id',
   'commerce_subscriptions.started_at as started_at',
   'commerce_subscriptions.ended_at as ended_at',
+  'commerce_subscriptions.collector as collector',
   'commerce_subscriptions.note as note',
   'commerce_subscriptions.created_at as created_at',
   'commerce_plan_versions.id as plan_version_id',
@@ -68,6 +70,7 @@ interface SubscriptionViewRow {
   org_id: string;
   started_at: Date;
   ended_at: Date | null;
+  collector: CommerceBillingCollector;
   note: string;
   created_at: Date;
   plan_version_id: string;
@@ -88,6 +91,7 @@ function toSubscriptionView(row: SubscriptionViewRow): CommerceSubscriptionView 
     planVersion: row.plan_version,
     platformFeeMicros: row.platform_fee_micros,
     currency: row.currency,
+    collector: row.collector,
     note: row.note,
     startedAt: row.started_at.toISOString(),
     endedAt: row.ended_at === null ? null : row.ended_at.toISOString(),
@@ -166,10 +170,16 @@ class PlanRepository {
    * Put an org on a plan's LATEST version, or (planId null) off every plan. One transaction: the
    * active row is ended and the new one inserted, so the partial unique index never sees two open
    * rows even mid-assignment.
+   *
+   * `collector` has no default anywhere in the stack, deliberately. The wrong value here is not a
+   * cosmetic mistake: marking an App Store subscriber as `stewra_stripe` invoices and charges a
+   * customer Apple is already billing, and marking a web subscriber as `apple` means nobody ever
+   * bills them at all. Whoever assigns the plan says who collects, or the write does not happen.
    */
   async setSubscription(params: {
     orgId: string;
     planId: string | null;
+    collector: CommerceBillingCollector | null;
     note: string;
     createdByUserId: string | null;
   }): Promise<CommerceSubscriptionView | null> {
@@ -181,6 +191,15 @@ class PlanRepository {
         .where('ended_at', 'is', null)
         .execute();
       if (params.planId === null) return null;
+      // Subscribing without saying who collects is not a shape this will guess its way out of.
+      // The controller's schema already refuses it; this is the same refusal at the only place
+      // that actually writes, so a future caller reaching the repository directly hits it too.
+      if (params.collector === null) {
+        throw new ValidationError('Validation failed', [
+          { field: 'collector', message: 'collector is required when subscribing to a plan' },
+        ]);
+      }
+      const collector = params.collector;
 
       const latest = await trx
         .selectFrom('commerce_plan_versions')
@@ -198,6 +217,7 @@ class PlanRepository {
         .values({
           org_id: params.orgId,
           plan_version_id: latest.id,
+          collector,
           note: params.note,
           created_by_user_id: params.createdByUserId,
         })

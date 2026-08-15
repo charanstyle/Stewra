@@ -14,14 +14,13 @@ const payloadSchema = z.object({
 });
 
 /**
- * Close one org's ended month into invoices.
+ * Bill one org's month, in advance, on the first day it covers.
  *
- * `done` covers three honest outcomes: issued, still-open (the period has unrated or unpriced
- * messages — the sweep will bring the job back after the backfill has had its hour), and
- * already-closed (a replayed job finding finished work). None of them is worth a retry loop:
- * the close either succeeded, or is waiting on DATA no retry produces.
+ * `done` covers both honest outcomes: billed, and already-billed (a replayed job finding finished
+ * work). There is no longer a "waiting on pricing" outcome — a flat fee is fully known when its
+ * period begins, so the only reason a period does not produce an invoice is that nobody owed one.
  *
- * Idempotent end to end — the period marker short-circuits a closed month, issued invoices are
+ * Idempotent end to end — the period marker short-circuits a billed month, issued invoices are
  * never rewritten, and a draft is rebuilt whole rather than appended to.
  */
 class BillingPeriodCloseHandler implements JobHandler {
@@ -43,16 +42,17 @@ class BillingPeriodCloseHandler implements JobHandler {
         orgId: job.orgId,
         periodStart: parsed.data.periodStart,
       });
-      if (result.outcome === 'still_open') {
-        logger.info('commerce billing: period not closeable yet — drafts written, waiting on pricing', {
-          orgId: job.orgId,
-          periodStart: parsed.data.periodStart,
-        });
-      }
+      logger.info('commerce billing: period billing job finished', {
+        orgId: job.orgId,
+        periodStart: parsed.data.periodStart,
+        outcome: result.outcome,
+        invoices: result.invoices.length,
+      });
       return { kind: 'done' };
     } catch (error) {
       if (error instanceof ValidationError) {
-        // A malformed or not-yet-ended period never becomes closeable by retrying this payload.
+        // A malformed period, or one that has not begun, never becomes billable by retrying this
+        // same payload.
         return { kind: 'failed', reason: error.message };
       }
       return {
@@ -66,22 +66,25 @@ class BillingPeriodCloseHandler implements JobHandler {
 export const billingPeriodCloseHandler = new BillingPeriodCloseHandler();
 
 /**
- * Queue a close for every (org, month) that needs one: the just-ended month for every org with
- * activity in it, plus any earlier month still marked open — a period whose stragglers the
- * backfill priced late closes on the next sweep instead of never.
+ * Queue billing for every (org, month) that needs it: the CURRENT month for every org holding a
+ * subscription in it, plus any earlier period a previous sweep left marked open.
  *
- * The dedupe key is (org, period, hour): an open period is re-attempted at most hourly, and the
- * attempts stop on their own the moment the marker says closed, because `periodsNeedingClose`
- * stops returning it.
+ * The month is the current one, not the last ended one, because the fee is charged in advance —
+ * an org subscribed on the 1st is invoiced that same day for the month ahead. Nothing waits for
+ * the month to finish because nothing about a flat fee changes while it runs.
+ *
+ * The dedupe key is (org, period, hour), so a period is attempted at most hourly and the attempts
+ * stop on their own the moment the marker says closed, because `periodsNeedingClose` stops
+ * returning it.
  */
 export async function enqueueBillingPeriodCloses(): Promise<number> {
   if (!config.metaCommerce.enabled) return 0;
 
   const now = new Date();
-  // The most recently ENDED month: first of this month is its exclusive end.
-  const periodEnd = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`;
-  const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-  const periodStart = prev.toISOString().slice(0, 10);
+  // The month in progress — billed on its first day, for itself.
+  const periodStart = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`;
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  const periodEnd = next.toISOString().slice(0, 10);
 
   const due = await invoiceRepository.periodsNeedingClose({ periodStart, periodEnd });
   if (due.length === 0) return 0;
