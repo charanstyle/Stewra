@@ -15,10 +15,17 @@ export default async function globalSetup() {
   process.env['COMMERCE_E2E_APP_SECRET'] = stack.appSecret;
   process.env['COMMERCE_E2E_EMAIL'] = stack.user.email;
   process.env['COMMERCE_E2E_PASSWORD'] = stack.user.password;
+  process.env['COMMERCE_E2E_BILLING_PROVIDER'] = stack.billingProvider;
+  process.env['COMMERCE_E2E_DATABASE_URL'] = stack.databaseUrl;
 
   process.stdout.write(
     `\n[commerce-e2e] website ${stack.webUrl} · api ${stack.apiUrl} · graph stub ${stack.graphOrigin}\n` +
-      `[commerce-e2e] QA user ${stack.user.email}\n\n`,
+      `[commerce-e2e] QA user ${stack.user.email}\n` +
+      `[commerce-e2e] billing provider: ${stack.billingProvider}` +
+      (stack.billingProvider === 'manual'
+        ? ' — card entry is NOT covered by this run. Put Stripe TEST keys in backend/.env.test' +
+          ' (STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET) to cover it.\n\n'
+        : '\n\n'),
   );
 
   return async () => {

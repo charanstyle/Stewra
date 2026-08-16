@@ -290,7 +290,11 @@ export default function BillingPage(): React.JSX.Element {
           </section>
         )}
 
-        {canManage && paymentMethod !== null && paymentMethod.provider === 'manual' && (
+        {/* The `!storeBilled` guard repeats what the Stripe branch above does, for a sharper
+            reason: this copy tells the reader to pay by transfer. Shown to an App Store subscriber
+            it invites a second payment for a month Apple has already charged — and unlike a
+            duplicate card charge, a bank transfer has no provider to reverse it. */}
+        {canManage && !storeBilled && paymentMethod !== null && paymentMethod.provider === 'manual' && (
           <section className={styles.card}>
             <h2 className={styles.cardTitle}>Payment method</h2>
             <p className={styles.muted}>

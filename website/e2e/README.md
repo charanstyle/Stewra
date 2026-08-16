@@ -125,8 +125,40 @@ disconnect, a `PENDING` number refused without a PIN then registered with one, a
 webhook routing to the right org's inbox with a reply going back out. Full detail, including why the
 webhook assertions must poll, is in [`TESTING.md`](../../TESTING.md).
 
+`commerce/billing.spec.ts` runs on the same stack and covers the money page: an org on no plan, a
+web subscriber whose $149 invoice is issued by the **real** billing sweep and close job, and an App
+Store subscriber who is shown neither a card form nor an offline-payment note and is never invoiced
+at all. The stack turns the hourly sweep down to two seconds via `COMMERCE_BILLING_SWEEP_MS` —
+which changes when it runs, never what it does; every step it drives is idempotent.
+
 **Untested seam:** the Embedded Signup dialog itself. `metaEmbeddedSignup.ts` loads Meta's SDK from
 `connect.facebook.net`, unreachable from a test; the specs connect through the real API instead.
+
+## The Stripe suite — `commerce/*.stripe.ts`, real test mode, credentials required
+
+```bash
+npm run test:e2e:stripe
+```
+
+Same stack, separate config, one difference: this suite needs real Stripe **test-mode** keys in
+`backend/.env.test` (`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`), and
+`commerce/stripeGlobalSetup.mjs` refuses to start without them.
+
+It is separate precisely because of that. The commerce suite provisions everything it needs, which
+is what lets CI run it at `E2E_MAX_SKIPS=0`; a suite that cannot always run would either break that
+budget or hide behind a skip. Card entry cannot be provisioned: the field is an iframe served by
+`js.stripe.com` and confirmed by Stripe's own script against the publishable key, so — unlike Meta's
+Graph — there is no network boundary at which Stripe can be replaced, and unlike the server's calls
+there is no `STRIPE_API_BASE_URL` that moves the browser somewhere else. A `4242` card in test mode
+is not a compromise here; it is the only honest way to prove a customer can put a card on file.
+
+What it drives: a card typed into Stripe's iframe → the real SetupIntent → the server re-reading
+from Stripe what that setup attached → a $149 invoice issued and then **collected without anyone
+pressing anything**, plus a replace-card pass proving a paid invoice is never charged twice.
+
+The server's half of Stripe — idempotency keys on the wire, two racing collectors, declines, webhook
+signatures over raw bytes — is covered without credentials by `backend/src/tests/commercePayments.test.ts`
+against a scripted stand-in.
 
 ## Safety: destructive / external-OAuth flows are skipped, not omitted
 

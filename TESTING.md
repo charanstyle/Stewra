@@ -439,6 +439,80 @@ its tokens are all real.
 > be inventing a substitute for our own code. The specs connect through the real API instead, so the
 > launcher's three outcomes (code / client cancelled / dialog error) are the untested seam.
 
+### Billing, on the same stack — `commerce/billing.spec.ts`
+
+Three tests, and none of the money in them is simulated. The invoice they wait for is issued by the
+real billing sweep, out of the real close job, against the real plan version the org was frozen at.
+
+1. An org on **no plan** is told so, and has no invoice — not even a draft.
+2. A **web subscriber** (`collector: stewra_stripe`) sees the plan name, `149.00`, "charged in
+   advance" and `Version 1`; a $149 invoice then appears on its own, `issued`, with the derived
+   delinquency warning that names what stops if it goes unpaid.
+3. An **App Store subscriber** (`collector: apple`) is told Apple bills it, is shown **no Payment
+   method section of any kind**, and is still uninvoiced several sweeps later.
+
+Test 3 is the one worth keeping honest. It differs from test 2 in exactly one input — who collects —
+and it caught a real defect: the manual-provider branch of `BillingPage.tsx` had no `storeBilled`
+guard, so an App Store subscriber on a manual install was told to *pay the invoice by transfer*. A
+duplicate card charge can be refunded by the provider; a duplicate bank transfer cannot.
+
+Two pieces of setup a browser cannot perform, both in `commerce/support.ts`:
+
+- **The plan and the subscription** go through `/platform/billing/*`. Those are install-admin
+  surfaces with no page behind them — a client may never write the price it is billed at.
+- **`backdateSubscription`** moves `started_at` before the month began, and deletes that month's
+  `commerce_billing_periods` marker in the same transaction. The platform fee is charged **in
+  advance**, so a period only bills a subscription that was already in force when it started — an
+  org subscribed on the 16th is free until the 1st, by design. Without the backdate there is no
+  invoice to see on any day but the 1st. Without the marker delete, a sweep that fired in the
+  ~200 ms between subscribing and backdating has already closed the period producing zero invoices,
+  and `periodsNeedingClose` never revisits a closed period — the test then fails with a timeout that
+  blames the page. (It did, twice, before the delete was added.)
+
+`COMMERCE_BILLING_SWEEP_MS` turns the hourly sweep down to two seconds for this stack. It changes
+**when** the sweep runs and nothing about what it does: a closed period short-circuits, an issued
+invoice is never rewritten, and a charge carries an idempotency key, so sweeping more often cannot
+bill anyone twice.
+
+> **The trap this suite fell into, worth knowing before writing another spec against this page.**
+> Every empty state on the billing page is also its *initial* state — `subscription` starts null
+> ("not on a plan yet"), `invoices` starts `[]` ("No invoices yet"), `paymentMethod` starts null (so
+> no card section renders at all). An assertion made the moment the page mounts therefore passes
+> against a request that has not been made, and keeps passing after the endpoint behind it breaks.
+> `billingLoaded(page)` waits for `Loading…` to clear — it is cleared in the `finally` of the fetch —
+> and every assertion of an absence must come after it.
+
+### Stripe card entry — `commerce/*.stripe.ts`, credentials required
+
+```bash
+cd website/e2e
+npm run test:e2e:stripe          # needs Stripe TEST keys in backend/.env.test
+```
+
+The same stack, a separate config (`playwright.stripe.config.ts`), and the only suite in the repo
+that talks to Stripe for real. `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY` and
+`STRIPE_WEBHOOK_SECRET` must all be present and all be test-mode; the stack refuses a partial set,
+refuses a live key outright (these specs charge invoices), and `commerce/stripeGlobalSetup.mjs`
+refuses to start at all when the stack came up on `manual`.
+
+**Why it is not part of the commerce suite:** that suite provisions everything it needs, which is
+what lets CI run it at `E2E_MAX_SKIPS=0` — there, a skip is a regression. Card entry cannot be
+provisioned. The field is an iframe served by `js.stripe.com`, confirmed by Stripe's own script
+against the publishable key, so unlike Meta there is no network boundary at which Stripe can be
+replaced, and unlike the server's calls there is no `STRIPE_API_BASE_URL` that redirects a browser.
+Splitting it out keeps the credential-free suite at zero skips instead of parking a permanent one in
+it.
+
+It drives: **Add a card** → `4242…` into Stripe's iframe → the real SetupIntent confirmed by Stripe →
+the server re-reading from Stripe what that setup attached (the browser is handed a setup id and
+believed about nothing) → a $149 invoice issued and then **collected with nobody pressing anything**.
+A second test replaces the card and lets several more sweeps run, asserting the paid invoice stays
+one invoice paid once — the assertion that would catch a retry loop billing a customer every sweep.
+
+The server's half needs no credentials and is covered in `backend/src/tests/commercePayments.test.ts`
+against a scripted stand-in: the idempotency key on the wire, two racing collectors, a decline
+leaving the invoice retryable, and a webhook whose signature is verified over raw bytes.
+
 ---
 
 ## Post-deploy smoke gate — `website/e2e/smoke/`

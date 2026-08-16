@@ -100,8 +100,12 @@ async function templateSync(): Promise<void> {
  * has priced the stragglers, and "your invoice issues within the hour of the data completing" is
  * the promise. The two enqueuers run in one tick, backfill first, so a straggler priced on this
  * pass can close its period on this pass's own close job rather than waiting another hour.
+ *
+ * Read from config rather than fixed here so the browser suite can watch a subscription become an
+ * invoice and an invoice become a charge inside a test's lifetime. Everything downstream is
+ * idempotent, so the cadence is a latency knob and not a correctness one.
  */
-const BILLING_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+const BILLING_SWEEP_INTERVAL_MS = config.commerceWorker.billingSweepMs;
 
 /**
  * Queue the cost backfills, then the period billing, then collection. Guarded like the other

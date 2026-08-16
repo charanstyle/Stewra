@@ -155,9 +155,56 @@ async function createVerifiedUser(apiUrl, databaseUrl, { email, password }) {
  * Starts Graph stub → backend → website, in that order, and resolves with everything the specs
  * need. Every step is awaited to readiness, so a spec never races the boot.
  */
+/**
+ * The Stripe half of the billing config, or `null` when this checkout has no test keys.
+ *
+ * There is no stand-in option here, and that is the whole point. `STRIPE_API_BASE_URL` can redirect
+ * the SERVER's calls, but the card number is typed into an iframe served by js.stripe.com and
+ * confirmed by Stripe's own script against the publishable key — a browser cannot be pointed
+ * somewhere else, and a fake key is rejected before the field renders. So the only honest way to
+ * drive card entry through the UI is Stripe's real test mode, and without keys that leg does not
+ * run at all rather than running against something that is not Stripe.
+ *
+ * All three keys or none: a publishable key with no secret renders a card field whose confirmation
+ * the server cannot verify, which fails halfway through with a message about the wrong thing.
+ */
+function readStripeConfig(backendEnv) {
+  const names = ['STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET'];
+  const present = names.filter((name) => {
+    const value = backendEnv[name];
+    return typeof value === 'string' && value !== '';
+  });
+  if (present.length === 0) return null;
+  if (present.length !== names.length) {
+    const missing = names.filter((name) => !present.includes(name));
+    throw new Error(
+      `[commerce-e2e] backend/.env.test sets ${present.join(', ')} but not ${missing.join(', ')}. ` +
+        'Stripe needs all three or none — a partial set boots a card form that cannot be confirmed.',
+    );
+  }
+  // Test mode is not a preference here. These specs put cards on file and charge invoices; a live
+  // key would move real money on a real account, and the prefix is the only thing that tells them
+  // apart before the first charge.
+  for (const name of ['STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY']) {
+    if (!backendEnv[name].includes('_test_')) {
+      throw new Error(
+        `[commerce-e2e] ${name} in backend/.env.test is not a test-mode key. This suite charges ` +
+          'invoices; refusing to run it against live Stripe.',
+      );
+    }
+  }
+  return {
+    COMMERCE_BILLING_PROVIDER: 'stripe',
+    STRIPE_SECRET_KEY: backendEnv['STRIPE_SECRET_KEY'],
+    STRIPE_PUBLISHABLE_KEY: backendEnv['STRIPE_PUBLISHABLE_KEY'],
+    STRIPE_WEBHOOK_SECRET: backendEnv['STRIPE_WEBHOOK_SECRET'],
+  };
+}
+
 export async function startCommerceStack() {
   const backendEnv = readBackendTestEnv();
   const databaseUrl = requireValue(backendEnv['DATABASE_URL'], 'DATABASE_URL');
+  const stripe = readStripeConfig(backendEnv);
 
   // Meta-shaped ids, so a log line reads like the real thing. The two SECRETS are random per run.
   const appId = '100000000000001';
@@ -211,6 +258,14 @@ export async function startCommerceStack() {
       // 5s poll is tuned for production patience, not for a test that sits inside a 120s budget
       // with three queue hops in it.
       COMMERCE_WORKER_POLL_MS: '500',
+      // Billing sweeps hourly in production. The billing spec subscribes an org and then waits for
+      // the REAL scheduler to close its period, issue the invoice and collect it — an hour of which
+      // no test may sit through. Two seconds, and the sweep's own idempotency does the rest.
+      COMMERCE_BILLING_SWEEP_MS: '2000',
+      // Spread last so an unset Stripe leaves `.env.test`'s own value alone — with no keys the
+      // backend boots on the `manual` provider, which is a real, shippable configuration and the
+      // one every credential-free billing assertion runs against.
+      ...(stripe ?? {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -235,6 +290,14 @@ export async function startCommerceStack() {
     webUrl,
     apiUrl,
     graphOrigin: graph.origin,
+    // Which billing provider the stack actually booted on. Published so a spec asserts against the
+    // configuration that is running rather than guessing from whether a locator appeared.
+    billingProvider: stripe === null ? 'manual' : 'stripe',
+    // The test database, published for the same class of setup `createVerifiedUser` already does
+    // here: a fact no endpoint can establish and no browser can reach. Billing in advance only
+    // bills a subscription that was already in force when the month began, so a run on any day but
+    // the 1st has to backdate one to see an invoice at all.
+    databaseUrl,
     // Published so a spec can sign an inbound webhook exactly as Meta does. Signing it for real is
     // the only way to prove the signature gate lets genuine traffic through.
     appSecret,

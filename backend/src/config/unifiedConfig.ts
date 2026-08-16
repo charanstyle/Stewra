@@ -347,6 +347,22 @@ const EnvSchema = z.object({
   // commerce plane, because a switch that turns off the only consumer while the enqueuers keep
   // running produces a silently growing backlog — the exact failure this queue replaced.
   COMMERCE_WORKER_POLL_MS: z.coerce.number().int().min(250).max(60_000).default(5_000),
+  // How often billing sweeps: backfill costs, close due periods, collect issued invoices. Hourly in
+  // production because a billing period is monthly and the sweep doubles as the retry loop for a
+  // period still waiting on pricing.
+  //
+  // Configurable for the same reason the poll above is, and with the same limit on the blast radius:
+  // it changes WHEN the sweep runs, never what it does. Every step it drives is idempotent — a
+  // closed period short-circuits, an issued invoice is never rewritten, a charge carries an
+  // idempotency key — so sweeping more often cannot bill anyone twice. The browser suite needs it:
+  // an org subscribed after boot waits a full hour for its first invoice otherwise, which is longer
+  // than any test may sit, and stubbing the sweep would leave the real scheduler untested.
+  COMMERCE_BILLING_SWEEP_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(6 * 60 * 60 * 1000)
+    .default(60 * 60 * 1000),
   // How many jobs one pass claims. The batch runs sequentially, so this is also the longest a single
   // pass can take: batch × slowest handler.
   COMMERCE_WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(5),
@@ -1294,6 +1310,7 @@ export const config = {
    */
   commerceStorePlanName: env.COMMERCE_STORE_PLAN_NAME ?? null,
   commerceWorker: {
+    billingSweepMs: env.COMMERCE_BILLING_SWEEP_MS,
     pollMs: env.COMMERCE_WORKER_POLL_MS,
     batchSize: env.COMMERCE_WORKER_BATCH_SIZE,
     leaseSeconds: env.COMMERCE_WORKER_LEASE_SECONDS,

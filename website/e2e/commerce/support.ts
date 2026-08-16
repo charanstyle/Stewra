@@ -7,6 +7,7 @@
 // here.
 import { createHmac, randomUUID } from 'node:crypto';
 import { expect, type Locator, type Page } from '@playwright/test';
+import pg from 'pg';
 
 /**
  * Published by `globalSetup.mjs` once the stack is up. Never defaulted: a guessed port would drive
@@ -304,4 +305,166 @@ export async function grantPricingAndHeadroom(orgId: string): Promise<void> {
   if (cap.status !== 200) {
     throw new Error(`[commerce-e2e] spend cap grant failed (${cap.status}): ${cap.raw}`);
   }
+}
+
+/** Which provider the stack booted billing on. Published by the global setup, never guessed. */
+export const BILLING_PROVIDER = fromStack('COMMERCE_E2E_BILLING_PROVIDER');
+
+/**
+ * The one plan the billing specs subscribe orgs to, created once per worker.
+ *
+ * A fresh name per run rather than a fixture, because plan versions are append-only: reusing a name
+ * across runs would climb the version number forever and make "Version 1" an assertion that passes
+ * exactly once. Install-admin surface, so it goes through `/platform/*` — a client may never write
+ * the price it is billed at, which is the whole reason these routes are separate.
+ */
+let cachedPlan: { id: string; name: string } | null = null;
+
+export async function billingPlan(): Promise<{ id: string; name: string }> {
+  if (cachedPlan !== null) return cachedPlan;
+  const name = `Stewra Pro e2e ${randomUUID().slice(0, 8)}`;
+  const created = await apiCall<{ data: { plan: { id: string; name: string } } }>(
+    '/platform/billing/plans',
+    {
+      method: 'PUT',
+      body: {
+        name,
+        // $149.00 in micros — what the website lists. The stores list $213, which is this figure
+        // grossed up for the headline 30% commission so the net is the same in every channel.
+        platformFeeMicros: '149000000',
+        currency: 'USD',
+        note: 'commerce e2e: the plan the billing page is asserted against',
+      },
+    },
+  );
+  const plan = created.body.data.plan;
+  cachedPlan = plan;
+  return plan;
+}
+
+/** Puts an org on a plan, naming who collects. Install-admin surface; no page writes this. */
+export async function subscribeOrg(params: {
+  orgId: string;
+  planId: string;
+  collector: 'stewra_stripe' | 'apple' | 'google';
+}): Promise<void> {
+  const res = await apiCall(`/platform/billing/subscriptions`, {
+    method: 'PUT',
+    body: {
+      orgId: params.orgId,
+      planId: params.planId,
+      collector: params.collector,
+      note: `commerce e2e: collected by ${params.collector}`,
+    },
+  });
+  if (res.status !== 200) {
+    throw new Error(`[commerce-e2e] subscribe failed (${res.status}): ${res.raw}`);
+  }
+}
+
+/**
+ * Moves a subscription's start back to before the current month began.
+ *
+ * Setup, not the feature. The platform fee is charged IN ADVANCE, which means a period only bills a
+ * subscription that was already in force when the month started — an org subscribed on the 16th is
+ * free until the 1st, by design and with its own backend test. So on any day but the 1st there is
+ * no invoice to see, and a browser suite that wanted to watch one issue and be charged would have
+ * to wait for a calendar month.
+ *
+ * One column, on a row this test created seconds ago, in the test database. Everything downstream —
+ * the sweep, the close job, the invoice, the charge — then runs for real. The same shape of
+ * shortcut, and the same justification, as flipping `email_verified` in `stack.mjs`.
+ *
+ * The period marker goes with it, and that is not an extra liberty — it is the same edit finished.
+ * The sweep runs every two seconds in this stack, so between subscribing and backdating it can
+ * already have closed the current period, correctly producing no invoice for a subscription that
+ * did not exist when the month began. That marker is derived from facts this function is changing,
+ * and `periodsNeedingClose` never revisits a closed period, so leaving it behind means the org is
+ * never billed and the test fails with a timeout that blames the wrong thing. Both statements run
+ * in one transaction so no sweep can observe a backdated subscription against a stale marker.
+ */
+export async function backdateSubscription(orgId: string): Promise<void> {
+  const client = new pg.Client({ connectionString: fromStack('COMMERCE_E2E_DATABASE_URL') });
+  await client.connect();
+  try {
+    await client.query('BEGIN');
+    const updated = await client.query(
+      `UPDATE commerce_subscriptions
+          SET started_at = date_trunc('month', now() AT TIME ZONE 'utc') - interval '1 day'
+        WHERE org_id = $1 AND ended_at IS NULL`,
+      [orgId],
+    );
+    if (updated.rowCount !== 1) {
+      throw new Error(
+        `[commerce-e2e] expected exactly one live subscription for org ${orgId} to backdate, ` +
+          `found ${updated.rowCount}.`,
+      );
+    }
+    await client.query(
+      `DELETE FROM commerce_billing_periods
+        WHERE org_id = $1
+          AND period_start = date_trunc('month', now() AT TIME ZONE 'utc')::date`,
+      [orgId],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Waits until the billing page has actually answered, before anything asserts what it says.
+ *
+ * Needed because every empty state on this page is also its INITIAL state: `subscription` starts
+ * null ("not on a plan yet"), `invoices` starts `[]` ("No invoices yet"), `paymentMethod` starts
+ * null (no card section at all). A test that asserted any of those the moment the page mounted
+ * would pass against a request that had not been made yet, and would keep passing after the
+ * endpoint behind it broke — the exact shape of a test that looks green and covers nothing.
+ *
+ * `Loading…` is the one element tied to the fetch itself: it is cleared in the `finally` of the
+ * billing load, so its absence is the page saying the round trip is over.
+ */
+export async function billingLoaded(page: Page): Promise<void> {
+  await expect(page.getByText('Loading…')).toBeHidden();
+}
+
+/**
+ * Reloads the billing page until `wanted` appears on it, or gives up loudly.
+ *
+ * The billing sweep is a real background timer, so a page rendered one second after a subscription
+ * is created is honestly showing no invoice yet — the only way to see one is to look again. Looking
+ * through the PAGE rather than the API is the point: the invoice has to survive the whole round
+ * trip into the list a customer reads, not merely exist in a table.
+ *
+ * Each attempt WAITS on the locator rather than sampling it. The Plan card that `openOrgPage` waits
+ * for renders on mount, before `GET /billing` has answered — it says "not on a plan yet" until the
+ * data lands — so an instant count after it appears reads an empty list every single time, and the
+ * loop spins to its deadline against a page that had the invoice on it all along. (It did. That is
+ * why this is written the long way.)
+ */
+export async function reloadBillingUntil(
+  page: Page,
+  orgId: string,
+  ready: Locator,
+  wanted: Locator,
+  what: string,
+): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  let attempts = 0;
+  while (Date.now() < deadline) {
+    attempts += 1;
+    await openOrgPage(page, '/commerce/billing', orgId, ready);
+    try {
+      await expect(wanted).toBeVisible({ timeout: 3_000 });
+      return;
+    } catch {
+      // Not there yet. The next sweep is seconds away; reload and look again.
+    }
+  }
+  throw new Error(
+    `[commerce-e2e] billing never showed ${what} for org ${orgId} within 60s (${attempts} reloads).`,
+  );
 }
