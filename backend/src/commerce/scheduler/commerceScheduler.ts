@@ -138,38 +138,53 @@ async function billingSweep(): Promise<void> {
 /**
  * Start the commerce timers. Returns a stop function for graceful shutdown.
  *
- * Tied to `metaCommerce.enabled` and nothing else. There is no credential to renew when the
- * integration is off, and hanging it off an unrelated switch is how someone eventually turns off
- * expiry handling by turning off something they thought was separate.
+ * TWO independent switches, because there are two independent things here.
+ *
+ * The Meta sweeps — channel credentials and template sync — are tied to `metaCommerce.enabled`,
+ * and rightly: there is no credential to renew and no template to mirror when the WhatsApp
+ * integration is off.
+ *
+ * Billing is NOT, and it used to be. A flat monthly platform fee is owed whether or not the
+ * organization ever sends a WhatsApp message, and a subscription bought in the App Store has
+ * nothing to do with Meta at all — yet `META_COMMERCE_ENABLED=false` silently meant no invoice was
+ * ever issued and no invoice was ever collected. That is the exact failure the old comment on this
+ * function warned about, committed by the comment's own code: expiry handling turned off by turning
+ * off something someone thought was separate. It fails in the worst direction too, granting free
+ * credit rather than refusing service, so nobody complains and it runs for months.
+ *
+ * Billing therefore has no switch. It does not need one: it has no credential that can be missing.
+ * Issuing an invoice involves no third party whatsoever, and collecting one is already refused by
+ * `issuedAwaitingCollection` unless a payment method is stored at the configured provider. With no
+ * subscriptions, both enqueuers return zero and the sweep is a no-op.
  *
  * A first pass runs immediately rather than waiting an hour: a deploy that has been down over a
  * weekend may come up with credentials already past their deadline, and an hour of a client being
  * told nothing is an hour they could have spent reconnecting.
  */
 export function startCommerceScheduler(): () => void {
-  if (!config.metaCommerce.enabled) {
-    logger.info('commerce scheduler: disabled (META_COMMERCE_ENABLED=false)');
-    return () => undefined;
-  }
-
   // The worker starts FIRST, and unconditionally alongside the enqueuers. A deploy that enqueues
   // without draining looks healthy — every enqueue succeeds — while the work silently piles up, so
-  // there is deliberately no separate switch that could leave those two apart.
+  // there is deliberately no separate switch that could leave those two apart. It is also why the
+  // worker is outside the Meta guard below: billing enqueues, so something must drain.
   const stopWorker = commerceWorker.start();
 
-  logger.info('commerce scheduler: channel credential sweep enabled');
-  void tokenSweep();
-  tokenTimer = setInterval(() => {
+  if (config.metaCommerce.enabled) {
+    logger.info('commerce scheduler: channel credential sweep enabled');
     void tokenSweep();
-  }, TOKEN_SWEEP_INTERVAL_MS);
-  tokenTimer.unref();
+    tokenTimer = setInterval(() => {
+      void tokenSweep();
+    }, TOKEN_SWEEP_INTERVAL_MS);
+    tokenTimer.unref();
 
-  logger.info('commerce scheduler: template sync enabled');
-  void templateSync();
-  templateTimer = setInterval(() => {
+    logger.info('commerce scheduler: template sync enabled');
     void templateSync();
-  }, TEMPLATE_SYNC_INTERVAL_MS);
-  templateTimer.unref();
+    templateTimer = setInterval(() => {
+      void templateSync();
+    }, TEMPLATE_SYNC_INTERVAL_MS);
+    templateTimer.unref();
+  } else {
+    logger.info('commerce scheduler: Meta sweeps disabled (META_COMMERCE_ENABLED=false)');
+  }
 
   logger.info('commerce scheduler: billing sweep enabled');
   void billingSweep();

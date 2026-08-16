@@ -76,9 +76,13 @@ export const invoiceChargeHandler = new InvoiceChargeHandler();
  *
  * A `manual` install enqueues nothing. That is not a fallback: it is the configured provider
  * saying money moves offline here, and inventing card charges against that would be the surprise.
+ *
+ * The billing provider is the ONLY switch here. It used to also be gated on `metaCommerce.enabled`,
+ * which meant an install selling subscriptions and nothing else issued invoices it then never
+ * collected — silently, and in the direction that grants free credit, so nothing would have
+ * complained. Collecting is already refused unless a payment method is stored at this provider.
  */
 export async function enqueueInvoiceCharges(): Promise<number> {
-  if (!config.metaCommerce.enabled) return 0;
   const provider = config.commerceBilling.provider;
   if (provider === 'manual') return 0;
 

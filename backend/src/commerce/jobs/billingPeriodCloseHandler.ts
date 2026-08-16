@@ -4,7 +4,6 @@ import type { JobHandler, JobOutcome } from './types.js';
 import { billingService } from '../services/billingService.js';
 import { invoiceRepository } from '../repositories/invoiceRepository.js';
 import { jobRepository } from '../repositories/jobRepository.js';
-import { config } from '../../config/unifiedConfig.js';
 import { logger } from '../../utils/logger.js';
 import { ValidationError } from '../../utils/errors.js';
 
@@ -75,11 +74,15 @@ export const billingPeriodCloseHandler = new BillingPeriodCloseHandler();
  *
  * The dedupe key is (org, period, hour), so a period is attempted at most hourly and the attempts
  * stop on their own the moment the marker says closed, because `periodsNeedingClose` stops
- * returning it.
+ * returning it. Note that it dedupes against every job carrying that key regardless of status, so a
+ * FINISHED close still blocks a re-run for the rest of the hour — which is what makes the marker
+ * the thing to look at when a period seems stuck, not the queue.
+ *
+ * Deliberately NOT gated on `metaCommerce.enabled`. The platform fee is owed whether or not the org
+ * ever sends a WhatsApp message, and issuing an invoice involves no third party at all. With no
+ * subscriptions this returns zero, which is the honest answer rather than a suppressed one.
  */
 export async function enqueueBillingPeriodCloses(): Promise<number> {
-  if (!config.metaCommerce.enabled) return 0;
-
   const now = new Date();
   // The month in progress — billed on its first day, for itself.
   const periodStart = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01`;

@@ -326,12 +326,27 @@ afterAll(async () => {
   }
   if (createdOrgs.length > 0) {
     await db.deleteFrom('commerce_jobs').where('org_id', 'in', createdOrgs).execute();
-    // Issued invoices refuse DELETE by trigger, for the same reason the ledger does. Lifted only
-    // here, and said out loud, so the harness borrows the rule rather than the schema losing it.
+    // Issued invoices refuse DELETE by trigger, and so do their lines once the invoice issues.
+    // Lifted only here, and said out loud, so the harness borrows the rule rather than the schema
+    // losing it.
+    //
+    // The line delete is scoped to THIS suite's invoices. It used to have no WHERE clause at all,
+    // which meant every invoice line in the test database, belonging to any suite. That was
+    // invisible while this file was the only thing that created invoices; the browser billing suite
+    // now creates real issued ones too, and the unscoped delete promptly failed against the lines
+    // trigger it did not think to disable. A teardown in a shared database has no business reaching
+    // past its own rows.
     await db.transaction().execute(async (trx) => {
       await sql`ALTER TABLE commerce_invoices DISABLE TRIGGER trg_commerce_invoices_issued_immutable`.execute(trx);
-      await trx.deleteFrom('commerce_invoice_lines').execute();
+      await sql`ALTER TABLE commerce_invoice_lines DISABLE TRIGGER trg_commerce_invoice_lines_draft_only`.execute(trx);
+      await trx
+        .deleteFrom('commerce_invoice_lines')
+        .where('invoice_id', 'in', (eb) =>
+          eb.selectFrom('commerce_invoices').select('id').where('org_id', 'in', createdOrgs),
+        )
+        .execute();
       await trx.deleteFrom('commerce_invoices').where('org_id', 'in', createdOrgs).execute();
+      await sql`ALTER TABLE commerce_invoice_lines ENABLE TRIGGER trg_commerce_invoice_lines_draft_only`.execute(trx);
       await sql`ALTER TABLE commerce_invoices ENABLE TRIGGER trg_commerce_invoices_issued_immutable`.execute(trx);
     });
     await db.transaction().execute(async (trx) => {
