@@ -393,6 +393,39 @@ const EnvSchema = z.object({
   // stand-in in tests — same reasoning as STRIPE_API_BASE_URL.
   APPLE_STORE_API_BASE_URL: z.string().url().optional(),
 
+  // ── Google Play subscriptions (migrations 060–061) ────────────────────────────────────────────
+  // The Android half of the same observation. Play sells the $213 listing, Play charges the card,
+  // and this install reads the result back. Enabling makes the credentials below required at boot,
+  // for the same reason as Apple's: Pub/Sub gives up redelivering eventually, and an event lost
+  // because a key was missing is an entitlement that silently never appears.
+  GOOGLE_PLAY_ENABLED: z.coerce.boolean().default(false),
+  GOOGLE_PLAY_PACKAGE_NAME: z.string().optional(),
+  // The service account authorized on the Play Console for the Android Publisher API. Its key
+  // signs the JWT that is exchanged for an access token; there is no user, no refresh token, and
+  // no interactive consent anywhere in this path.
+  GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
+  // The service account's private key, PEM. Newlines may be written as literal \n.
+  GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY:
+    z.string().optional(),
+  // WHO IS ALLOWED TO PUSH. A Pub/Sub push endpoint is a plain public URL; the only thing that
+  // separates Google's delivery from anyone else's POST is the OIDC token, and the only thing that
+  // separates OUR Google delivery from another Google customer's is these two claims. Both are
+  // required — an audience with no expected caller would accept any Google-issued token at all.
+  GOOGLE_PLAY_PUBSUB_AUDIENCE: z.string().optional(),
+  GOOGLE_PLAY_PUBSUB_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
+  // WHICH LEDGER, exactly as with Apple. Play has no separate sandbox host — a license tester's
+  // free purchase comes back from the same API, flagged `testPurchase`. This says which kind this
+  // install is willing to honor, so a tester cannot hold a real entitlement in production.
+  GOOGLE_PLAY_ENVIRONMENT: z.enum(['sandbox', 'production']).default('sandbox'),
+  // Origin overrides, so the whole notification → token-exchange → lookup chain can be driven
+  // end-to-end against local stand-ins in tests. Same reasoning as STRIPE_API_BASE_URL.
+  GOOGLE_PLAY_API_BASE_URL: z.string().url().default('https://androidpublisher.googleapis.com'),
+  GOOGLE_PLAY_TOKEN_URL: z.string().url().default('https://oauth2.googleapis.com/token'),
+  // Where Google publishes the public keys its OIDC tokens are signed with. Fetched rather than
+  // pinned because Google rotates these on its own schedule and publishes no long-lived root for
+  // them — unlike Apple, who ships a root CA that can be committed and compared byte for byte.
+  GOOGLE_PLAY_JWKS_URL: z.string().url().default('https://www.googleapis.com/oauth2/v3/certs'),
+
   // ── WhatsApp PERSONAL (experimental companion device, via the user-hosted Stewra Bridge) ──────────
   // A SECOND, separate, opt-in channel. Everything above is Meta's sanctioned Cloud API; everything here
   // is the unofficial path, where the user links their OWN WhatsApp account and CAN be permanently
@@ -599,6 +632,24 @@ if (env.APPLE_STORE_ENABLED) {
   ).filter((k) => !env[k]);
   if (missing.length > 0) {
     throw new Error(`APPLE_STORE_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+}
+
+// The Play half of the same guard. The two Pub/Sub values are in this list on purpose: without
+// them the push endpoint would verify that a token came from Google and stop there, which every
+// Google Cloud customer on earth can produce. "Signed by Google" is not "sent by us".
+if (env.GOOGLE_PLAY_ENABLED) {
+  const missing = (
+    [
+      'GOOGLE_PLAY_PACKAGE_NAME',
+      'GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL',
+      'GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY',
+      'GOOGLE_PLAY_PUBSUB_AUDIENCE',
+      'GOOGLE_PLAY_PUBSUB_SERVICE_ACCOUNT_EMAIL',
+    ] as const
+  ).filter((k) => !env[k]);
+  if (missing.length > 0) {
+    throw new Error(`GOOGLE_PLAY_ENABLED=true requires: ${missing.join(', ')}`);
   }
 }
 
@@ -847,6 +898,67 @@ function readAppleStoreConfig(): AppleStoreConfig {
     privateKey: APPLE_STORE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     environment: env.APPLE_STORE_ENVIRONMENT,
     apiBaseUrl: env.APPLE_STORE_API_BASE_URL ?? APPLE_STORE_BASE_URLS[env.APPLE_STORE_ENVIRONMENT],
+  };
+}
+
+/**
+ * Google Play, the same discriminated union for the same reason: narrow on `enabled` and every
+ * credential below is a real string.
+ *
+ * Note what is NOT derived here. Play has no sandbox host to point at — a license tester's free
+ * purchase is returned by the same API as a paying customer's, distinguished only by a
+ * `testPurchase` marker on the purchase itself. So `environment` says what this install is willing
+ * to HONOR, and the adapter compares it against what the store reports per purchase. An install
+ * that accepted either would hand a real entitlement to anyone on the tester list.
+ */
+export type GooglePlayConfig =
+  | { readonly enabled: false }
+  | {
+      readonly enabled: true;
+      readonly packageName: string;
+      readonly serviceAccountEmail: string;
+      /** PEM. Signs the JWT exchanged for an Android Publisher token; never leaves this process. */
+      readonly serviceAccountPrivateKey: string;
+      /** The `aud` an inbound Pub/Sub OIDC token must carry — this endpoint, and no other. */
+      readonly pubsubAudience: string;
+      /** The `email` claim that token must carry — our push subscription, and no other. */
+      readonly pubsubServiceAccountEmail: string;
+      readonly environment: 'sandbox' | 'production';
+      readonly apiBaseUrl: string;
+      readonly tokenUrl: string;
+      readonly jwksUrl: string;
+    };
+
+function readGooglePlayConfig(): GooglePlayConfig {
+  if (!env.GOOGLE_PLAY_ENABLED) return { enabled: false };
+  // As with Apple: the post-parse guard already refused to boot without these, and this re-reads
+  // them as a narrowing that a placeholder cannot satisfy. If it throws, the guard has a hole.
+  const packageName = env.GOOGLE_PLAY_PACKAGE_NAME;
+  const serviceAccountEmail = env.GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL;
+  const serviceAccountKey = env.GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY;
+  const pubsubAudience = env.GOOGLE_PLAY_PUBSUB_AUDIENCE;
+  const pubsubServiceAccountEmail = env.GOOGLE_PLAY_PUBSUB_SERVICE_ACCOUNT_EMAIL;
+  if (
+    packageName === undefined ||
+    serviceAccountEmail === undefined ||
+    serviceAccountKey === undefined ||
+    pubsubAudience === undefined ||
+    pubsubServiceAccountEmail === undefined
+  ) {
+    throw new Error('GOOGLE_PLAY_ENABLED=true but its credentials are not all set');
+  }
+  return {
+    enabled: true,
+    packageName,
+    serviceAccountEmail,
+    // Stored in env with literal \n so it survives a one-line env file; restored here.
+    serviceAccountPrivateKey: serviceAccountKey.replace(/\\n/g, '\n'),
+    pubsubAudience,
+    pubsubServiceAccountEmail,
+    environment: env.GOOGLE_PLAY_ENVIRONMENT,
+    apiBaseUrl: env.GOOGLE_PLAY_API_BASE_URL,
+    tokenUrl: env.GOOGLE_PLAY_TOKEN_URL,
+    jwksUrl: env.GOOGLE_PLAY_JWKS_URL,
   };
 }
 
@@ -1133,6 +1245,7 @@ export const config = {
   /** How invoices are collected. `manual` records money; only `stripe` moves it. */
   commerceBilling: readCommerceBillingConfig(),
   appleStore: readAppleStoreConfig(),
+  googlePlay: readGooglePlayConfig(),
   commerceWorker: {
     pollMs: env.COMMERCE_WORKER_POLL_MS,
     batchSize: env.COMMERCE_WORKER_BATCH_SIZE,

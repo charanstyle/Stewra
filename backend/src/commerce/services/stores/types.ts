@@ -17,15 +17,21 @@
 /**
  * One vocabulary for two stores that name these differently.
  *
- * **Entitlement is `active` or `grace_period`, and nothing else.** The other four all describe a
+ * **Entitlement is `active` or `grace_period`, and nothing else.** The other five all describe a
  * customer who still has a subscription object at the store but is not currently paid up:
- * `on_hold` is Google's account hold after a failed payment, `paused` is a Play-side voluntary
- * pause, `expired` ran out, and `revoked` was refunded or pulled. Treating any of them as entitled
- * serves someone who has stopped paying, which is the expensive direction to be wrong in.
+ * `pending` is a Play purchase whose deferred payment has not cleared, `on_hold` is Google's
+ * account hold after a failed payment, `paused` is a Play-side voluntary pause, `expired` ran out,
+ * and `revoked` was refunded or pulled. Treating any of them as entitled serves someone who has
+ * not paid, which is the expensive direction to be wrong in.
+ *
+ * `pending` exists rather than being folded into `on_hold` because the two are answers to
+ * different questions — "has never paid yet" versus "paid before, and the card just failed" — and
+ * a support conversation that cannot tell them apart is a support conversation that guesses.
  */
 export const STORE_SUBSCRIPTION_STATUSES = [
   'active',
   'grace_period',
+  'pending',
   'on_hold',
   'paused',
   'expired',
@@ -49,13 +55,23 @@ export interface StoreSubscriptionState {
    */
   readonly environment: 'sandbox' | 'production';
   readonly productId: string;
-  /** Apple `originalTransactionId` / Google purchase token — stable across the subscription's life. */
+  /** Apple `originalTransactionId` / the Google purchase token this state was read for. */
   readonly storeSubscriptionRef: string;
   readonly latestTransactionRef: string | null;
   readonly status: StoreSubscriptionStatus;
   /** End of the paid period. Null only when the store did not say — never inferred. */
   readonly currentPeriodEnd: Date | null;
   readonly autoRenewing: boolean;
+  /**
+   * The reference this one REPLACES, when the store has re-issued it.
+   *
+   * Always null for Apple, whose `originalTransactionId` genuinely does survive everything. Google
+   * mints a BRAND NEW purchase token on every upgrade, downgrade and resubscribe, and reports the
+   * one it supersedes as `linkedPurchaseToken`. Ignoring that field is how an org ends up with two
+   * rows for one customer — the old token still looking entitled, the new one unclaimed — so it is
+   * carried here and the caller is expected to retire the old row rather than add a second.
+   */
+  readonly supersedesRef: string | null;
 }
 
 /**
@@ -76,6 +92,24 @@ export type StoreNotification =
       readonly state: StoreSubscriptionState;
     }
   | {
+      /**
+       * The money went back. Carried separately from `subscription` because for Google this is the
+       * ONLY channel that reports it: `purchases.subscriptionsv2.get` has no revoked state, and a
+       * refunded purchase reads back as merely expired — indistinguishable from one that ran its
+       * course. Acting on this needs no current state from the store, only which purchase it was,
+       * which is what makes it safe to handle when the lookup itself would 404 on a dead token.
+       *
+       * Apple never produces this: its refunds arrive as an ordinary notification whose signed
+       * transaction carries a `revocationDate`, and are read out of the data like everything else.
+       */
+      readonly kind: 'revoked';
+      readonly notificationRef: string;
+      readonly notificationType: string;
+      readonly subtype: string | null;
+      readonly store: 'apple' | 'google';
+      readonly storeSubscriptionRef: string;
+    }
+  | {
       readonly kind: 'ignored';
       readonly notificationRef: string;
       readonly notificationType: string;
@@ -87,11 +121,19 @@ export interface StoreProvider {
   readonly store: 'apple' | 'google';
 
   /**
-   * Authenticate a delivery against its RAW bytes and normalize it. Throws AuthenticationError on
-   * anything that does not verify; never partially trusts, and never falls back to trusting the
-   * body because the signature was hard to check.
+   * Authenticate a delivery and normalize it. Throws AuthenticationError on anything that does not
+   * verify; never partially trusts, and never falls back to trusting the body because the
+   * signature was hard to check.
+   *
+   * Both inputs are here because the two stores authenticate in different places. Apple signs the
+   * BODY — the whole proof is in `rawBody`, and the header is nothing. Google does not sign the
+   * body at all: a Pub/Sub push is ordinary JSON, and the only proof it came from Google is the
+   * OIDC token in `authorization`. A port that carried just the bytes would force the Google
+   * adapter to either trust an unsigned body or verify its caller somewhere else, and "the
+   * authentication happens in a different file from the parsing" is how a route ends up wired up
+   * without it.
    */
-  verifyNotification(rawBody: Buffer): Promise<StoreNotification>;
+  verifyNotification(rawBody: Buffer, authorizationHeader: string | null): Promise<StoreNotification>;
 
   /**
    * Ask the store about one subscription by its stable reference. This is what turns an app's

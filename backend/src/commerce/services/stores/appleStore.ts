@@ -297,6 +297,9 @@ function toState(
     status,
     currentPeriodEnd: periodEnd === undefined ? null : new Date(periodEnd),
     autoRenewing: renewal.autoRenewStatus === 1,
+    // Apple never re-issues this. `originalTransactionId` is the same string through renewals,
+    // upgrades and resubscribes, which is the whole reason it is the join key.
+    supersedesRef: null,
   };
 }
 
@@ -326,7 +329,8 @@ function assertOurs(params: { bundleId: string; environment: 'sandbox' | 'produc
 class AppleStoreProvider implements StoreProvider {
   readonly store = 'apple' as const;
 
-  async verifyNotification(rawBody: Buffer): Promise<StoreNotification> {
+  // Apple signs the body, so the Authorization header is not part of the proof and is not read.
+  async verifyNotification(rawBody: Buffer, _authorizationHeader: string | null): Promise<StoreNotification> {
     let body: unknown;
     try {
       body = JSON.parse(rawBody.toString('utf8'));
