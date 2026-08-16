@@ -384,6 +384,10 @@ const EnvSchema = z.object({
   APPLE_STORE_BUNDLE_ID: z.string().optional(),
   APPLE_STORE_ISSUER_ID: z.string().optional(),
   APPLE_STORE_KEY_ID: z.string().optional(),
+  // The ONE auto-renewable product this install sells. A purchase naming anything else is refused
+  // rather than honoured: an app that ships a second product later (a cheaper tier, a consumable)
+  // would otherwise have every one of them silently grant the full plan.
+  APPLE_STORE_PRODUCT_ID: z.string().optional(),
   // The In-App Purchase key (.p8) contents, PEM. Newlines may be written as literal \n.
   APPLE_STORE_PRIVATE_KEY: z.string().optional(),
   // WHICH LEDGER. Not discovered, not retried across: sandbox purchases are free, and an install
@@ -400,6 +404,9 @@ const EnvSchema = z.object({
   // because a key was missing is an entitlement that silently never appears.
   GOOGLE_PLAY_ENABLED: z.coerce.boolean().default(false),
   GOOGLE_PLAY_PACKAGE_NAME: z.string().optional(),
+  // The one subscription product this install sells, exactly as with Apple's. Play's product ids
+  // are per-package and need not match Apple's, so this is its own variable rather than shared.
+  GOOGLE_PLAY_PRODUCT_ID: z.string().optional(),
   // The service account authorized on the Play Console for the Android Publisher API. Its key
   // signs the JWT that is exchanged for an access token; there is no user, no refresh token, and
   // no interactive consent anywhere in this path.
@@ -425,6 +432,19 @@ const EnvSchema = z.object({
   // pinned because Google rotates these on its own schedule and publishes no long-lived root for
   // them — unlike Apple, who ships a root CA that can be committed and compared byte for byte.
   GOOGLE_PLAY_JWKS_URL: z.string().url().default('https://www.googleapis.com/oauth2/v3/certs'),
+
+  // ── What a store purchase BUYS ────────────────────────────────────────────────────────────────
+  // A verified store subscription is an observation; it becomes an agreement only by putting the
+  // org on a plan, and this names which one — matched against `commerce_plans.name`, the same
+  // catalog `/platform/billing/plans` loads.
+  //
+  // Config rather than a column because the mapping is 1:1 and this install sells one plan: the
+  // $213 store listing and the $149 web listing are the SAME plan, differing only in who collects
+  // and therefore in what the customer pays for the store's commission. It is required whenever
+  // either store is enabled, and the claim path refuses loudly if no plan by this name has been
+  // loaded — a purchase that verified but bought nothing is money taken for no entitlement, which
+  // is the one failure here that a customer notices and we would not.
+  COMMERCE_STORE_PLAN_NAME: z.string().optional(),
 
   // ── WhatsApp PERSONAL (experimental companion device, via the user-hosted Stewra Bridge) ──────────
   // A SECOND, separate, opt-in channel. Everything above is Meta's sanctioned Cloud API; everything here
@@ -628,6 +648,7 @@ if (env.APPLE_STORE_ENABLED) {
       'APPLE_STORE_ISSUER_ID',
       'APPLE_STORE_KEY_ID',
       'APPLE_STORE_PRIVATE_KEY',
+      'APPLE_STORE_PRODUCT_ID',
     ] as const
   ).filter((k) => !env[k]);
   if (missing.length > 0) {
@@ -642,6 +663,7 @@ if (env.GOOGLE_PLAY_ENABLED) {
   const missing = (
     [
       'GOOGLE_PLAY_PACKAGE_NAME',
+      'GOOGLE_PLAY_PRODUCT_ID',
       'GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL',
       'GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY',
       'GOOGLE_PLAY_PUBSUB_AUDIENCE',
@@ -651,6 +673,16 @@ if (env.GOOGLE_PLAY_ENABLED) {
   if (missing.length > 0) {
     throw new Error(`GOOGLE_PLAY_ENABLED=true requires: ${missing.join(', ')}`);
   }
+}
+
+// A store that can verify a purchase but has nothing to grant for it is worse than a store that is
+// switched off: the customer has been charged by Apple or Google and this install would accept the
+// receipt, write the observation, and stop. Refuse at boot instead.
+if ((env.APPLE_STORE_ENABLED || env.GOOGLE_PLAY_ENABLED) && !env.COMMERCE_STORE_PLAN_NAME) {
+  throw new Error(
+    'APPLE_STORE_ENABLED or GOOGLE_PLAY_ENABLED requires COMMERCE_STORE_PLAN_NAME — ' +
+      'a verified store purchase must have a plan to put the organization on.',
+  );
 }
 
 if (env.COMMERCE_BILLING_PROVIDER === 'stripe') {
@@ -861,6 +893,8 @@ export type AppleStoreConfig =
   | {
       readonly enabled: true;
       readonly bundleId: string;
+      /** The one auto-renewable product this install sells. Any other product id is refused. */
+      readonly productId: string;
       readonly issuerId: string;
       readonly keyId: string;
       /** The .p8 contents, PEM. Signs the App Store Server API token; never leaves this process. */
@@ -881,17 +915,20 @@ function readAppleStoreConfig(): AppleStoreConfig {
   // narrowing that cannot be satisfied by a placeholder. If it ever throws, the guard has a hole.
   const { APPLE_STORE_BUNDLE_ID, APPLE_STORE_ISSUER_ID, APPLE_STORE_KEY_ID, APPLE_STORE_PRIVATE_KEY } =
     env;
+  const productId = env.APPLE_STORE_PRODUCT_ID;
   if (
     APPLE_STORE_BUNDLE_ID === undefined ||
     APPLE_STORE_ISSUER_ID === undefined ||
     APPLE_STORE_KEY_ID === undefined ||
-    APPLE_STORE_PRIVATE_KEY === undefined
+    APPLE_STORE_PRIVATE_KEY === undefined ||
+    productId === undefined
   ) {
     throw new Error('APPLE_STORE_ENABLED=true but its credentials are not all set');
   }
   return {
     enabled: true,
     bundleId: APPLE_STORE_BUNDLE_ID,
+    productId,
     issuerId: APPLE_STORE_ISSUER_ID,
     keyId: APPLE_STORE_KEY_ID,
     // Stored in env with literal \n so it survives a one-line env file; restored here.
@@ -916,6 +953,8 @@ export type GooglePlayConfig =
   | {
       readonly enabled: true;
       readonly packageName: string;
+      /** The one subscription product this install sells. Any other product id is refused. */
+      readonly productId: string;
       readonly serviceAccountEmail: string;
       /** PEM. Signs the JWT exchanged for an Android Publisher token; never leaves this process. */
       readonly serviceAccountPrivateKey: string;
@@ -934,12 +973,14 @@ function readGooglePlayConfig(): GooglePlayConfig {
   // As with Apple: the post-parse guard already refused to boot without these, and this re-reads
   // them as a narrowing that a placeholder cannot satisfy. If it throws, the guard has a hole.
   const packageName = env.GOOGLE_PLAY_PACKAGE_NAME;
+  const productId = env.GOOGLE_PLAY_PRODUCT_ID;
   const serviceAccountEmail = env.GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL;
   const serviceAccountKey = env.GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY;
   const pubsubAudience = env.GOOGLE_PLAY_PUBSUB_AUDIENCE;
   const pubsubServiceAccountEmail = env.GOOGLE_PLAY_PUBSUB_SERVICE_ACCOUNT_EMAIL;
   if (
     packageName === undefined ||
+    productId === undefined ||
     serviceAccountEmail === undefined ||
     serviceAccountKey === undefined ||
     pubsubAudience === undefined ||
@@ -950,6 +991,7 @@ function readGooglePlayConfig(): GooglePlayConfig {
   return {
     enabled: true,
     packageName,
+    productId,
     serviceAccountEmail,
     // Stored in env with literal \n so it survives a one-line env file; restored here.
     serviceAccountPrivateKey: serviceAccountKey.replace(/\\n/g, '\n'),
@@ -1246,6 +1288,11 @@ export const config = {
   commerceBilling: readCommerceBillingConfig(),
   appleStore: readAppleStoreConfig(),
   googlePlay: readGooglePlayConfig(),
+  /**
+   * The plan a verified store purchase buys, by name. Null only when neither store is enabled —
+   * the boot guard above makes any other combination refuse to start.
+   */
+  commerceStorePlanName: env.COMMERCE_STORE_PLAN_NAME ?? null,
   commerceWorker: {
     pollMs: env.COMMERCE_WORKER_POLL_MS,
     batchSize: env.COMMERCE_WORKER_BATCH_SIZE,

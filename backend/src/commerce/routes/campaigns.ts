@@ -170,6 +170,20 @@ router.post(
   },
 );
 
+// The in-app-purchase equivalent of card capture, and gated identically. It is not a write about
+// price either: the store already set the price and already took the money. What this says is
+// "that purchase over there belongs to this organization", which the server then verifies with the
+// store before believing a word of it.
+router.post(
+  '/billing/store-purchase',
+  requireAuth,
+  verified,
+  requireOrgMember('admin'),
+  (req, res) => {
+    void billingController.claimStorePurchase(req, res);
+  },
+);
+
 router.get('/invoices', requireAuth, verified, requireOrgMember('admin'), (req, res) => {
   void billingController.listInvoices(req, res);
 });

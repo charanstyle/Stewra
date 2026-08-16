@@ -24,6 +24,8 @@ import type {
   CommerceBillingCollector,
   CommercePaymentProvider,
   CommerceSubscriptionView,
+  CommerceStore,
+  CommerceStoreSubscription,
   MessagePricingCategory,
   RateUnit,
   CommerceCostSummary,
@@ -953,6 +955,40 @@ export interface GetOrgBillingResponse {
   readonly subscription: CommerceSubscriptionView | null;
   readonly delinquency: CommerceDelinquency;
   readonly paymentMethod: CommercePaymentMethodState;
+  /**
+   * What the App Store and Play say about subscriptions this org bought there. Normally empty or
+   * one; two only if the same org bought on both platforms.
+   *
+   * Returned here rather than on its own endpoint, for the same reason `delinquency` is: a client
+   * must not be able to render "add a card" without also having been handed the fact that Apple is
+   * already charging this customer every month.
+   */
+  readonly storeSubscriptions: readonly CommerceStoreSubscription[];
+}
+
+/**
+ * POST /orgs/:orgId/billing/store-purchase — an app reports that its user bought the subscription
+ * in the App Store or on Play.
+ *
+ * The body carries a REFERENCE and nothing else, deliberately. No product, no price, no expiry, no
+ * receipt payload: the server reads all of that back from the store's own API, so a decompiled app
+ * replaying an edited body can only ever name a purchase it does not own — which the unique
+ * constraint on `(store, ref)` then refuses. Anything more in this shape would be something a
+ * client could assert, and every field a client can assert is a field somebody eventually forges.
+ */
+export interface ClaimStorePurchaseRequest {
+  readonly store: CommerceStore;
+  /**
+   * Apple: the `originalTransactionId` from the StoreKit transaction. Play: the `purchaseToken`.
+   * Both are what the store's own lookup takes; neither is a receipt.
+   */
+  readonly storeSubscriptionRef: string;
+}
+
+export interface ClaimStorePurchaseResponse {
+  readonly storeSubscription: CommerceStoreSubscription;
+  /** The plan tenure the claim created or refreshed, so the app can render entitlement at once. */
+  readonly subscription: CommerceSubscriptionView | null;
 }
 
 /**

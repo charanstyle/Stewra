@@ -15,35 +15,18 @@
  */
 
 /**
- * One vocabulary for two stores that name these differently.
- *
- * **Entitlement is `active` or `grace_period`, and nothing else.** The other five all describe a
- * customer who still has a subscription object at the store but is not currently paid up:
- * `pending` is a Play purchase whose deferred payment has not cleared, `on_hold` is Google's
- * account hold after a failed payment, `paused` is a Play-side voluntary pause, `expired` ran out,
- * and `revoked` was refunded or pulled. Treating any of them as entitled serves someone who has
- * not paid, which is the expensive direction to be wrong in.
- *
- * `pending` exists rather than being folded into `on_hold` because the two are answers to
- * different questions — "has never paid yet" versus "paid before, and the card just failed" — and
- * a support conversation that cannot tell them apart is a support conversation that guesses.
+ * The status vocabulary and the entitlement rule live in `@stewra/shared-types`, not here: the
+ * website and the app render the same seven words the database checks, and a second copy in this
+ * file would be a list that drifts from the one clients see. Re-exported so the adapters beside
+ * this file keep importing their vocabulary from the port they implement.
  */
-export const STORE_SUBSCRIPTION_STATUSES = [
-  'active',
-  'grace_period',
-  'pending',
-  'on_hold',
-  'paused',
-  'expired',
-  'revoked',
-] as const;
+export {
+  STORE_SUBSCRIPTION_STATUSES,
+  isEntitled,
+  type StoreSubscriptionStatus,
+} from '@stewra/shared-types';
 
-export type StoreSubscriptionStatus = (typeof STORE_SUBSCRIPTION_STATUSES)[number];
-
-/** True only for the two states where the customer has actually paid for the period they are in. */
-export function isEntitled(status: StoreSubscriptionStatus): boolean {
-  return status === 'active' || status === 'grace_period';
-}
+import type { StoreSubscriptionStatus } from '@stewra/shared-types';
 
 /** What a store says about one subscription, right now. Every field is the store's, not a client's. */
 export interface StoreSubscriptionState {

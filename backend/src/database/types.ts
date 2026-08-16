@@ -1397,10 +1397,19 @@ export interface CommerceStoreSubscriptionsTable {
   store: ColumnType<'apple' | 'google', 'apple' | 'google', never>;
   environment: ColumnType<'sandbox' | 'production', 'sandbox' | 'production', never>;
   product_id: string;
-  /** Apple `originalTransactionId` / Google purchase token. Unique per store. */
-  store_subscription_ref: ColumnType<string, string, never>;
+  /**
+   * Apple `originalTransactionId` / Google purchase token. Unique per store.
+   *
+   * Updatable, unlike `store` and `environment` beside it, and only for Google: Play mints a BRAND
+   * NEW purchase token on every upgrade, downgrade and resubscribe and reports the superseded one
+   * as `linkedPurchaseToken`. The row is re-keyed forward onto the live token so one customer keeps
+   * one row — inserting a second would leave the old token still reading entitled. Apple never
+   * re-issues its ref, so nothing on that path ever writes this column twice.
+   */
+  store_subscription_ref: ColumnType<string, string, string>;
   latest_transaction_ref: ColumnType<string | null, string | null | undefined, string | null>;
-  status: 'active' | 'grace_period' | 'on_hold' | 'paused' | 'expired' | 'revoked';
+  /** Widened by migration 061 to add `pending` — a Play purchase whose deferred payment has not cleared. */
+  status: 'active' | 'grace_period' | 'pending' | 'on_hold' | 'paused' | 'expired' | 'revoked';
   current_period_end: ColumnType<Date | null, Date | null | undefined, Date | null>;
   auto_renewing: boolean;
   subscription_id: ColumnType<string | null, string | null | undefined, string | null>;

@@ -82,6 +82,10 @@ const origin = `http://127.0.0.1:${(play.address() as AddressInfo).port}`;
 
 process.env['GOOGLE_PLAY_ENABLED'] = 'true';
 process.env['GOOGLE_PLAY_PACKAGE_NAME'] = PACKAGE_NAME;
+process.env['GOOGLE_PLAY_PRODUCT_ID'] = PRODUCT_ID;
+// Required at boot alongside the credentials: a store that can verify a purchase but has nothing
+// to grant for it would take the customer's money and hand back an observation.
+process.env['COMMERCE_STORE_PLAN_NAME'] = 'Standard';
 process.env['GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL'] = 'stewra-play@stewra.iam.gserviceaccount.com';
 process.env['GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY'] = serviceAccount.privateKey.export({
   type: 'pkcs8',

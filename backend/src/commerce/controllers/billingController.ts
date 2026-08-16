@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type {
   ChargeInvoiceResponse,
+  ClaimStorePurchaseResponse,
   GetInvoiceResponse,
   GetOrgBillingResponse,
   ListInvoicesResponse,
@@ -12,11 +13,12 @@ import type {
   SetSubscriptionResponse,
   UpsertPlanResponse,
 } from '@stewra/shared-types';
-import { COMMERCE_BILLING_COLLECTORS } from '@stewra/shared-types';
+import { COMMERCE_BILLING_COLLECTORS, COMMERCE_STORES } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { billingService } from '../services/billingService.js';
 import { paymentService } from '../services/paymentService.js';
 import { dunningService } from '../services/dunningService.js';
+import { storeSubscriptionService } from '../services/storeSubscriptionService.js';
 import { orgContext } from '../middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 import { AuthenticationError } from '../../utils/errors.js';
@@ -67,6 +69,21 @@ const confirmPaymentMethodSchema = z.object({
 
 const markPaidSchema = z.object({
   note: z.string().min(1).max(2000),
+});
+
+/**
+ * A reference, and which store issued it. Nothing else is accepted and nothing else would be used:
+ * the server reads the product, the status and the period end back from the store's own API, so
+ * every additional field here would be a field a decompiled app could assert.
+ *
+ * 255 matches the column. Both stores' identifiers are far shorter — an `originalTransactionId` is
+ * numeric and a Play purchase token is a long opaque string — so this is a sanity bound, not a
+ * format claim: guessing at either store's format is how a legitimate purchase gets refused after
+ * the customer has already been charged.
+ */
+const claimStorePurchaseSchema = z.object({
+  store: z.enum(COMMERCE_STORES),
+  storeSubscriptionRef: z.string().min(1).max(255),
 });
 
 /**
@@ -127,10 +144,44 @@ class BillingController extends BaseController {
       // the Growth plan" without also having been handed the fact that the last invoice is unpaid.
       const delinquency = await dunningService.delinquency(orgId);
       const paymentMethod = await paymentService.paymentMethodState(orgId);
-      const response: GetOrgBillingResponse = { subscription, delinquency, paymentMethod };
+      // Same argument as the delinquency above: a client must not be able to render "add a card"
+      // without also having been handed the fact that a store is already charging this customer.
+      const storeSubscriptions = await storeSubscriptionService.listForOrg(orgId);
+      const response: GetOrgBillingResponse = {
+        subscription,
+        delinquency,
+        paymentMethod,
+        storeSubscriptions,
+      };
       this.handleSuccess(res, response);
     } catch (error) {
       this.handleError(error, res, 'BillingController.orgBilling');
+    }
+  }
+
+  /**
+   * POST /orgs/:orgId/billing/store-purchase
+   *
+   * The app's side of an in-app purchase. It reports a reference; the server asks the store what
+   * that reference actually is and writes only what the store said. See `claimPurchase` for the
+   * four refusals — wrong ledger, wrong product, not paid up, already somebody else's.
+   */
+  async claimStorePurchase(req: Request, res: Response): Promise<void> {
+    try {
+      const { orgId } = orgContext(req);
+      const body = parse(claimStorePurchaseSchema, req.body);
+      const storeSubscription = await storeSubscriptionService.claimPurchase({
+        orgId,
+        store: body.store,
+        storeSubscriptionRef: body.storeSubscriptionRef,
+      });
+      // Read back rather than assembled: the claim may have created the plan tenure, and the app
+      // renders entitlement from this in the same round trip.
+      const subscription = await billingService.activeSubscription(orgId);
+      const response: ClaimStorePurchaseResponse = { storeSubscription, subscription };
+      this.handleSuccess(res, response);
+    } catch (error) {
+      this.handleError(error, res, 'BillingController.claimStorePurchase');
     }
   }
 

@@ -30,6 +30,7 @@ import rateCardRoutes from './commerce/routes/rateCards.js';
 import spendCapRoutes from './commerce/routes/spendCaps.js';
 import billingRoutes from './commerce/routes/billing.js';
 import paymentsWebhookRoutes from './commerce/routes/paymentsWebhook.js';
+import storeWebhookRoutes from './commerce/routes/storeWebhook.js';
 import metaWebhookRoutes from './commerce/routes/metaWebhook.js';
 import { commerceIntentService } from './commerce/services/commerceIntentService.js';
 import { commerceProposalExecutorRegistry, turnIntentRegistry } from './ports/turnIntent.js';
@@ -78,6 +79,11 @@ export function createApp(): Express {
   app.use('/webhooks/meta', metaWebhookRoutes);
   // The payment provider's webhook, same raw-bytes reasoning: Stripe signs the exact body.
   app.use('/webhooks/payments', paymentsWebhookRoutes);
+  // The App Store and Play server notifications. Apple signs the exact body, so it belongs here for
+  // the same reason as the three above. Play does not sign the body at all — its proof is an OIDC
+  // token in the Authorization header — but it shares the router because the alternative is one
+  // store's deliveries being parsed by a different pipeline from the other's.
+  app.use('/webhooks/stores', storeWebhookRoutes);
 
   app.use(express.json({ limit: '1mb' }));
 

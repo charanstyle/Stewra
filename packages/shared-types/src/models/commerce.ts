@@ -598,6 +598,73 @@ export interface CommerceSubscriptionView {
   readonly createdAt: ISODateString;
 }
 
+/** Which store sold a subscription. Not a payment provider — these two never charge for us. */
+export const COMMERCE_STORES = ['apple', 'google'] as const;
+
+export type CommerceStore = (typeof COMMERCE_STORES)[number];
+
+/**
+ * One vocabulary for two stores that name these differently (migrations 060–061).
+ *
+ * **Entitlement is `active` or `grace_period`, and nothing else.** The other five all describe a
+ * customer who still has a subscription object at the store but is not currently paid up:
+ * `pending` is a Play purchase whose deferred payment has not cleared, `on_hold` is Google's
+ * account hold after a failed payment, `paused` is a Play-side voluntary pause, `expired` ran out,
+ * and `revoked` was refunded or pulled. Treating any of them as entitled serves someone who has
+ * not paid, which is the expensive direction to be wrong in.
+ *
+ * `pending` exists rather than being folded into `on_hold` because the two are answers to
+ * different questions — "has never paid yet" versus "paid before, and the card just failed" — and
+ * a support conversation that cannot tell them apart is a support conversation that guesses.
+ *
+ * This list lives here rather than in the backend's store port so the website and the app render
+ * the same seven words the database checks, instead of a second list that drifts from it.
+ */
+export const STORE_SUBSCRIPTION_STATUSES = [
+  'active',
+  'grace_period',
+  'pending',
+  'on_hold',
+  'paused',
+  'expired',
+  'revoked',
+] as const;
+
+export type StoreSubscriptionStatus = (typeof STORE_SUBSCRIPTION_STATUSES)[number];
+
+/** True only for the two states where the customer has actually paid for the period they are in. */
+export function isEntitled(status: StoreSubscriptionStatus): boolean {
+  return status === 'active' || status === 'grace_period';
+}
+
+/**
+ * What this install currently believes about one store-sold subscription (migration 060).
+ *
+ * Every field is the store's own answer, never a client's claim — see the migration for why. What
+ * is deliberately NOT here is anything a receipt would carry: no transaction blob, no price, no
+ * payment method. The store took the money and the store's receipt is the bill; this is the
+ * observation that decides whether the organization is entitled today.
+ */
+export interface CommerceStoreSubscription {
+  readonly id: UUID;
+  readonly orgId: UUID;
+  readonly store: CommerceStore;
+  /** Which ledger. A `sandbox` row must never be read as a paying customer. */
+  readonly environment: 'sandbox' | 'production';
+  readonly productId: string;
+  /** Apple `originalTransactionId` / the live Google purchase token. */
+  readonly storeSubscriptionRef: string;
+  readonly latestTransactionRef: string | null;
+  readonly status: StoreSubscriptionStatus;
+  /** End of the paid period — during grace, the grace date. Null only when the store did not say. */
+  readonly currentPeriodEnd: ISODateString | null;
+  readonly autoRenewing: boolean;
+  /** The plan tenure this observation created, once it created one. Null while not entitled. */
+  readonly subscriptionId: UUID | null;
+  readonly createdAt: ISODateString;
+  readonly updatedAt: ISODateString;
+}
+
 /**
  * Where an invoice is in its life. `draft` is the honest-refusal state: the period contains
  * messages still unrated or unpriced, so the document exists but does not claim to be a bill yet.

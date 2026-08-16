@@ -239,6 +239,21 @@ class PlanRepository {
     });
   }
 
+  /**
+   * A plan by its catalog name. Used by the store-purchase path, which is told WHICH plan a
+   * verified App Store or Play purchase buys by name (`COMMERCE_STORE_PLAN_NAME`) rather than by
+   * id — an id is generated per install and could not be written into a deploy env, and a name is
+   * the thing an operator actually typed when they loaded the catalog.
+   */
+  async findPlanByName(name: string): Promise<CommercePlan | null> {
+    const row = await db
+      .selectFrom('commerce_plans')
+      .selectAll()
+      .where('name', '=', name)
+      .executeTakeFirst();
+    return row === undefined ? null : toPlan(row);
+  }
+
   /** The org's active subscription (ended_at null), if any. */
   async activeSubscription(orgId: string): Promise<CommerceSubscriptionView | null> {
     const row = await db
