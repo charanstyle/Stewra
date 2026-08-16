@@ -42,6 +42,12 @@ export interface RootStackParamList {
    */
   Activity: undefined;
   /**
+   * Buying the platform subscription in the app, and what the store says about it afterwards.
+   * Pushed over the tabs from Commerce. A stack screen rather than a tab because it is a thing you
+   * do once and then rarely look at, not a place you work.
+   */
+  Subscription: undefined;
+  /**
    * The biometric gate for approving an email Stewra drafted, reached by tapping Approve on the
    * approval notification. Carries only the message id — the draft is fetched over the authenticated
    * session, never from the notification, so the OS never holds the email's contents.

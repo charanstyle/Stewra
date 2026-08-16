@@ -87,6 +87,11 @@ const config: ExpoConfig = {
   plugins: [
     'expo-dev-client',
     'expo-secure-store',
+    // In-app subscriptions. The plugin adds StoreKit on iOS and the Play Billing library on
+    // Android, so this is a native change: adding it needs a new dev-client / EAS build, and the
+    // purchase flow cannot be exercised in Expo Go at all. `expo install expo-iap` could not write
+    // this entry itself — the config is dynamic (a .ts module) and it only edits static app.json.
+    'expo-iap',
     // SDK 55 requires an explicit config-plugin entry for expo-audio (voice notes).
     'expo-audio',
     [

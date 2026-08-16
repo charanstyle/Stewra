@@ -10,6 +10,8 @@ import type {
   OrgMembership,
 } from '@stewra/shared-types';
 import { roleMeetsMinimum } from '@stewra/shared-types';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import type { MainTabParamList } from '../../navigation/types';
 import { api, ApiError } from '../../services/api';
 import { theme } from '../../theme/colors';
 
@@ -36,7 +38,9 @@ function windowRemaining(expiresAt: string | null): string | null {
  * the website; Meta's Embedded Signup is a browser dialog, and a phone keyboard is the wrong place
  * to write a compliance attestation.
  */
-export default function CommerceScreen(): React.JSX.Element {
+export default function CommerceScreen({
+  navigation,
+}: BottomTabScreenProps<MainTabParamList, 'Commerce'>): React.JSX.Element {
   const [memberships, setMemberships] = useState<ReadonlyArray<OrgMembership>>([]);
   const [orgId, setOrgId] = useState<string | null>(null);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
@@ -224,6 +228,21 @@ export default function CommerceScreen(): React.JSX.Element {
             <Text style={styles.smallButtonLabel}>Use this business when I text Stewra</Text>
           </Pressable>
         )}
+
+        {/*
+          The only billing control on this screen, and deliberately a link rather than a section:
+          buying the subscription is a store flow with its own lifecycle (an interrupted purchase is
+          redelivered on the next launch), and hosting that inside a screen that also polls the
+          inbox would mean two things competing for the same "busy" state.
+        */}
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => navigation.navigate('Subscription')}
+          style={({ pressed }) => [styles.smallButton, styles.standalone, pressed && styles.pressed]}
+          testID="open-subscription"
+        >
+          <Text style={styles.smallButtonLabel}>Subscription and billing</Text>
+        </Pressable>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Numbers</Text>

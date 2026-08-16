@@ -29,7 +29,7 @@ EXPLICIT_UDID="${2:-}"
 # from a cleared state, which would otherwise sign the earlier flows out from under themselves.
 # today runs before pause (a lingering mid-failure pause would starve today's recompute), and both
 # before the messaging/call flows so a paused account can never be what a call failure means.
-ORDER=(login.yaml today.yaml activity.yaml connections.yaml pause.yaml send-message.yaml call-smoke.yaml logout.yaml full.yaml)
+ORDER=(login.yaml today.yaml activity.yaml connections.yaml subscription.yaml pause.yaml send-message.yaml call-smoke.yaml logout.yaml full.yaml)
 
 declare -a FLOWS=()
 for name in "${ORDER[@]}"; do

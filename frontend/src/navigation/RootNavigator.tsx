@@ -16,6 +16,7 @@ import ConversationScreen from '../screens/chat/ConversationScreen';
 import EmailApprovalScreen from '../screens/chat/EmailApprovalScreen';
 import CallScreen from '../screens/call/CallScreen';
 import ActivityScreen from '../screens/settings/ActivityScreen';
+import SubscriptionScreen from '../screens/commerce/SubscriptionScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -90,6 +91,11 @@ export default function RootNavigator(): React.JSX.Element {
               name="Activity"
               component={ActivityScreen}
               options={{ title: 'Activity' }}
+            />
+            <Stack.Screen
+              name="Subscription"
+              component={SubscriptionScreen}
+              options={{ title: 'Subscription' }}
             />
           </>
         )}

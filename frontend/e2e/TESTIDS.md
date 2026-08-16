@@ -39,6 +39,14 @@ Convention: kebab-case `<screen-or-area>-<element>`.
 | `settings-connect-google` | `src/components/settings/ConnectionsCard.tsx` | The "Connect a Google account" button (opens the consent alert, then the browser) |
 | `settings-pause-switch` | `src/screens/settings/SettingsScreen.tsx` | The global "Pause Stewra" kill switch |
 | `settings-activity-link` | `src/screens/settings/SettingsScreen.tsx` | The Settings row that pushes the Activity screen |
+| `open-subscription` | `src/screens/commerce/CommerceScreen.tsx` | The "Subscription and billing" row that pushes the Subscription screen |
+| `subscription-screen` | `src/screens/commerce/SubscriptionScreen.tsx` | The Subscription screen's scroll container — presence only means it mounted, so flows assert on the plan card below as well |
+| `subscription-plan-card` | `src/screens/commerce/SubscriptionScreen.tsx` | The "Your plan" card, rendered once `GET /orgs/:orgId/billing` has answered |
+| `subscription-price` | `src/screens/commerce/SubscriptionScreen.tsx` | The store's localized price. Absent unless the store returned the product — which needs a StoreKit config (iOS) or an internal-track build with a license tester (Android), so no simulator flow can rely on it |
+| `subscribe-button` | `src/screens/commerce/SubscriptionScreen.tsx` | Starts the store's purchase sheet. Same availability caveat as the price |
+| `restore-purchases` | `src/screens/commerce/SubscriptionScreen.tsx` | Re-claims a subscription this store account already owns. Required by App Review; gated on the admin role |
+| `store-subscription-status` | `src/screens/commerce/SubscriptionScreen.tsx` | What the store says about the subscription, in plain words. Absent until one has been claimed |
+| `subscription-error` / `subscription-notice` | `src/screens/commerce/SubscriptionScreen.tsx` | The screen's failure and success lines |
 | `today-onboarding` | `src/components/today/OnboardingCard.tsx` | The cold-start card on Today (shown while the user has no connections, or none of the value computed yet) |
 | `onboarding-connect-google` | `src/components/today/OnboardingCard.tsx` | The onboarding "Connect Google Calendar" button (consent alert, then browser) |
 

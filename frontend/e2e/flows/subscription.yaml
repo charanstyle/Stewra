@@ -1,0 +1,36 @@
+# Commerce → Subscription — the in-app purchase screen.
+#
+# WHAT THIS COVERS, and what it deliberately does not.
+#
+# It covers the screen: that Commerce offers a way in, that the screen mounts, and that it reports
+# the plan state it got from `GET /orgs/:orgId/billing` rather than a spinner. That is the half a
+# simulator can actually prove.
+#
+# It does NOT cover buying anything, because a simulator cannot. iOS needs a StoreKit configuration
+# in the run scheme (or a real device on a sandbox Apple ID); Android needs Play Services, a signed
+# build on an internal track, and a license-tester account — neither of which a Maestro run on an
+# emulator has. Faking a purchase to make this flow green would test the fake, so the purchase leg
+# is a live-device task instead, tracked separately.
+#
+# Assumes a signed-in session; run after login.yaml like the rest.
+appId: com.stewra.app
+---
+- runFlow: lib/goto-chats.yaml
+# Regex covers Android's plain "Commerce" tab label and iOS's composed "Commerce, tab, 5 of 6".
+- tapOn: "Commerce(, tab, .*)?"
+- extendedWaitUntil:
+    visible:
+      id: "open-subscription"
+    timeout: 20000
+- tapOn:
+    id: "open-subscription"
+- extendedWaitUntil:
+    visible:
+      id: "subscription-screen"
+    timeout: 20000
+# The plan card, not merely the screen: the screen renders while still loading, and a flow that
+# stopped at the container would pass against a billing call that never returned.
+- extendedWaitUntil:
+    visible:
+      id: "subscription-plan-card"
+    timeout: 20000

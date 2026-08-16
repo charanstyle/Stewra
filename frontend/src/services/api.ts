@@ -75,6 +75,9 @@ import type {
   CancelBroadcastResponse,
   ResumeBroadcastResponse,
   ListCommerceJobsResponse,
+  GetOrgBillingResponse,
+  ClaimStorePurchaseRequest,
+  ClaimStorePurchaseResponse,
   ListActivityResponse,
   ListConnectionsResponse,
   StartCalendarConnectionResponse,
@@ -539,4 +542,21 @@ export const api = {
 
   listCommerceJobs: (orgId: string): Promise<ListCommerceJobsResponse> =>
     request(`/orgs/${orgId}/jobs?limit=20`),
+
+  /** What plan the org is on, who bills it, and what the stores say about it. Admin-gated. */
+  getOrgBilling: (orgId: string): Promise<GetOrgBillingResponse> =>
+    request(`/orgs/${orgId}/billing`),
+
+  /**
+   * Report an in-app purchase to the server, which then asks the store what it actually is.
+   *
+   * The body carries a REFERENCE and nothing else — no product, no price, no expiry, no receipt.
+   * That is the contract, not an omission: everything written server-side comes from Apple's or
+   * Play's own API, so this call cannot describe a purchase, only name one.
+   */
+  claimStorePurchase: (
+    orgId: string,
+    body: ClaimStorePurchaseRequest,
+  ): Promise<ClaimStorePurchaseResponse> =>
+    request(`/orgs/${orgId}/billing/store-purchase`, { method: 'POST', body }),
 };
