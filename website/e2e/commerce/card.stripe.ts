@@ -93,6 +93,12 @@ test.describe('stripe card', () => {
     await page.goto(`${WEB}/commerce`, { waitUntil: 'domcontentloaded' });
     const orgId = await createOrg(page, `Acme Stripe ${Date.now()}`);
     await subscribeOrg({ orgId, planId: plan.id, collector: 'stewra_stripe' });
+    // Backdated up front, so the invoice is issued BEFORE a card exists. That order is the real
+    // one — a customer is billed for the month and then goes to pay — and it makes the test say
+    // more: the invoice has to sit there uncollected for want of a payment method, and be picked up
+    // by a later sweep once one appears. Adding the card first would prove only that a charge
+    // works when everything was already in place.
+    await backdateSubscription(orgId);
 
     await openOrgPage(page, '/commerce/billing', orgId, planCard(page));
     await billingLoaded(page);
@@ -101,6 +107,18 @@ test.describe('stripe card', () => {
     await expect(
       page.getByText('No card on file. Invoices will be issued but nothing can be collected'),
     ).toBeVisible();
+
+    // The invoice arrives while there is still nothing to charge. `issuedAwaitingCollection`
+    // requires a stored method at this provider, so it must stay `issued` — enqueueing a charge
+    // that cannot succeed would manufacture failed attempts that read like declines in the record,
+    // which is a much more alarming fact than "this customer has not paid yet".
+    await reloadBillingUntil(
+      page,
+      orgId,
+      planCard(page),
+      invoiceRows(page).filter({ hasText: 'issued' }).first(),
+      'an invoice issued before any card existed',
+    );
 
     await page.getByRole('button', { name: 'Add a card' }).click();
     await fillCard(page);
@@ -120,13 +138,9 @@ test.describe('stripe card', () => {
     expect(billing.body.data.paymentMethod.provider).toBe('stripe');
     expect(billing.body.data.paymentMethod.stored).toBe(true);
 
-    // Now give it something to collect. Backdated for the same reason as in `billing.spec.ts`: the
-    // fee is charged in advance, so a subscription that began today is free until the 1st.
-    await backdateSubscription(orgId);
-
-    // From here nothing is driven — the real sweep enqueues the close, the real close job issues
-    // the $149 invoice, the real charge job collects it through Stripe, and the page reports `paid`
-    // without anyone pressing anything. That silence is the feature.
+    // From here nothing is driven. The invoice was already sitting there uncollected; the card
+    // arriving is the only thing that changed, and the next sweep collects it through Stripe on its
+    // own. Nobody presses anything, and that silence is the feature.
     await reloadBillingUntil(
       page,
       orgId,

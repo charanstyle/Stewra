@@ -375,13 +375,21 @@ export async function subscribeOrg(params: {
  * the sweep, the close job, the invoice, the charge — then runs for real. The same shape of
  * shortcut, and the same justification, as flipping `email_verified` in `stack.mjs`.
  *
- * The period marker goes with it, and that is not an extra liberty — it is the same edit finished.
- * The sweep runs every two seconds in this stack, so between subscribing and backdating it can
- * already have closed the current period, correctly producing no invoice for a subscription that
- * did not exist when the month began. That marker is derived from facts this function is changing,
- * and `periodsNeedingClose` never revisits a closed period, so leaving it behind means the org is
- * never billed and the test fails with a timeout that blames the wrong thing. Both statements run
- * in one transaction so no sweep can observe a backdated subscription against a stale marker.
+ * TWO pieces of derived state go with it, and neither is an extra liberty — they are the same edit
+ * finished. The sweep runs every two seconds in this stack, so between subscribing and backdating it
+ * can already have closed the current period, correctly producing no invoice for a subscription that
+ * did not exist when the month began. That leaves behind:
+ *
+ *  1. a CLOSED `commerce_billing_periods` marker, which `periodsNeedingClose` never revisits; and
+ *  2. a finished `billing_period_close` JOB, whose dedupe key is `(org, period, hour)` — and
+ *     `enqueue` dedupes against every job with that key regardless of status, so nothing can be
+ *     re-enqueued for the rest of the clock hour.
+ *
+ * Clearing only the marker is not enough, and the way it fails is instructive: the sweep starts
+ * logging `{"due":1,"enqueued":0}` every two seconds — it can see the work, and it silently declines
+ * to schedule it — until the hour rolls over. The test then times out blaming the page. Both are
+ * deleted here, in one transaction with the backdate, so no sweep can observe a backdated
+ * subscription against either kind of stale residue.
  */
 export async function backdateSubscription(orgId: string): Promise<void> {
   const client = new pg.Client({ connectionString: fromStack('COMMERCE_E2E_DATABASE_URL') });
@@ -404,6 +412,13 @@ export async function backdateSubscription(orgId: string): Promise<void> {
       `DELETE FROM commerce_billing_periods
         WHERE org_id = $1
           AND period_start = date_trunc('month', now() AT TIME ZONE 'utc')::date`,
+      [orgId],
+    );
+    // Every close job this org has, not just this hour's: they are all for a period that had not
+    // begun under the old start date, and the org was created by this test seconds ago, so there is
+    // nothing here worth keeping. Leaving one behind holds the dedupe key and starves the sweep.
+    await client.query(
+      `DELETE FROM commerce_jobs WHERE org_id = $1 AND kind = 'billing_period_close'`,
       [orgId],
     );
     await client.query('COMMIT');

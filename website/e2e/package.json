@@ -8,7 +8,7 @@
     "test:e2e": "playwright test",
     "test:e2e:seeded": "./with-prod-db.sh",
     "test:e2e:commerce": "playwright test -c playwright.commerce.config.ts",
-    "test:e2e:stripe": "playwright test -c playwright.stripe.config.ts",
+    "test:e2e:stripe": "E2E_MAX_SKIPS=0 playwright test -c playwright.stripe.config.ts",
     "test:smoke:preview": "playwright test -c playwright.smoke.config.ts smoke/render.smoke.ts",
     "test:smoke:deployed": "playwright test -c playwright.smoke.config.ts",
     "test:e2e:headed": "playwright test --headed",
