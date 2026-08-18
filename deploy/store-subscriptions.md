@@ -28,9 +28,12 @@ listings differ only in who collects.
 
 ## Before either console: the plan must exist
 
-The claim path refuses loudly if `COMMERCE_STORE_PLAN_NAME` names a plan that has not been
-loaded — a purchase that verified but bought nothing is money already taken for no entitlement.
-So load the plan first, as an install admin (`INSTALL_ADMIN_EMAILS`):
+**The backend refuses to boot** if `COMMERCE_STORE_PLAN_NAME` names a plan that is not loaded, or
+one carrying no versions — a store-enabled install that cannot say what a purchase buys does not
+start. The claim path refuses too, but by then the store has taken the customer's money for an
+entitlement nobody can grant, so the check runs at startup and names the plans that *are* loaded
+(a case difference is the mismatch that actually ships). Load the plan **before** setting the
+store flags, as an install admin (`INSTALL_ADMIN_EMAILS`):
 
 ```
 PUT /api/platform/billing/plans

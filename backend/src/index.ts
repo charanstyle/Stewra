@@ -14,6 +14,7 @@ import { startScheduler } from './scheduler/scheduler.js';
 // that scheduler belongs to the personal-assistant plane, and this file is the composition root
 // where the two contexts are allowed to meet.
 import { startCommerceScheduler } from './commerce/scheduler/commerceScheduler.js';
+import { storeSubscriptionService } from './commerce/services/storeSubscriptionService.js';
 import type { AppServer } from './websocket/types.js';
 
 /**
@@ -24,6 +25,12 @@ import type { AppServer } from './websocket/types.js';
 async function main(): Promise<void> {
   await assertDbConnection();
   logger.info('Database connection OK');
+
+  // A store-enabled install must be able to say WHICH plan a verified purchase buys before it is
+  // allowed to sell one. Config can only prove a name was typed; this proves it resolves. No-op
+  // unless APPLE_STORE_ENABLED or GOOGLE_PLAY_ENABLED, and a refusal here is the point — the
+  // alternative is discovering the mismatch from a customer who has already been charged.
+  await storeSubscriptionService.assertStorePlanLoaded();
 
   const app = createApp();
   // Own the http.Server explicitly (rather than app.listen) so Socket.IO can attach to it. createApp()

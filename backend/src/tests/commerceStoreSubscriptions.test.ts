@@ -129,6 +129,9 @@ const { organizationRepository } = await import(
   '../commerce/repositories/organizationRepository.js'
 );
 const { planRepository } = await import('../commerce/repositories/planRepository.js');
+const { storeSubscriptionService } = await import(
+  '../commerce/services/storeSubscriptionService.js'
+);
 
 const app = express();
 // Raw-body webhook BEFORE express.json, mirroring app.ts.
@@ -338,6 +341,94 @@ afterAll(async () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The boot probe, which is the only thing here that runs before anybody can buy anything.
+ *
+ * `COMMERCE_STORE_PLAN_NAME` is matched against a free-text catalog name, and the config guard can
+ * only prove somebody typed one. Everything below is the same failure — the name resolves to
+ * nothing that can be granted — caught in the operator's terminal instead of by a customer the
+ * store has already charged. So each case asserts on the REFUSAL, never on a recovery.
+ */
+describe('the boot probe for the plan a purchase buys', () => {
+  const RENAMED = `${PLAN_NAME} (moved by the probe suite)`;
+
+  it('passes when the configured plan is loaded', async () => {
+    await expect(storeSubscriptionService.assertStorePlanLoaded()).resolves.toBeUndefined();
+  });
+
+  it('refuses when the configured name matches no plan', async () => {
+    // The state an operator reaches by renaming the plan in the catalog after the env was written.
+    // Moving ours out of the way reproduces it exactly, without inventing a row.
+    await db
+      .updateTable('commerce_plans')
+      .set({ name: RENAMED })
+      .where('id', '=', planId)
+      .execute();
+    try {
+      await expect(storeSubscriptionService.assertStorePlanLoaded()).rejects.toThrow(
+        `COMMERCE_STORE_PLAN_NAME="${PLAN_NAME}" names no plan`,
+      );
+    } finally {
+      await db
+        .updateTable('commerce_plans')
+        .set({ name: PLAN_NAME })
+        .where('id', '=', planId)
+        .execute();
+    }
+  });
+
+  it('points at the plan whose name differs only in case', async () => {
+    // The mismatch that actually gets shipped. Both spellings look identical in a deploy diff, and
+    // "names no plan" on its own reads as "the catalog is empty" — which sends the operator to load
+    // a SECOND plan rather than fix one character.
+    const miscased = PLAN_NAME.toUpperCase();
+    await db
+      .updateTable('commerce_plans')
+      .set({ name: miscased })
+      .where('id', '=', planId)
+      .execute();
+    try {
+      await expect(storeSubscriptionService.assertStorePlanLoaded()).rejects.toThrow(
+        `Did you mean "${miscased}"?`,
+      );
+    } finally {
+      await db
+        .updateTable('commerce_plans')
+        .set({ name: PLAN_NAME })
+        .where('id', '=', planId)
+        .execute();
+    }
+  });
+
+  it('refuses a plan that exists but carries no versions', async () => {
+    // Existence is not the question a purchase asks. `setSubscription` writes against a plan's
+    // LATEST VERSION, so a bare plan row is a name that resolves and still grants nothing — and
+    // nothing in the schema forbids one, so a hand-written catalog fix can produce it.
+    await db
+      .updateTable('commerce_plans')
+      .set({ name: RENAMED })
+      .where('id', '=', planId)
+      .execute();
+    const bare = await db
+      .insertInto('commerce_plans')
+      .values({ name: PLAN_NAME })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    try {
+      await expect(storeSubscriptionService.assertStorePlanLoaded()).rejects.toThrow(
+        'has no versions',
+      );
+    } finally {
+      await db.deleteFrom('commerce_plans').where('id', '=', bare.id).execute();
+      await db
+        .updateTable('commerce_plans')
+        .set({ name: PLAN_NAME })
+        .where('id', '=', planId)
+        .execute();
+    }
+  });
+});
 
 describe('claiming a purchase', () => {
   it('writes what Play says and puts the organization on the plan', async () => {

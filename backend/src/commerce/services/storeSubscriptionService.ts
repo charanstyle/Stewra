@@ -38,6 +38,74 @@ export type StoreNotificationOutcome =
   | 'foreign_product';
 
 class StoreSubscriptionService {
+  /**
+   * Prove at boot that a verified purchase would actually buy something.
+   *
+   * `COMMERCE_STORE_PLAN_NAME` is free text matched against `commerce_plans.name`, and the config
+   * guard can only check that somebody typed one. A typo, a plan renamed in the catalog, or an
+   * install whose catalog was never loaded all leave a store-enabled backend that boots clean,
+   * lists a subscription, lets the store take the customer's money — and only then discovers it has
+   * nothing to grant. `reconcileEntitlement` does refuse loudly at that point, but by then the
+   * charge has happened. This is the same refusal moved to where it costs nothing: the operator's
+   * terminal, before anyone can pay.
+   *
+   * Existence is not the whole question. `setSubscription` writes against a plan's LATEST VERSION,
+   * so a plan row carrying no versions is a name that resolves and still grants nothing.
+   *
+   * No-op unless a store is enabled — an install that sells only through Stripe has no plan name
+   * to check and must not be held to one.
+   */
+  async assertStorePlanLoaded(): Promise<void> {
+    if (!config.appleStore.enabled && !config.googlePlay.enabled) return;
+
+    const planName = config.commerceStorePlanName;
+    if (planName === null) {
+      // Unreachable: the post-parse guard in unifiedConfig refuses this pair. If it ever throws,
+      // that guard has a hole — and the hole is worth the crash either way.
+      throw new Error(
+        'A store is enabled but COMMERCE_STORE_PLAN_NAME is not set, so a verified purchase would ' +
+          'have nothing to buy.',
+      );
+    }
+
+    const catalog = await planRepository.listPlans();
+    const match = catalog.find((entry) => entry.plan.name === planName);
+    if (match === undefined) {
+      // What the operator is told next is the whole value of this refusal. The lookup is an exact
+      // string match, so the mismatch that actually happens is a case or whitespace difference —
+      // invisible reading the env file, obvious the moment both spellings sit on one line.
+      const fold = (name: string): string => name.trim().toLowerCase();
+      const near = catalog.find((entry) => fold(entry.plan.name) === fold(planName));
+      const NAMES_SHOWN = 10;
+      const rest = catalog.length - NAMES_SHOWN;
+      const hint =
+        catalog.length === 0
+          ? 'No plans are loaded at all — load one with PUT /api/platform/billing/plans.'
+          : near !== undefined
+            ? `Did you mean "${near.plan.name}"? The match is exact, case and spacing included.`
+            : `Loaded plans: ${catalog
+                .slice(0, NAMES_SHOWN)
+                .map((entry) => `"${entry.plan.name}"`)
+                .join(', ')}${rest > 0 ? ` and ${rest} more` : ''}.`;
+      throw new Error(
+        `COMMERCE_STORE_PLAN_NAME="${planName}" names no plan in this install's catalog, so every ` +
+          `store purchase would verify and grant nothing. ${hint}`,
+      );
+    }
+    if (match.versions.length === 0) {
+      throw new Error(
+        `COMMERCE_STORE_PLAN_NAME="${planName}" names a plan that has no versions. A subscription ` +
+          'is written against a plan VERSION, so a purchase would verify and grant nothing.',
+      );
+    }
+
+    logger.info('commerce stores: the plan a store purchase buys is loaded', {
+      planName,
+      planId: match.plan.id,
+      versions: match.versions.length,
+    });
+  }
+
   /** Every store subscription an org holds — what the billing page renders the store section from. */
   async listForOrg(orgId: string): Promise<CommerceStoreSubscription[]> {
     return storeSubscriptionRepository.listForOrg(orgId);
