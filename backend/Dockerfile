@@ -91,6 +91,13 @@ COPY --from=build /app/packages/agent-runtime/package.json ./packages/agent-runt
 COPY --from=build /app/packages/agent-runtime/dist ./packages/agent-runtime/dist
 COPY --from=build /app/backend/package.json ./backend/package.json
 COPY --from=build /app/backend/dist ./backend/dist
+# Apple's root CA, which the App Store receipt/notification verifier chains every JWS x5c header to
+# (backend/src/commerce/services/stores/appleStore.ts resolves it as ../../../../certs from its
+# compiled location, i.e. /app/backend/certs). It is committed to the repo and was present in the
+# build stage via `COPY . .`, but the runtime stage copies dist only — so without this line every
+# purchase claim and every App Store server notification fails at verification. It is a public root
+# certificate, not a secret.
+COPY --from=build /app/backend/certs ./backend/certs
 
 # Baked STT/TTS tools + models. Point stewra.env at these (see .env.example):
 #   WHISPER_BIN=/opt/voice/bin/whisper-cli   WHISPER_MODEL=/opt/voice/models/ggml-base.en.bin
