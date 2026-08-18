@@ -34,7 +34,8 @@ So load the plan first, as an install admin (`INSTALL_ADMIN_EMAILS`):
 
 ```
 PUT /api/platform/billing/plans
-{ "name": "Stewra Pro", "platformFeeMicros": "149000000", "currency": "USD" }
+{ "name": "Stewra Pro", "platformFeeMicros": "149000000", "currency": "USD",
+  "note": "why this rate is being loaded — required, 1-2000 chars" }
 ```
 
 `platformFeeMicros` is the **net** figure ($149). The $213 lives only in the store consoles —
