@@ -15,12 +15,23 @@ The platform fee is **$149/month net to Stewra in every channel**.
 
 - Web (Stripe): the customer is charged **$149**. Stripe's fee comes out of that; it is small and
   is treated as a cost of collection, not a listing decision.
-- App Store and Play: the customer is charged **$213**, which is `$149 ÷ 0.70` — priced against
-  the headline 30% commission so that $149 survives it. Revenue is recognised **net**.
+- Play: the customer is charged **$213**, which is `$149 ÷ 0.70` — priced against the headline 30%
+  commission so that $149 survives it. Play accepts an arbitrary price, so $213 is exact there.
+- App Store: **$214.99**. Apple does not accept an arbitrary price — it sells from a fixed ladder
+  of price points, and **$213 is not on it**. Of all 800 US points, $214.99 is the *cheapest* whose
+  proceeds still clear the $149 floor: it returns **$150.50**. The next one down, $209.99, returns
+  $147.00 and is $2.00/month short. Verified against Apple's own price-point table, not computed
+  by hand; re-check with `pricePoints` on the subscription if the commission ever changes.
 
-`$213` is what you type into both consoles. It is not a rounding of anything; if you enter $149
-there, the business takes $104.30 and the whole billing plane is quietly wrong in a direction
-nobody complains about.
+Revenue is recognised **net** in all three. The number to preserve is the $149 floor, not the
+$213 — if you enter $149 in a store console the business takes $104.30, and the whole billing
+plane is quietly wrong in a direction nobody complains about.
+
+Outside the US, App Store prices come from Apple's **equalization table** for the $214.99 point,
+which is what the console's "generate other storefronts" button uses. Those are local-currency
+prices and their proceeds are local-currency too, so **$149 net is a US guarantee, not a worldwide
+one** — FX and per-territory commission move it either way (Germany nets €147.05 on €249.99; the
+UK nets £115.96 on £199.99).
 
 Both listings are the **same plan** as far as this install is concerned. `COMMERCE_STORE_PLAN_NAME`
 names one row in `commerce_plans`, and a store purchase puts the org on it. The store and web
@@ -41,7 +52,8 @@ PUT /api/platform/billing/plans
   "note": "why this rate is being loaded — required, 1-2000 chars" }
 ```
 
-`platformFeeMicros` is the **net** figure ($149). The $213 lives only in the store consoles —
+`platformFeeMicros` is the **net** figure ($149). The store-facing price lives only in the store
+consoles ($214.99 on the App Store, $213 on Play) —
 this install never issues an invoice for a store subscription, because Apple's receipt *is* the
 bill and a second document is a second charge.
 
@@ -57,32 +69,44 @@ Identifiers this repo already commits to (`frontend/app.config.ts`):
 
 ## 1. App Store Connect
 
-### 1.1 The app record
+### 1.1 The app record — DONE 2026-08-18
 
-An app record must exist for `com.stewra.app` before any in-app purchase can be created. If the
-bundle id is not yet registered, create it first in the Developer portal (Certificates,
-Identifiers & Profiles → Identifiers), with **In-App Purchase** capability enabled.
+Created via the App Store Connect API, not the dashboard, so the values are recorded rather than
+remembered:
 
-### 1.2 The subscription
+| | |
+|---|---|
+| Bundle id | `com.stewra.app`, portal id `RW6T593FF5`, In-App Purchase capability on |
+| App record | **Stewra**, app id `6802676118`, SKU `stewra-001`, primary language en-US |
 
-App Store Connect → your app → **Subscriptions**.
+The name `Stewra` was free at the time of registration. An app record cannot be created through
+the API — only the bundle id can — so that step went through fastlane's session against the
+account holder login.
 
-1. Create a **subscription group**. The group is what Apple upgrades/downgrades within; one group
-   is correct here because there is one tier today. Name it something the customer will see on
-   their receipt — "Stewra".
-2. Inside it, create an **auto-renewable subscription**:
-   - **Product ID** — this is the string that must match `APPLE_STORE_PRODUCT_ID` **and**
-     `EXPO_PUBLIC_STORE_PRODUCT_ID_IOS` exactly. Suggested: `com.stewra.app.pro.monthly`.
-     It is permanent; Apple will not let you reuse or rename it.
-   - **Duration**: 1 month.
-   - **Price**: **$213.00 USD** (Apple will generate the other storefronts from it; review that
-     table rather than accepting it blindly if you sell outside the US).
-   - **Localization**: display name and description, at minimum for English (U.S.).
-   - **Review information**: screenshot of the subscription screen and a note telling the reviewer
-     how to reach it. Apple rejects subscriptions with no review screenshot.
+### 1.2 The subscription — DONE 2026-08-18
 
-The product stays in "Ready to Submit" until it goes through review with a build. **Sandbox
-purchases work before that** — which is what makes step 4 possible now.
+| | |
+|---|---|
+| Group | `Stewra`, id `22317605`, customer-facing name "Stewra" (en-US) |
+| Product id | **`com.stewra.app.pro.monthly`**, id `6802680088` — permanent, Apple will not rename or reuse it |
+| Duration | 1 month, group level 1, family sharing off |
+| Display name | "Stewra Pro" |
+| Description | "Your assistant for calendar, mail, money and WhatsApp." |
+| Availability | all **175** territories, new territories auto-enrolled |
+| Price | **$214.99** US (proceeds $150.50) + 174 equalized storefronts |
+
+Two things Apple enforces that are worth knowing before editing any of this by hand:
+
+- **The description is capped at 55 characters** and the API rejects the whole request if it is
+  longer — it does not truncate.
+- **A price cannot be set before availability.** Apple refuses a price in a territory the product
+  is not sold in, and the error it returns says only `ENTITY_ERROR.RELATIONSHIP.INVALID` with
+  "An error occurred while processing the pricing information", which names neither cause nor fix.
+  Set availability first, always.
+
+The product now sits in **`MISSING_METADATA`**, which is expected and is not a configuration
+error: it wants review assets (§1.7). **Sandbox purchases work in this state** — which is what
+makes step 4 possible before any submission.
 
 ### 1.3 The In-App Purchase key (`.p8`)
 
@@ -134,6 +158,38 @@ COMMERCE_STORE_PLAN_NAME=Stewra Pro
 **required at boot** — a half-configured App Store deploy refuses to start rather than discovering
 the gap when a renewal notification arrives (Apple retries for about a day, then stops, and the
 subscription silently reads as expired).
+
+### 1.7 What is still outstanding on the Apple side
+
+The product exists and is priced. These are the things between it and taking money, in the order
+they bite:
+
+1. **Paid Applications agreement** (App Store Connect → Business). Must be *active*, with bank
+   details and tax forms complete. Free apps do not need it; a subscription does. This is the one
+   with real lead time — bank verification and tax review take days, and nothing about it is
+   visible from the API, so it has to be checked in the console.
+2. **Review assets** on the subscription — a screenshot of the subscription screen and a note
+   telling the reviewer how to reach it. Apple rejects subscriptions submitted without a
+   screenshot. This is what `MISSING_METADATA` refers to and it clears once both are supplied.
+3. **The In-App Purchase key** from §1.3 — still needed, and it is a *different key* from the App
+   Store Connect API key used to create all of the above. Same account, different section, and one
+   authenticates fine while 401ing against the App Store Server API. §1.3 is the right section.
+4. **Server notification URLs** (§1.4) and a **sandbox tester** (§1.5).
+
+None of these block a sandbox purchase except the key in step 3, which the backend needs to verify
+one.
+
+### 1.8 The App Store Connect API key (tooling, not runtime)
+
+Creating the app record, subscription, availability and prices was driven through the App Store
+Connect API with a **team key** (Users and Access → Integrations → App Store Connect API), role
+Admin, issuer `6d7e0959-7c53-4142-b027-a4f225142c88`, key id `8RDCL892YB`, private key at
+`~/.appstoreconnect/private_keys/AuthKey_8RDCL892YB.p8` on the dev machine (mode 0600).
+
+This key is **not** used by the backend and must never appear in `stewra.env`. It exists so the
+console work is repeatable and reviewable instead of a sequence of clicks nobody can audit. Apple
+serves the `.p8` exactly once; losing it means revoking and re-issuing, which costs nothing but
+the two minutes.
 
 ---
 
@@ -281,6 +337,6 @@ When the sandbox runs clean and the app has cleared review:
 2. Restart the backend and confirm it boots (the boot guard is the check that nothing is missing).
 3. Buy once, for real, on a production build, and refund it from the console.
 
-That last step is the only end-to-end proof that exists, and it is worth its $213 — **there is no
+That last step is the only end-to-end proof that exists, and it is worth its $214.99 — **there is no
 refund surface in the product today.** A refund can only be issued from the store console (or the
 Stripe dashboard, for web). Whether to build one is still an open decision.
