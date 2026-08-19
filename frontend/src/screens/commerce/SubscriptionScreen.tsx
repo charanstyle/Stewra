@@ -120,10 +120,32 @@ export default function SubscriptionScreen(): React.JSX.Element {
     [],
   );
 
-  const onPurchaseSuccess = useCallback(
+  /**
+   * A purchase that arrived before we knew which organization to attach it to.
+   *
+   * The store's listener is registered at mount and StoreKit redelivers an unfinished transaction
+   * the moment its connection is up — which regularly beats `api.listOrgs()`. Reading a null org id
+   * there refused a purchase the customer had already paid for, telling them "No organization is
+   * selected", on the first launch after paying. Observed on a real sandbox purchase: the claim
+   * lost that race, then succeeded on the next launch when it won it.
+   *
+   * So it is held rather than refused. Holding is not a fallback path — the org id is on its way,
+   * and the only alternative to waiting for it is answering with the wrong one. `busy` stays true
+   * across the wait so the screen keeps saying it is working, and the drain effect below claims it
+   * the instant the load settles.
+   */
+  const pendingPurchaseRef = useRef<Purchase | null>(null);
+  // Read by the store's callback, which cannot see `loading` freshly: it is registered once and
+  // would capture whatever that state was at mount.
+  const orgLoadSettledRef = useRef(false);
+  // A held purchase must NOT be claimed after a failed load. `orgId` ends up null for two different
+  // reasons — this account has no business, and we could not find out — and only the first is a
+  // true thing to tell someone about their purchase. On a failed load the transaction stays
+  // unfinished and the store redelivers it next launch, which is the retry this screen is built on.
+  const orgLoadFailedRef = useRef(false);
+
+  const runClaim = useCallback(
     (purchase: Purchase): void => {
-      setBusy(true);
-      setError(null);
       claimPurchase(purchase, { finish: true })
         .catch((err: unknown) => {
           // Deliberately NOT finished. The store keeps the transaction and redelivers it, so both
@@ -137,6 +159,19 @@ export default function SubscriptionScreen(): React.JSX.Element {
         .finally(() => setBusy(false));
     },
     [claimPurchase],
+  );
+
+  const onPurchaseSuccess = useCallback(
+    (purchase: Purchase): void => {
+      setBusy(true);
+      setError(null);
+      if (!orgLoadSettledRef.current) {
+        pendingPurchaseRef.current = purchase;
+        return;
+      }
+      runClaim(purchase);
+    },
+    [runClaim],
   );
 
   /**
@@ -184,15 +219,47 @@ export default function SubscriptionScreen(): React.JSX.Element {
         const res = await api.listOrgs();
         setMemberships(res.memberships);
         const id = res.activeOrgId ?? res.memberships[0]?.org.id ?? null;
+        // Publish to the ref here, not just via the re-render `setOrgId` schedules. The store's
+        // callback reads the ref and is gated on `orgLoadSettledRef`, which is set in the `finally`
+        // below — so leaving the ref to the next render leaves a window where the callback is told
+        // the org is known and then reads null. Narrow, but it is the same race this whole block
+        // exists to close.
+        orgIdRef.current = id;
         setOrgId(id);
         if (id !== null) await loadBilling(id);
       } catch (err) {
+        orgLoadFailedRef.current = true;
         setError(err instanceof ApiError ? err.message : 'Something went wrong');
       } finally {
+        // Set with `loading`, and for the same moment: the callback reads the ref, the effect below
+        // reads the state, and they must never disagree about whether the org is known.
+        orgLoadSettledRef.current = true;
         setLoading(false);
       }
     })();
   }, [loadBilling]);
+
+  /**
+   * Claim a purchase that arrived before the org did — see `pendingPurchaseRef`.
+   *
+   * Keyed on `loading` so it fires the instant the org load settles, and on `orgId` so a purchase
+   * held across an org switch is attached to the org that is selected now rather than the one that
+   * happened to be selected when the store redelivered it.
+   */
+  useEffect(() => {
+    if (loading) return;
+    const held = pendingPurchaseRef.current;
+    if (held === null) return;
+    if (orgLoadFailedRef.current) {
+      // The load's own error is already on screen and is the true reason. Leave it there rather
+      // than replacing it with a claim failure that would name the wrong cause, and leave the
+      // purchase with the store, which redelivers it next launch.
+      setBusy(false);
+      return;
+    }
+    pendingPurchaseRef.current = null;
+    runClaim(held);
+  }, [loading, orgId, runClaim]);
 
   // Ask the store about the product only once its connection is up: `fetchProducts` before the
   // billing client has connected returns nothing on Android, which would render as "no price" for
