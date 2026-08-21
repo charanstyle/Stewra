@@ -18,6 +18,7 @@ import type { db, closeDb } from '../database/index.js';
 import type { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository.js';
 import type { whatsappStore } from '../repositories/whatsappStore.js';
 import type { authService } from '../services/authService.js';
+import type { mediaService } from '../services/mediaService.js';
 import type { redis } from '../services/redisClient.js';
 import type { whatsappPersonalService } from '../services/whatsappPersonalService.js';
 import type { bridgeUserRoom } from '../websocket/bridgeTypes.js';
@@ -118,6 +119,7 @@ interface Graph {
   readonly bridgeDeviceRepository: typeof bridgeDeviceRepository;
   readonly whatsappStore: typeof whatsappStore;
   readonly authService: typeof authService;
+  readonly mediaService: typeof mediaService;
   readonly bridgeUserRoom: typeof bridgeUserRoom;
   readonly db: typeof db;
   readonly closeDb: typeof closeDb;
@@ -132,6 +134,7 @@ async function loadGraph(enabled: boolean): Promise<Graph> {
   const { bridgeDeviceRepository } = await import('../repositories/bridgeDeviceRepository.js');
   const { whatsappStore } = await import('../repositories/whatsappStore.js');
   const { authService } = await import('../services/authService.js');
+  const { mediaService } = await import('../services/mediaService.js');
   const { bridgeUserRoom } = await import('../websocket/bridgeTypes.js');
   const { redis } = await import('../services/redisClient.js');
   const database = await import('../database/index.js');
@@ -141,6 +144,7 @@ async function loadGraph(enabled: boolean): Promise<Graph> {
     bridgeDeviceRepository,
     whatsappStore,
     authService,
+    mediaService,
     bridgeUserRoom,
     redis,
     db: database.db,
@@ -779,6 +783,118 @@ describe('bridge:allowed-chats', () => {
     // Both chats the user really ticked are still there.
     expect(await on.whatsappStore.findChatByJid(userId, SELF_JID)).not.toBeNull();
     expect(await on.whatsappStore.findChatByJid(userId, FRIEND_JID)).not.toBeNull();
+  });
+});
+
+/**
+ * Voice over WhatsApp. VOICE_ENABLED is off in this process — there is no whisper or Piper binary on a
+ * CI box — so what is pinned here is the wire (a voice note is accepted, a two-bodied frame is not),
+ * the outbox (a queued voice note reaches a bridge that can carry it and is refused for one that
+ * cannot), and the promise that a spoken turn on a deploy without voice is answered in TEXT that says
+ * so, never with silence.
+ */
+describe('voice notes', () => {
+  // Any bytes will do for the wire: the server stores and forwards, it does not decode.
+  const CLIP = Buffer.from(`OggS-not-really-${RUN_ID}`);
+
+  const voiceInbound = (providerMessageId: string): Record<string, unknown> => ({
+    providerMessageId,
+    jid: SELF_JID,
+    isSelfChat: true,
+    fromMe: true,
+    audio: { data: CLIP.toString('base64'), mime: 'audio/ogg', seconds: 2.5 },
+    sentAt: new Date().toISOString(),
+  });
+
+  it('records a voice note as one, and on a deploy without voice answers in text that says so', async () => {
+    const { userId, token } = await newUserWithBridge();
+    const bridge = await connectBridge(token);
+
+    bridge.say(BRIDGE_CLIENT_EVENTS.INBOUND, voiceInbound(waId('v1')));
+
+    await waitFor('the text answer to reach the bridge', () => bridge.sent.length > 0 || undefined);
+    const reply = bridge.sent[0];
+    expect(reply?.audio).toBeUndefined();
+    expect(reply?.text).toContain('Voice replies are unavailable right now');
+    const stored = await on.db
+      .selectFrom('whatsapp_messages')
+      .select(['direction', 'is_voice'])
+      .where('user_id', '=', userId)
+      .where('provider_message_id', '=', waId('v1'))
+      .executeTakeFirstOrThrow();
+    expect(stored).toEqual({ direction: 'inbound', is_voice: true });
+    // The person was told, not answered as if they had typed — nothing else went out.
+    await sleep(QUIET_MS);
+    expect(bridge.sent).toHaveLength(1);
+  });
+
+  it('rejects a frame that carries both text and audio — exactly one body, or nothing is stored', async () => {
+    const { userId, token } = await newUserWithBridge();
+    const bridge = await connectBridge(token);
+
+    bridge.say(BRIDGE_CLIENT_EVENTS.INBOUND, { ...voiceInbound(waId('v2')), text: 'and also this' });
+    await sleep(QUIET_MS);
+
+    expect(await storedMessages(userId)).toEqual([]);
+    expect(await outbox(userId)).toEqual([]);
+  });
+
+  it('delivers a queued voice note, bytes intact, to a bridge that can carry one', async () => {
+    const { userId, token, selfChatId } = await newUserWithBridge();
+    const asset = await on.mediaService.saveUpload({
+      ownerId: userId,
+      conversationId: null,
+      kind: 'tts_out',
+      mime: 'audio/ogg',
+      buffer: CLIP,
+    });
+    const outboxId = await on.whatsappStore.enqueueSend(userId, selfChatId, 'spoken words', asset.id);
+    const bridge = await connectBridge(token);
+
+    bridge.say(BRIDGE_CLIENT_EVENTS.HELLO, { appVersion: '1.2.0', waState: 'open' });
+
+    await waitFor('the voice note to reach the bridge', () => bridge.sent.length > 0 || undefined);
+    expect(bridge.sent[0]).toMatchObject({ outboxId, jid: SELF_JID, text: 'spoken words' });
+    expect(Buffer.from(bridge.sent[0]?.audio?.data ?? '', 'base64').equals(CLIP)).toBe(true);
+    expect(bridge.sent[0]?.audio?.mime).toBe('audio/ogg');
+    const row = await waitFor('the outbox row to be marked sent', async () =>
+      (await outbox(userId)).find((r) => r.status === 'sent'),
+    );
+    expect(row.id).toBe(outboxId);
+    // The outbound message row lands one step after the outbox row is marked sent.
+    const stored = await waitFor('the outbound message to be recorded', () =>
+      on.db
+        .selectFrom('whatsapp_messages')
+        .select('is_voice')
+        .where('user_id', '=', userId)
+        .where('direction', '=', 'outbound')
+        .executeTakeFirst(),
+    );
+    expect(stored.is_voice).toBe(true);
+  });
+
+  it('REFUSES a voice note to a bridge that predates voice — it would arrive as a duplicate text', async () => {
+    const { userId, token, selfChatId } = await newUserWithBridge();
+    const asset = await on.mediaService.saveUpload({
+      ownerId: userId,
+      conversationId: null,
+      kind: 'tts_out',
+      mime: 'audio/ogg',
+      buffer: CLIP,
+    });
+    const outboxId = await on.whatsappStore.enqueueSend(userId, selfChatId, 'spoken words', asset.id);
+    const bridge = await connectBridge(token);
+
+    bridge.say(BRIDGE_CLIENT_EVENTS.HELLO, { appVersion: '1.1.0', waState: 'open' });
+
+    const row = await waitFor('the voice note to be failed', async () =>
+      (await outbox(userId)).find((r) => r.status === 'failed'),
+    );
+    expect(row.id).toBe(outboxId);
+    expect(row.last_error).toBe('bridge_too_old_for_voice');
+    // Nothing crossed the wire: the old bridge was never handed a frame it would have mangled.
+    await sleep(QUIET_MS);
+    expect(bridge.sent).toEqual([]);
   });
 });
 

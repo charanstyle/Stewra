@@ -16,6 +16,13 @@ export interface SocketData {
    */
   deviceId?: string;
   /**
+   * The Stewra Bridge build on the other end, as it announced itself in `bridge:hello`. Present only on
+   * `/bridge` sockets, and only after hello. It decides what the server may ask of this bridge: a build
+   * older than `BRIDGE_VOICE_MIN_VERSION` strips `audio` from a send and would deliver a voice note as a
+   * second copy of the text, so such a send is refused rather than handed over.
+   */
+  bridgeAppVersion?: string;
+  /**
    * Whether the `/runner` socket on the other end is a machine the user owns or a container Stewra
    * hosts. Present only on runner sockets, for the same Socket.IO reason `deviceId` is.
    *

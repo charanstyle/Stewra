@@ -118,10 +118,12 @@ class MessagesController extends BaseController {
         throw new ValidationError('Uploaded file must be audio');
       }
 
-      const { userMessage, assistantMessage } = await messageService.sendVoice(userId, conversationId, {
-        buffer: file.buffer,
-        mime: file.mimetype,
-      });
+      const { userMessage, assistantMessage } = await messageService.sendVoice(
+        userId,
+        conversationId,
+        { buffer: file.buffer, mime: file.mimetype },
+        'stewra_chat',
+      );
 
       // Fan out the caller's turn; for a human thread, double-tick any online recipient.
       emitToConversation(conversationId, SERVER_EVENTS.CHAT_MESSAGE, { message: userMessage });

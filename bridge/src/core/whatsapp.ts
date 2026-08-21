@@ -1,5 +1,9 @@
-import makeWASocket, { fetchLatestBaileysVersion, jidNormalizedUser } from '@whiskeysockets/baileys';
-import type { WASocket } from '@whiskeysockets/baileys';
+import makeWASocket, {
+  downloadMediaMessage,
+  fetchLatestBaileysVersion,
+  jidNormalizedUser,
+} from '@whiskeysockets/baileys';
+import type { WAMessage, WASocket } from '@whiskeysockets/baileys';
 import type { BridgeWaState } from '@stewra/shared-types';
 import { decideCloseAction } from './closePolicy.js';
 import { useEncryptedAuthState } from './authState.js';
@@ -8,7 +12,14 @@ import type { ChatMeta } from './chatDirectory.js';
 import { extractLid, extractStatusCode, mapUpsert, metas, renderQr } from './waMapping.js';
 import type { WhatsappMessage } from './waMapping.js';
 
-export type { WhatsappMessage } from './waMapping.js';
+export type { VoiceNote, WhatsappMessage } from './waMapping.js';
+
+/**
+ * The largest voice note the bridge will download and forward. The server's socket rejects frames
+ * above its own buffer limit by DROPPING THE CONNECTION, so the cap is enforced here first, where it
+ * can be logged instead. 3 MiB of OGG/Opus at WhatsApp's bitrate is well over twenty minutes of speech.
+ */
+export const MAX_VOICE_NOTE_BYTES = 3 * 1024 * 1024;
 
 export interface WhatsappEvents {
   /**
@@ -232,12 +243,68 @@ export class WhatsappClient {
         );
       }
       for (const message of outcome.live) {
-        console.error(
-          `Stewra Bridge: message on ${message.remoteJid} (fromMe=${message.fromMe}) → allowlist gate.`,
-        );
-        this.options.events.onMessage(message);
+        if (message.voice === null) {
+          console.error(
+            `Stewra Bridge: message on ${message.remoteJid} (fromMe=${message.fromMe}) → allowlist gate.`,
+          );
+          this.options.events.onMessage(message);
+          continue;
+        }
+        // A voice note: fetch and decrypt the bytes here, on this machine, then hand it to the same gate.
+        // The download is async; a failure is logged and the note is dropped — nothing is forwarded that
+        // we could not read.
+        const { raw, mime, seconds } = message.voice;
+        void this.downloadVoiceNote(raw)
+          .then((data) => {
+            if (data.byteLength > MAX_VOICE_NOTE_BYTES) {
+              console.error(
+                `Stewra Bridge: a voice note on ${message.remoteJid} is ${data.byteLength} bytes, over the ` +
+                  `${MAX_VOICE_NOTE_BYTES}-byte limit — dropped.`,
+              );
+              return;
+            }
+            console.error(
+              `Stewra Bridge: voice note on ${message.remoteJid} (fromMe=${message.fromMe}, ${mime}, ` +
+                `${data.byteLength} bytes) → allowlist gate.`,
+            );
+            this.options.events.onMessage({
+              providerMessageId: message.providerMessageId,
+              remoteJid: message.remoteJid,
+              fromMe: message.fromMe,
+              sentAt: message.sentAt,
+              text: null,
+              voice: { data, mime, seconds },
+            });
+          })
+          .catch((error: unknown) => {
+            console.error(`Stewra Bridge: could not download a voice note on ${message.remoteJid}:`, error);
+          });
       }
     });
+  }
+
+  /** Fetch and decrypt one media message's bytes. Baileys streams or buffers; we only ever want the buffer. */
+  private async downloadVoiceNote(raw: WAMessage): Promise<Buffer> {
+    const result = await downloadMediaMessage(raw, 'buffer', {});
+    if (!Buffer.isBuffer(result)) throw new Error('Baileys returned a stream for a buffer download');
+    return result;
+  }
+
+  /**
+   * Deliver a voice note — audio the recipient sees as a recorded message with a play button, not as a
+   * file. OGG/Opus is what WhatsApp itself records, and the only container that renders as a voice note
+   * on every client; the server transcodes to it before asking.
+   */
+  async sendVoiceNote(jid: string, audio: Buffer): Promise<string> {
+    const sock = this.sock;
+    if (sock === null) throw new Error('WhatsApp is not connected');
+
+    const sent = await sock.sendMessage(jid, { audio, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+    const id = sent?.key.id;
+    if (id === null || id === undefined) {
+      throw new Error('WhatsApp accepted the voice note but returned no id');
+    }
+    return id;
   }
 
   /** Deliver one message. The provider id it returns is what breaks the echo loop on the server. */

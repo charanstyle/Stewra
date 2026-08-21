@@ -19,6 +19,15 @@ const sendPayloadSchema = z.object({
   outboxId: z.string().min(1),
   jid: z.string().min(1),
   text: z.string().min(1),
+  // Present ⇒ deliver as a voice note. The mime is pinned: the bridge always sends OGG/Opus PTT, and
+  // accepting anything else here would be promising a format WhatsApp would not play as a voice note.
+  audio: z
+    .object({
+      data: z.string().min(1),
+      mime: z.literal('audio/ogg'),
+      seconds: z.number().positive().optional(),
+    })
+    .optional(),
 });
 
 const claimResponseSchema = z.object({
@@ -121,8 +130,18 @@ export class StewraClient {
         ack({ ok: false, error: 'malformed_send' });
         return;
       }
+      const { outboxId, jid, text, audio } = parsed.data;
+      const payload: BridgeSendPayload =
+        audio === undefined
+          ? { outboxId, jid, text }
+          : {
+              outboxId,
+              jid,
+              text,
+              audio: { data: audio.data, mime: audio.mime, ...(audio.seconds !== undefined ? { seconds: audio.seconds } : {}) },
+            };
       void this.events
-        .onSend(parsed.data)
+        .onSend(payload)
         .then(ack)
         .catch((error: unknown) => {
           ack({ ok: false, error: error instanceof Error ? error.message : 'send_failed' });

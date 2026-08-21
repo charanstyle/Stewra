@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/node';
 import { z } from 'zod';
 import { BRIDGE_CLIENT_EVENTS, BRIDGE_WA_STATES } from '@stewra/shared-types';
+import type { BridgeInboundPayload } from '@stewra/shared-types';
 import { whatsappBridgeService } from '../services/whatsappBridgeService.js';
 import { logger } from '../utils/logger.js';
 import { bridgeUserRoom } from './bridgeTypes.js';
@@ -19,15 +20,33 @@ const helloSchema = z.object({
 
 const stateSchema = z.object({ waState: waStateSchema });
 
-const inboundSchema = z.object({
-  providerMessageId: z.string().min(1).max(255),
-  jid: z.string().min(1).max(128),
-  isSelfChat: z.boolean(),
-  fromMe: z.boolean(),
-  // Bounded: WhatsApp's own cap is 4096, and an unbounded body from a client is a storage-abuse vector.
-  text: z.string().min(1).max(8192),
-  sentAt: z.string().datetime(),
-});
+const inboundSchema = z
+  .object({
+    providerMessageId: z.string().min(1).max(255),
+    jid: z.string().min(1).max(128),
+    isSelfChat: z.boolean(),
+    fromMe: z.boolean(),
+    // Bounded: WhatsApp's own cap is 4096, and an unbounded body from a client is a storage-abuse vector.
+    text: z.string().min(1).max(8192).optional(),
+    // A voice note. The bridge caps the file at 3 MiB; base64 inflates by 4/3, so 4 MiB of text is the
+    // ceiling for an honest bridge and anything larger is refused before it is decoded.
+    audio: z
+      .object({
+        data: z
+          .string()
+          .min(1)
+          .max(4 * 1024 * 1024)
+          .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+        mime: z.enum(['audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/aac', 'audio/wav', 'audio/webm']),
+        seconds: z.number().positive().optional(),
+      })
+      .optional(),
+    sentAt: z.string().datetime(),
+  })
+  // Exactly one body: a message that is both, or neither, is a bridge bug, not something to guess at.
+  .refine((m) => (m.text === undefined) !== (m.audio === undefined), {
+    message: 'exactly one of text or audio is required',
+  });
 
 const allowedChatsSchema = z.object({
   // NEVER empty. The self-chat is always allowed, so an empty list is a broken bridge — and a bug must
@@ -96,6 +115,8 @@ export function registerBridgeHandler(socket: BridgeSocketLike): void {
     const parsed = helloSchema.safeParse(raw);
     if (!parsed.success) return;
     logger.info('bridge: hello', { userId, deviceId, ...parsed.data });
+    // Remembered so a voice-note send can be refused for a build that would strip it (see dispatchToBridge).
+    socket.data.bridgeAppVersion = parsed.data.appVersion;
     guard(BRIDGE_CLIENT_EVENTS.HELLO, () =>
       whatsappBridgeService.onBridgeOnline(userId, deviceId, parsed.data.waState),
     );
@@ -126,7 +147,22 @@ export function registerBridgeHandler(socket: BridgeSocketLike): void {
       logger.warn('bridge: rejected a malformed inbound message', { userId, deviceId });
       return;
     }
-    guard(BRIDGE_CLIENT_EVENTS.INBOUND, () => whatsappBridgeService.onInbound(userId, parsed.data));
+    const { text, audio, ...rest } = parsed.data;
+    // Rebuilt rather than passed through, so an absent field stays absent under exactOptionalPropertyTypes.
+    const payload: BridgeInboundPayload = {
+      ...rest,
+      ...(text !== undefined ? { text } : {}),
+      ...(audio !== undefined
+        ? {
+            audio: {
+              data: audio.data,
+              mime: audio.mime,
+              ...(audio.seconds !== undefined ? { seconds: audio.seconds } : {}),
+            },
+          }
+        : {}),
+    };
+    guard(BRIDGE_CLIENT_EVENTS.INBOUND, () => whatsappBridgeService.onInbound(userId, payload));
   });
 
   socket.on('disconnect', () => {

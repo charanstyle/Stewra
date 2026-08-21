@@ -65,9 +65,29 @@ export interface BridgeInboundPayload {
   readonly isSelfChat: boolean;
   /** True when the user themself sent it (Baileys `key.fromMe`). */
   readonly fromMe: boolean;
-  readonly text: string;
+  /** The message text. Absent when the message was a voice note — then `audio` is present instead. */
+  readonly text?: string;
+  /**
+   * A voice note (WhatsApp "push to talk" audio), decrypted on the user's own machine and carried here
+   * so the server can transcribe it. Exactly one of `text` / `audio` is present. Other media (images,
+   * files, non-PTT audio) is still dropped on the device.
+   */
+  readonly audio?: BridgeVoiceNote;
   readonly sentAt: string;
 }
+
+/** Audio bytes on the bridge wire — base64, with the container's MIME type. */
+export interface BridgeVoiceNote {
+  /** Base64 of the audio bytes as WhatsApp delivered them (normally OGG/Opus). */
+  readonly data: string;
+  /** MIME type without codec parameters, e.g. `audio/ogg`. */
+  readonly mime: string;
+  /** Duration WhatsApp reported, when it did. */
+  readonly seconds?: number;
+}
+
+/** Bridges older than this strip `audio` from `bridge:send` and would deliver a voiced reply as text only. */
+export const BRIDGE_VOICE_MIN_VERSION = '1.2.0';
 
 /** One chat the user has allowed. */
 export interface BridgeAllowedChat {
@@ -91,11 +111,18 @@ export interface BridgeAllowedChatsPayload {
   readonly chats: readonly BridgeAllowedChat[];
 }
 
-/** `bridge:send` — an outbound message the user has already approved. */
+/**
+ * `bridge:send` — an outbound message the user has already approved.
+ *
+ * With `audio` present the bridge sends the bytes as a WhatsApp voice note (PTT) and `text` is the
+ * spoken words, kept for the server's own records; without it, the bridge sends `text` as a message.
+ * A voiced Stewra reply is therefore TWO sends — the note, then the text — never one frame doing both.
+ */
 export interface BridgeSendPayload {
   readonly outboxId: string;
   readonly jid: string;
   readonly text: string;
+  readonly audio?: BridgeVoiceNote;
 }
 
 /** The bridge's ack to `bridge:send`. `providerMessageId` is what WhatsApp assigned the sent message. */

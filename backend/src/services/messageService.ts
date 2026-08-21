@@ -79,12 +79,14 @@ class MessageService {
    * asset, and persist the caller's `voice` message (transcript + audio). In the user's Stewra-AI
    * conversation it then produces Stewra's reply (text + TTS audio) via the control-plane orchestrator;
    * in a human conversation `assistantMessage` is null (it's just a voice note). Gated by
-   * `assertParticipant` like every other write.
+   * `assertParticipant` like every other write. `channel` is where the person spoke from — it decides
+   * where a runner session started by this turn reports back to.
    */
   async sendVoice(
     userId: string,
     conversationId: string,
     audio: { buffer: Buffer; mime: string },
+    channel: RunnerChatChannel,
   ): Promise<VoiceTurnResult> {
     const { conversation } = await conversationService.assertParticipant(userId, conversationId);
 
@@ -115,7 +117,7 @@ class MessageService {
 
     const assistantMessage =
       conversation.type === 'stewra_ai'
-        ? await stewraConversationService.generateReply(userId, conversation, userMessage, 'stewra_chat')
+        ? await stewraConversationService.generateReply(userId, conversation, userMessage, channel)
         : null;
 
     return { conversation, userMessage, assistantMessage };
