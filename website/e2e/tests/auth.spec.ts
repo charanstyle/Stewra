@@ -77,7 +77,7 @@ test.describe('auth', () => {
       'aria-checked',
       'true',
     );
-    await gp.getByLabel('Name').fill(name);
+    await gp.getByLabel('Name', { exact: true }).fill(name);
     await gp.getByLabel('Email').fill(address);
     await gp.getByLabel('Password').fill(password);
     if (shape.kind === 'business') {
@@ -175,7 +175,7 @@ test.describe('auth', () => {
       await gp.goto(`${WEB}/login`, { waitUntil: 'domcontentloaded' });
       await gp.getByRole('button', { name: 'Create account' }).first().click();
       await gp.getByTestId('register-kind-business').click();
-      await gp.getByLabel('Name').fill('QA Signup');
+      await gp.getByLabel('Name', { exact: true }).fill('QA Signup');
       await gp.getByLabel('Email').fill(`refused-${randomBytes(4).toString('hex')}@stewra.invalid`);
       await gp.getByLabel('Password').fill(`${randomBytes(9).toString('base64url')}-9`);
       await expect(gp.getByTestId('register-company-name')).toBeVisible();
