@@ -136,17 +136,26 @@ describe('the chat relay survives a restart', () => {
       title: 'Run npm test',
     });
 
-    // The ask reached the chat the session came from — and names the PROJECT, not the folder.
-    const gate = (await contentsOf(conversationId)).find((c) => c.includes('Permission needed'));
-    expect(gate).toContain('Truetalk');
-    expect(gate).toContain('Run npm test');
+    // The ask reached the chat the session came from — names the PROJECT, not the folder, and asks the
+    // way a person would.
+    const gate = (await contentsOf(conversationId)).find((c) => c.includes('needs your OK'));
+    expect(gate).toBe('Truetalk needs your OK for one step: Run npm test — npm test. Shall I let it? (yes / no)');
 
     // Answered → forgotten. Done → origin forgotten, result posted.
     await after.clearPermission(sessionId);
     await expect(after.latestPendingPermission(userId)).resolves.toBeNull();
 
-    await new RunnerChatRelayService().onDone({ sessionId, status: 'completed', branch: 'stewra/run/x', committed: true });
-    expect((await contentsOf(conversationId)).some((c) => c.startsWith('Done on Mac mini (Truetalk)'))).toBe(true);
+    // The runner's "stopReason: end_turn" is its ordinary ending and is not repeated to the person.
+    await new RunnerChatRelayService().onDone({
+      sessionId,
+      status: 'completed',
+      summary: 'stopReason: end_turn',
+      branch: 'stewra/run/x',
+      committed: true,
+    });
+    expect(await contentsOf(conversationId)).toContain(
+      'All done — Truetalk on Mac mini has finished. The changes are saved on branch stewra/run/x. Say "push it" and I\'ll push them, or "open a PR".',
+    );
     const origin = await db.selectFrom('runner_chat_origins').selectAll().where('session_id', '=', sessionId).executeTakeFirst();
     expect(origin).toBeUndefined();
   });

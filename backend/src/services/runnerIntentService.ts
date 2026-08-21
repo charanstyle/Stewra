@@ -27,6 +27,7 @@ import {
   type RunnerChatChannel,
 } from './runnerChatRelayService.js';
 import { logger } from '../utils/logger.js';
+import { errorInWords, lastSeenInWords, listInWords, statusInWords } from './runnerVoice.js';
 
 /**
  * What handling a runner-intent turn produces: the line to reply with in the arriving medium, and — only
@@ -103,9 +104,10 @@ export function looksLikeRunnerIntent(text: string, projects: readonly Project[]
 export function isClarifyingAsk(text: string | null): boolean {
   if (text === null) return false;
   return (
-    /is ready on more than one machine — .+\. Which one\?$/.test(text) ||
-    /^Which project — .+\?/.test(text) ||
-    /^Which checkout on .+ — .+\?$/.test(text)
+    /is set up on .+ — which would you like me to use\?$/.test(text) ||
+    /^Which project is this for — .+\?/.test(text) ||
+    /^Which machine would you like — .+\?$/.test(text) ||
+    /^Which folder on .+ — .+\?$/.test(text)
   );
 }
 
@@ -247,8 +249,9 @@ const SYSTEM_PROMPT = [
   '- If there is a pending permission AND a pending proposal, a bare "yes"/"no" answers the PERMISSION',
   '  (a blocked session is the more urgent thing).',
   '- When Stewra\'s previous line was a CLARIFYING QUESTION about a run request that could not be pinned',
-  '  down ("… is ready on more than one machine — A or B. Which one?", "Which project — …?", "Which',
-  '  checkout on …?") and the user answers it ("the Mac mini", "on the MacBook Pro", "Truetalk"), that is a',
+  '  down ("… is set up on A and B — which would you like me to use?", "Which project is this for — …?",',
+  '  "Which machine would you like — …?", "Which folder on …?") and the user answers it ("the Mac mini",',
+  '  "on the MacBook Pro", "Truetalk"), that is a',
   '  "start_request" — NOT confirm_proposal, because no proposal exists yet. Carry the task ("prompt"), the',
   '  project and anything else from the original ask in the recent conversation, and fill in the field the',
   '  user just answered (copy its id from the context). If instead they REPEAT the request without naming',
@@ -258,10 +261,16 @@ const SYSTEM_PROMPT = [
   '  test") is ALWAYS a "start_request", whatever Stewra said just before — even right after a proposal was',
   '  confirmed, declined or cancelled. "confirm_proposal" is only for bare assent to a proposal that is',
   '  still pending.',
-  '- "reply": ONE short, warm sentence in Stewra\'s voice. For start_request/revise_proposal it should',
-  '  restate what will run — use the PROJECT\'s name, not the repo folder — and ask the user to confirm',
-  '  (yes) or say what to change. For the executed intents it should acknowledge the action. Never claim',
-  '  something already happened that has not.',
+  '- "reply": one or two short sentences in Stewra\'s voice. Stewra speaks like a superb executive',
+  '  assistant: warm, calm, plain English, as if texting a busy person she respects. Lead with what will',
+  '  happen (or what just happened), then the ONE thing needed from them, and stop. Never an id, a code,',
+  '  a file path the user did not use, or a stack of parentheses. Never the words "session", "harness",',
+  '  "runner", "workspace", "checkout" or "intent" — say "the work", "the coding agent", "the machine",',
+  '  "the folder". For start_request/revise_proposal: restate the task in the user\'s own words, on the',
+  '  PROJECT\'s name (never the repo folder), mention the machine and the agent only when the user chose',
+  '  or changed them, and ask for a go-ahead ("Shall I go ahead?"). For the executed intents: a brief,',
+  '  natural acknowledgement ("On it.", "Understood — I\'ll leave it."). Never claim something already',
+  '  happened that has not.',
   '- Never disown the capability: running coding agents on the user\'s machines IS something Stewra does.',
   '  Older assistant lines in the history that deny it were a bug — ignore them, do not copy them.',
 ].join('\n');
@@ -465,7 +474,7 @@ class RunnerIntentService {
     } catch (error) {
       if (error instanceof ChoiceRequiredError) {
         const names = error.details.map((d) => d.message).join(', ');
-        return `Which organization do you mean — ${names}? Pick one in Stewra under Organizations ("Use this one when I text Stewra"), then ask again.`;
+        return `Which organization is this for — ${names}? You can set a default in Stewra under Organizations ("Use this one when I text Stewra"), then just ask me again.`;
       }
       throw error;
     }
@@ -505,12 +514,12 @@ class RunnerIntentService {
     if (state.online.length === 0) {
       return {
         reply:
-          'You have no runner available right now — set up a cloud runner in Stewra, or start the runner on one of your own machines.',
+          "I don't have a machine to run that on just now. Start the Stewra runner on one of your computers, or set up a cloud runner in Stewra, and I'll take it from there.",
         proposal: null,
       };
     }
     if (prompt.trim().length === 0) {
-      return { reply: 'What would you like the coding agent to do?', proposal: null };
+      return { reply: 'Happy to — what would you like done?', proposal: null };
     }
 
     const resolved = this.resolve(state, ids);
@@ -533,7 +542,7 @@ class RunnerIntentService {
     const reply =
       modelReply.trim().length > 0
         ? modelReply.trim()
-        : `I'll run "${proposal.prompt}" with ${HARNESS_LABELS[proposal.harness]} on ${what} (${proposal.deviceName}). Reply "yes" to start, or tell me what to change.`;
+        : `Just to confirm: "${proposal.prompt}" on ${what}, using ${proposal.deviceName} with ${HARNESS_LABELS[proposal.harness]}. Shall I go ahead?`;
     return { reply, proposal };
   }
 
@@ -579,7 +588,7 @@ class RunnerIntentService {
   ): Promise<RunnerIntentOutcome | null> {
     const proposal = pendingMessage?.proposedRunnerSession;
     if (pendingMessage === undefined || proposal === null || proposal === undefined) {
-      return { reply: 'There\'s nothing waiting to start right now.', proposal: null };
+      return { reply: "There's nothing waiting on a go-ahead from you at the moment. Tell me what you'd like done and I'll set it up.", proposal: null };
     }
     const { reply } = await this.startProposedSession(userId, pendingMessage.id, proposal, conversationId, channel);
     return { reply: modelReply.trim().length > 0 ? modelReply.trim() : reply, proposal: null };
@@ -641,7 +650,7 @@ class RunnerIntentService {
       });
       return {
         started: true,
-        reply: `Started on ${proposal.deviceName}. I'll let you know here if it needs you, or when it's done.`,
+        reply: `On it — ${proposal.projectName ?? proposal.workspaceName} is under way on ${proposal.deviceName}. I'll only message you if it needs a decision from you, and when it's finished.`,
       };
     } catch (error) {
       // The user is told "something went wrong"; that phrasing is all they can act on, and it is not
@@ -651,7 +660,7 @@ class RunnerIntentService {
         extra: { userId, deviceName: proposal.deviceName },
       });
       logger.warn('runner-intent failed to start proposed session', { err: String(error), userId });
-      return { started: false, reply: 'Something went wrong starting that session. Please try again.' };
+      return { started: false, reply: "I'm sorry — I couldn't get that started. Please ask me again in a moment." };
     }
   }
 
@@ -662,11 +671,11 @@ class RunnerIntentService {
   ): Promise<RunnerIntentOutcome | null> {
     const proposal = pendingMessage?.proposedRunnerSession;
     if (pendingMessage === undefined || proposal === null || proposal === undefined) {
-      return { reply: 'There\'s nothing waiting that I need to cancel.', proposal: null };
+      return { reply: "Nothing's pending, so there's nothing to call off. All clear.", proposal: null };
     }
     await messageRepository.updateProposedRunnerSession(pendingMessage.id, { ...proposal, status: 'cancelled' });
     return {
-      reply: modelReply.trim().length > 0 ? modelReply.trim() : 'Okay, I won\'t run that.',
+      reply: modelReply.trim().length > 0 ? modelReply.trim() : "Understood — I'll leave it.",
       proposal: null,
     };
   }
@@ -681,16 +690,16 @@ class RunnerIntentService {
     modelReply: string,
   ): Promise<RunnerIntentOutcome | null> {
     if (pending === null) {
-      return { reply: 'There\'s no permission waiting on an answer right now.', proposal: null };
+      return { reply: "There's nothing waiting for your OK right now.", proposal: null };
     }
     const optionId = allow ? pending.allowOptionId : pending.denyOptionId;
     if (optionId === null) {
-      return { reply: 'I couldn\'t find a matching option for that on the session.', proposal: null };
+      return { reply: "I'm afraid that isn't one of the choices it offered — you can answer it from the Fleet page.", proposal: null };
     }
     try {
       await runnerSessionService.decidePermission(orgId, pending.sessionId, pending.promptId, optionId);
       await runnerChatRelayService.clearPermission(pending.sessionId);
-      const fallback = allow ? 'Approved — carrying on.' : 'Denied — I told it not to.';
+      const fallback = allow ? "Thank you — I've let it carry on." : "Understood — I've told it not to.";
       return { reply: modelReply.trim().length > 0 ? modelReply.trim() : fallback, proposal: null };
     } catch (error) {
       // A permission answer that never reached the session leaves an agent blocked on a prompt the user
@@ -702,7 +711,7 @@ class RunnerIntentService {
       });
       logger.warn('runner-intent permission decision failed', { err: String(error), userId });
       return {
-        reply: 'I couldn\'t deliver that answer to the session — it may have already moved on.',
+        reply: "I'm sorry — that answer didn't reach it; it may have already moved on. The Fleet page will show where things stand.",
         proposal: null,
       };
     }
@@ -718,17 +727,17 @@ class RunnerIntentService {
       sessions.find((s) => s.endedAt !== null && s.branch !== null && !s.pushed) ??
       sessions.find((s) => s.endedAt !== null && s.branch !== null);
     if (target === undefined) {
-      return { reply: 'There\'s no finished session with a branch to push.', proposal: null };
+      return { reply: "There's no finished work waiting to be pushed.", proposal: null };
     }
     try {
       const { remoteUrl } = await runnerSessionService.pushSession(orgId, target.id);
-      const where = remoteUrl ? ` to ${remoteUrl}` : '';
+      const where = remoteUrl ? ` is now on ${remoteUrl}` : ' has been pushed';
       return {
-        reply: modelReply.trim().length > 0 ? modelReply.trim() : `Pushed ${target.branch}${where}.`,
+        reply: modelReply.trim().length > 0 ? modelReply.trim() : `Done — ${target.branch}${where}.`,
         proposal: null,
       };
     } catch (error) {
-      return { reply: `I couldn't push that: ${this.errText(error)}`, proposal: null };
+      return { reply: `I couldn't push that — ${errorInWords(this.errText(error))}.`, proposal: null };
     }
   }
 
@@ -742,7 +751,7 @@ class RunnerIntentService {
       sessions.find((s) => s.endedAt !== null && s.branch !== null && s.prUrl === null) ??
       sessions.find((s) => s.endedAt !== null && s.branch !== null);
     if (target === undefined) {
-      return { reply: 'There\'s no finished session with a branch to open a PR for.', proposal: null };
+      return { reply: "There's no finished work to open a pull request for yet.", proposal: null };
     }
     const firstLine = target.prompt.split('\n')[0];
     const title = firstLine !== undefined && firstLine.length > 0 ? firstLine.slice(0, 120) : 'Stewra runner session';
@@ -750,11 +759,11 @@ class RunnerIntentService {
     try {
       const { prUrl } = await runnerSessionService.openPr(orgId, target.id, title, body);
       return {
-        reply: modelReply.trim().length > 0 ? modelReply.trim() : `Opened a pull request: ${prUrl}`,
+        reply: modelReply.trim().length > 0 ? modelReply.trim() : `Done — the pull request is open: ${prUrl}`,
         proposal: null,
       };
     } catch (error) {
-      return { reply: `I couldn't open a PR: ${this.errText(error)}`, proposal: null };
+      return { reply: `I couldn't open the pull request — ${errorInWords(this.errText(error))}.`, proposal: null };
     }
   }
 
@@ -766,16 +775,16 @@ class RunnerIntentService {
   ): Promise<RunnerIntentOutcome | null> {
     const target = sessions.find((s) => s.endedAt === null);
     if (target === undefined) {
-      return { reply: 'You don\'t have a running session to stop.', proposal: null };
+      return { reply: "Nothing's running at the moment, so there's nothing to stop.", proposal: null };
     }
     try {
       await runnerSessionService.cancel(orgId, target.id);
       return {
-        reply: modelReply.trim().length > 0 ? modelReply.trim() : `Stopping the session on ${target.deviceName}.`,
+        reply: modelReply.trim().length > 0 ? modelReply.trim() : `Stopping the work on ${target.deviceName} now.`,
         proposal: null,
       };
     } catch (error) {
-      return { reply: `I couldn't stop that session: ${this.errText(error)}`, proposal: null };
+      return { reply: `I couldn't stop that — ${errorInWords(this.errText(error))}.`, proposal: null };
     }
   }
 
@@ -787,9 +796,9 @@ class RunnerIntentService {
     const finished = sessions.filter((s) => s.endedAt !== null).slice(0, 3);
     const lines: string[] = [];
     if (running.length === 0) {
-      lines.push('Nothing is running right now.');
+      lines.push(finished.length > 0 ? "Nothing's running at the moment." : "Nothing's running at the moment, and nothing has run yet.");
     } else {
-      lines.push(running.length === 1 ? 'One session running:' : `${running.length} sessions running:`);
+      lines.push(running.length === 1 ? "Here's what's running:" : `Here's what's running — ${running.length} things:`);
       for (const s of running) lines.push(`• ${this.sessionLine(s)}`);
     }
     if (finished.length > 0) {
@@ -803,20 +812,23 @@ class RunnerIntentService {
     const what = s.projectName ?? s.workspaceName;
     const firstLine = s.prompt.split('\n')[0] ?? s.prompt;
     const instruction = firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
+    const state = statusInWords(s.status);
     const tail =
       s.endedAt === null
-        ? s.status
+        ? state
         : s.prUrl !== null
-          ? `${s.status}, PR ${s.prUrl}`
+          ? `${state}, pull request open: ${s.prUrl}`
           : s.branch !== null
-            ? `${s.status}, on ${s.branch}${s.pushed ? ' (pushed)' : ''}`
-            : s.status;
+            ? `${state}, ${s.pushed ? 'pushed' : 'ready to push'} (${s.branch})`
+            : state;
     return `${what} on ${s.deviceName} — "${instruction}" — ${tail}`;
   }
 
   /** "Is the Mac mini up?" — every machine in the org, in one line each. */
   private describeDevices(state: TurnState): string {
-    if (state.devices.length === 0) return 'There are no machines paired to this organization yet.';
+    if (state.devices.length === 0) {
+      return "No machines are connected to this organization yet. Once the Stewra runner is running on one, it'll show up here.";
+    }
     const lines = state.devices.map((d) => {
       const ready = state.projects
         .filter((p) => this.readyOn(state, p).some((c) => c.device.id === d.id))
@@ -824,12 +836,14 @@ class RunnerIntentService {
       const status = d.online
         ? 'online'
         : d.kind === 'hosted'
-          ? 'asleep (wakes when needed)'
+          ? 'asleep — wakes when needed'
           : d.lastSeenAt !== null
-            ? `offline since ${new Date(d.lastSeenAt).toLocaleString('en-GB')}`
+            ? `offline, last seen ${lastSeenInWords(d.lastSeenAt)}`
             : 'never connected';
-      const projects = ready.length > 0 ? `; ready: ${ready.join(', ')}` : '';
-      return `• ${d.name} (${d.environment}) — ${status}${projects}`;
+      // The label is worth a word only when it carries weight: production means a typed confirmation.
+      const label = d.environment === 'production' ? ' (production)' : '';
+      const projects = ready.length > 0 ? `; ready for ${listInWords(ready)}` : '';
+      return `• ${d.name}${label} — ${status}${projects}`;
     });
     return lines.join('\n');
   }
@@ -880,8 +894,8 @@ class RunnerIntentService {
         device = ready[0].device;
         workspace = ready[0].workspace;
       } else if (ready.length > 1) {
-        const names = ready.map((c) => c.device.name).join(' or ');
-        return `${project.name} is ready on more than one machine — ${names}. Which one?`;
+        const names = listInWords(ready.map((c) => c.device.name));
+        return `${project.name} is set up on ${names} — which would you like me to use?`;
       } else {
         return this.notReadyReason(state, project, null, null);
       }
@@ -890,17 +904,17 @@ class RunnerIntentService {
       // named (or be the only one online), and the checkout must be named.
       device = state.online.find((d) => d.id === ids.deviceId) ?? (state.online.length === 1 ? state.online[0] : undefined);
       if (device === undefined) {
-        const names = state.online.map((d) => d.name).join(', ');
+        const machines = listInWords(state.online.map((d) => d.name), 'or');
         return state.projects.length > 0
-          ? `Which project — ${state.projects.map((p) => p.name).join(', ')}? Or name a machine: ${names}.`
-          : `Which machine should I use — ${names}?`;
+          ? `Which project is this for — ${listInWords(state.projects.map((p) => p.name), 'or')}? Or just tell me the machine: ${machines}.`
+          : `Which machine would you like — ${machines}?`;
       }
       workspace = device.workspaces.find((w) => w.id === ids.workspaceId);
       if (workspace === undefined) {
-        const names = device.workspaces.map((w) => w.name).join(', ');
+        const names = listInWords(device.workspaces.map((w) => w.name), 'or');
         return names.length > 0
-          ? `Which checkout on ${device.name} — ${names}?`
-          : `${device.name} has no checkouts exposed to run against.`;
+          ? `Which folder on ${device.name} — ${names}?`
+          : `${device.name} doesn't have any project folders I can work in yet.`;
       }
     }
 
@@ -909,7 +923,7 @@ class RunnerIntentService {
     const preferred = harnessId !== null && usable.some((h) => h.id === harnessId) ? harnessId : undefined;
     const chosenHarness = preferred ?? usable[0]?.id;
     if (chosenHarness === undefined) {
-      return `${device.name} doesn't have a coding agent available right now.`;
+      return `${device.name} doesn't have a coding agent installed that I can use, I'm afraid.`;
     }
 
     // The checkout's own binding decides the project when none was named.
@@ -928,8 +942,8 @@ class RunnerIntentService {
     const bindings = state.bindings.filter((b) => b.projectId === project.id && (deviceId === null || b.deviceId === deviceId));
     if (bindings.length === 0) {
       return deviceName === null
-        ? `${project.name} isn't bound to a checkout on any machine yet — bind it on the Fleet page first.`
-        : `${project.name} isn't bound to a checkout on ${deviceName} — bind it on the Fleet page first.`;
+        ? `${project.name} isn't set up on any machine yet. Link it to its folder on the Fleet page and I'll be able to run it.`
+        : `${project.name} isn't set up on ${deviceName} yet. Link it to its folder there on the Fleet page and I'll be able to run it.`;
     }
     const offline = bindings.filter((b) => !state.online.some((d) => d.id === b.deviceId));
     const notReporting = bindings.filter((b) => {
@@ -940,14 +954,14 @@ class RunnerIntentService {
     if (notReporting.length > 0) {
       const b = notReporting[0];
       if (b !== undefined) {
-        return `${nameOf(b.deviceId)} is online but isn't reporting ${b.workspacePath} — check the volume is mounted, then press Rescan on the Fleet page.`;
+        return `${nameOf(b.deviceId)} is online, but I can't see ${project.name}'s folder on it right now (${b.workspacePath}). Is the drive mounted? Once it is, press Rescan on the Fleet page and I'll try again.`;
       }
     }
     if (offline.length > 0) {
-      const names = offline.map((b) => nameOf(b.deviceId)).join(' and ');
-      return `${project.name} is on ${names}, which ${offline.length === 1 ? 'is' : 'are'} offline right now.`;
+      const names = listInWords(offline.map((b) => nameOf(b.deviceId)));
+      return `${project.name} lives on ${names}, which ${offline.length === 1 ? 'is' : 'are'} offline at the moment. I'll be able to run it as soon as it's back.`;
     }
-    return `${project.name} isn't ready to run right now.`;
+    return `${project.name} isn't ready to run at the moment.`;
   }
 
   /**
@@ -958,12 +972,12 @@ class RunnerIntentService {
    */
   private startFailureReply(deviceName: string, error: string | null): string {
     if (error === 'runner_wake_timeout') {
-      return `Your cloud runner didn't finish starting up in time. Try again in a moment — it usually only takes a minute.`;
+      return 'Your cloud runner is taking longer than usual to wake up. Give it a minute and ask me again.';
     }
     if (error === 'device_offline') {
-      return `${deviceName} isn't reachable right now — is the runner running on that machine?`;
+      return `${deviceName} isn't reachable at the moment — is the Stewra runner still running there?`;
     }
-    return `I couldn't start it on ${deviceName}${error !== null && error.length > 0 ? `: ${error}` : '.'}`;
+    return `I couldn't start that on ${deviceName}${error !== null && error.length > 0 ? ` — ${errorInWords(error)}` : ''}.`;
   }
 
   private asHarnessId(value: string): RunnerHarnessId | null {

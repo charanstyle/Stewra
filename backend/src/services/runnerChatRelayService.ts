@@ -11,6 +11,7 @@ import type { PendingRunnerPermission, RunnerOrigin } from '../repositories/runn
 import { emitToConversation } from '../websocket/emitter.js';
 import { whatsappBridgeService } from './whatsappBridgeService.js';
 import { logger } from '../utils/logger.js';
+import { summaryInWords, errorInWords } from './runnerVoice.js';
 
 export type { PendingRunnerPermission, RunnerOrigin } from '../repositories/runnerChatRelayRepository.js';
 /**
@@ -69,8 +70,11 @@ export class RunnerChatRelayService {
 
     const origin = await runnerChatRelayRepository.findOrigin(payload.sessionId);
     if (origin === null) return;
-    const detail = payload.detail.trim().length > 0 ? ` (${payload.detail.trim()})` : '';
-    const line = `Permission needed on ${subject(origin)}: ${payload.title}${detail}. Reply "yes" to allow or "no" to deny.`;
+    // The agent's title and detail are usually the same words; say them once.
+    const title = payload.title.trim();
+    const detail = payload.detail.trim();
+    const step = detail.length > 0 && detail !== title ? `${title} — ${detail}` : title;
+    const line = `${subject(origin)} needs your OK for one step: ${step}. Shall I let it? (yes / no)`;
     await this.deliver(origin, line);
   }
 
@@ -84,20 +88,21 @@ export class RunnerChatRelayService {
     if (origin === null) return;
     await runnerChatRelayRepository.deleteOrigin(payload.sessionId);
 
-    const where = `${origin.deviceName} (${subject(origin)})`;
+    const what = subject(origin);
     let line: string;
     if (payload.status === 'completed') {
-      const summary = payload.summary && payload.summary.trim().length > 0 ? ` ${payload.summary.trim()}` : '';
-      const pushable =
+      const summary = summaryInWords(payload.summary);
+      const note = summary.length > 0 ? ` ${summary}` : '';
+      const next =
         payload.committed && payload.branch
-          ? ` The work is on branch ${payload.branch} — say "push it" to push, or "open a PR".`
-          : '';
-      line = `Done on ${where}.${summary}${pushable}`;
+          ? ` The changes are saved on branch ${payload.branch}. Say "push it" and I'll push them, or "open a PR".`
+          : ' There were no changes to save.';
+      line = `All done — ${what} on ${origin.deviceName} has finished.${note}${next}`;
     } else if (payload.status === 'cancelled') {
-      line = `Session on ${where} was cancelled.`;
+      line = `Stopped the work on ${what} (${origin.deviceName}), as asked.`;
     } else {
-      const why = payload.error && payload.error.trim().length > 0 ? `: ${payload.error.trim()}` : '';
-      line = `Session on ${where} failed${why}.`;
+      const why = payload.error && payload.error.trim().length > 0 ? ` — ${errorInWords(payload.error)}` : '';
+      line = `I'm sorry — the work on ${what} (${origin.deviceName}) didn't finish${why}. The Fleet page has the full log if you'd like to see what happened.`;
     }
     await this.deliver(origin, line);
   }
