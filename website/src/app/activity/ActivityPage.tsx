@@ -15,7 +15,6 @@ import { FeedbackControl } from '../../components/FeedbackControl/FeedbackContro
 import WhatsappBridgePanel from './WhatsappBridgePanel';
 import EmailOverWhatsappPanel from './EmailOverWhatsappPanel';
 import RunnerPanel from './RunnerPanel';
-import RunnerSessions from './RunnerSessions';
 import styles from './ActivityPage.module.css';
 
 function describeError(err: unknown): string {
@@ -272,8 +271,6 @@ export default function ActivityPage(): React.JSX.Element {
           <EmailOverWhatsappPanel emailVerified={emailVerified} />
 
           <RunnerPanel emailVerified={emailVerified} />
-
-          <RunnerSessions />
 
           <div className={styles.card}>
             <h2 className={styles.cardTitle}>Gmail window</h2>
