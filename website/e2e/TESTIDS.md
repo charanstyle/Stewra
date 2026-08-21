@@ -18,6 +18,9 @@ same change (mirrors the intent of the Maestro suite's testID discipline on mobi
 | `runner-session-cancel` | `src/components/chat/ProposedRunnerSessionCard.tsx` | the secondary `<button>` | Cancel (or, after a failed start, "Dismiss") the proposal. |
 | `runner-session-busy` | `src/components/chat/ProposedRunnerSessionCard.tsx` | the "Starting…" `<span>` | Shown while a confirm request for this proposal is in flight (both buttons removed). Lets a spec wait out the round-trip. |
 | `runner-session-status` | `src/components/chat/ProposedRunnerSessionCard.tsx` | the terminal-status `<p>` | The collapsed status line for a resolved (`sent`/`cancelled`) proposal, e.g. "Started on <machine>". |
+| `settings-delete-account` | `src/app/settings/SettingsPage.tsx` | the "Delete account" `<button>` in Danger zone | Opens the deletion sheet. Deletes nothing by itself — it fetches the server's preview first, so a spec asserts on the sheet, not on a signed-out app. Mirrors the mobile id of the same name. |
+| `delete-account-password` | `src/app/settings/SettingsPage.tsx` | the password `<input>` inside the sheet | Password re-entry. Rendered only when the preview reports no blockers, so its appearance doubles as "the preview arrived and this account may proceed". |
+| `delete-account-confirm` | `src/app/settings/SettingsPage.tsx` | the "Delete forever" `<button>` | **Irreversible.** Destroys the account for real — no grace period, no restore. Any spec touching it must register its own throwaway account first (`tests/accountDeletion.spec.ts` does); aimed at a shared QA account it would end the rest of the suite. |
 
 ## Conventions
 

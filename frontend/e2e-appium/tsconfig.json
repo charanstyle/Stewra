@@ -1,0 +1,29 @@
+{
+  "//": "Separate from ../tsconfig.json because the two have genuinely different shapes: the app is Metro-bundled JSX with React Native types, while this is a Node ESM program with no DOM and no JSX. It is not covered by the app's `include`, so without this file the suite would never be typechecked at all.",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+
+    // Node strips types from `.ts` at run time and resolves the specifier verbatim, so imports
+    // must name the real file (`./session.ts`). tsc rejects that without this flag.
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true,
+    "isolatedModules": true
+  },
+  "include": ["lib/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts", "vitest.config.ts"]
+}

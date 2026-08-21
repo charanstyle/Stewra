@@ -37,26 +37,48 @@ function ssh(sshHost, script) {
 }
 
 /**
- * Poll for a recent verification mail addressed to `address` and return its 6-digit code.
- * Throws if none arrives within `timeoutMs`.
+ * Undo `Content-Transfer-Encoding: quoted-printable`, which nodemailer applies to every body here
+ * (the copy contains em dashes, so no part is plain 7-bit). Two things it fixes, both of which would
+ * otherwise break a match on an accept link: soft line breaks chop long URLs at column 76, and `=`
+ * itself — the character that separates `token` from its value — arrives as `=3D`.
+ *
+ * Byte-for-byte only for the ASCII a caller extracts (digits, URLs). A multi-byte UTF-8 character
+ * comes back as its individual bytes, which is fine for matching and wrong for display; nothing here
+ * displays a body.
  */
-export async function waitForVerificationCode({
+function decodeQuotedPrintable(body) {
+  return body
+    .replace(/=\r?\n/g, '')
+    .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+/**
+ * Poll for a recent mail addressed to `address` whose decoded body matches `pattern`, and return
+ * that pattern's first capture group. Throws if none arrives within `timeoutMs`.
+ *
+ * Reads the newest FEW matching messages rather than only the newest one: an address can hold more
+ * than one recent mail (sign up, then get invited), and pinning to `head -1` would sit on the wrong
+ * message until the deadline. Files arrive newest-first, so the first match is the freshest.
+ */
+export async function waitForMail({
   sshHost,
   imapContainer,
   mailbox,
   address,
+  pattern,
+  what = 'mail',
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {
-  for (const [name, value] of Object.entries({ sshHost, imapContainer, mailbox, address })) {
+  for (const [name, value] of Object.entries({ sshHost, imapContainer, mailbox, address, pattern })) {
     if (!value) {
-      throw new Error(`[mailbox] waitForVerificationCode requires "${name}"`);
+      throw new Error(`[mailbox] waitForMail requires "${name}"`);
     }
   }
 
   const find =
     `docker exec ${imapContainer} sh -lc ` +
     `"find /mail/${mailbox}/new /mail/${mailbox}/cur -type f -mmin -${FRESH_MINUTES} ` +
-    `-exec grep -l '${address}' {} + 2>/dev/null | xargs -r ls -t | head -1 | xargs -r cat"`;
+    `-exec grep -l '${address}' {} + 2>/dev/null | xargs -r ls -t | head -5 | xargs -r cat"`;
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -67,11 +89,35 @@ export async function waitForVerificationCode({
       // No match yet (grep exits non-zero) or a transient ssh hiccup — both just mean "retry", and `body`
       // keeps its empty initial value so the regex below simply misses and the loop goes round again.
     }
-    const m = /verification code is\s*(\d{6})/i.exec(body);
+    const m = pattern.exec(decodeQuotedPrintable(body));
     if (m) {
       return m[1];
     }
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
-  throw new Error(`[mailbox] no verification mail for ${address} within ${timeoutMs}ms`);
+  throw new Error(`[mailbox] no ${what} for ${address} within ${timeoutMs}ms`);
+}
+
+/** The 6-digit code from a recent verification mail. */
+export async function waitForVerificationCode(params) {
+  return waitForMail({
+    ...params,
+    pattern: /verification code is\s*(\d{6})/i,
+    what: 'verification mail',
+  });
+}
+
+/**
+ * The `/invites/accept?token=…` path out of a recent org-invite mail — everything after the origin,
+ * so the caller opens it on the site under test rather than on whatever APP_URL the server was
+ * configured with.
+ */
+export async function waitForInviteAcceptPath(params) {
+  return waitForMail({
+    ...params,
+    // Stops at the first character that cannot be in a URL, which is what ends the token in both the
+    // text part ("Open this link to accept: <url>\n") and the HTML one (href="<url>").
+    pattern: /(\/invites\/accept\?token=[^\s"'<>]+)/,
+    what: 'org-invite mail',
+  });
 }

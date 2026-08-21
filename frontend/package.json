@@ -10,6 +10,10 @@
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
+    "appium": "appium server --port ${APPIUM_PORT:-4723} --log-level info",
+    "e2e": "vitest run --root e2e-appium",
+    "e2e:devices": "node e2e-appium/scripts/list-devices.ts",
+    "e2e:typecheck": "tsc --noEmit -p e2e-appium/tsconfig.json",
     "eas-build-post-install": "npm run build --workspace @stewra/shared-types"
   },
   "dependencies": {
@@ -48,6 +52,8 @@
   "devDependencies": {
     "@babel/core": "^7.26.0",
     "@config-plugins/react-native-webrtc": "^14.0.0",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "vitest": "^3.2.7",
+    "webdriverio": "^9.31.1"
   }
 }

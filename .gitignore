@@ -23,6 +23,9 @@ google-services.json
 **/.mailcredentials
 .DS_Store
 coverage/
+# Screenshots and element dumps captured when a device test fails (frontend/e2e-appium). Useful
+# for minutes, worthless afterwards, and they picture a signed-in QA account's real screen.
+frontend/e2e-appium/artifacts/
 .next/
 *.tsbuildinfo
 
@@ -57,3 +60,6 @@ coverage/
 # The live smoke driver's WhatsApp session (bridge/smoke-selfchat.mts) — REAL linked-device
 # credentials for the QA account. Committing this would publish a working WhatsApp session.
 /bridge/.smoke-session/
+# Store binaries are EAS build outputs, reproducible from the build id; never history.
+*.ipa
+*.aab

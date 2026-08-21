@@ -1,0 +1,56 @@
+# Commerce → create a business (organization) from the app.
+#
+# The commerce plane hangs off an org: without one, the Commerce tab is an empty state and the
+# Subscription screen has no route at all. Until this screen grew a create form, the only way to
+# get one was the website — so a mobile-only user could not start a business, and
+# subscription.yaml could never run on a fresh QA account.
+#
+# IDEMPOTENT BY CONSTRUCTION, not by ignoring failures. The create form only exists in the
+# `memberships.length === 0` branch, so this flow creates an org on the first run and skips
+# straight to the assertion on every run after. Both paths end at the same place: the business
+# surface is reachable and `open-subscription` is on screen. A rerun that quietly did nothing and
+# passed would be worthless, so the tail assertion is outside the conditional and always runs.
+#
+# Assumes a signed-in session; run after login.yaml like the rest.
+#
+# No flow-level `env:` default for ORG_NAME — in Maestro 2.6.x+ a flow-level default WINS over
+# --env, which would discard what run-features.sh injects.
+appId: com.stewra.app
+---
+- runFlow: lib/goto-chats.yaml
+# Regex covers Android's plain "Commerce" tab label and iOS's composed "Commerce, tab, 5 of 6".
+- tapOn: "Commerce(, tab, .*)?"
+
+# The screen shows a spinner until GET /orgs answers, so neither branch below is decidable yet.
+# Waiting on the title that only the loaded empty state renders would hang for accounts that HAVE
+# an org; waiting on the org row would hang for accounts that don't. Wait on the tab bar settling
+# instead, then let the conditional read whichever branch actually mounted.
+- extendedWaitUntil:
+    visible: "No business yet|Numbers"
+    timeout: 20000
+
+- runFlow:
+    when:
+      visible:
+        id: "create-org"
+    commands:
+      # Fails loudly rather than typing an empty name into the form: with ORG_NAME unset the
+      # Create button stays disabled and the tap below would report "element not enabled", which
+      # reads as an app bug instead of unset configuration.
+      - assertTrue: ${typeof ORG_NAME !== 'undefined' && ORG_NAME !== '' && ORG_NAME !== 'null'}
+      - tapOn:
+          id: "create-org-name"
+      - inputText: "${ORG_NAME}"
+      - tapOn:
+          id: "create-org"
+      # POST /orgs then a full reload of GET /orgs — the org chip carrying the name proves the
+      # server accepted it and the list came back with it, not merely that the button was tapped.
+      - extendedWaitUntil:
+          visible: ".*${ORG_NAME}.*"
+          timeout: 20000
+
+# Always asserted, on both paths: an org exists and the commerce surface it gates is reachable.
+- extendedWaitUntil:
+    visible:
+      id: "open-subscription"
+    timeout: 20000

@@ -43,10 +43,12 @@ export const config = {
   contactName: env.E2E_CONTACT_NAME || '',
   // OPTIONAL real mailbox for reading emailed verification codes — what lets the sign-up flow
   // be driven through the UI instead of stubbed. Off unless E2E_SIGNUP_MAILBOX is set, because
-  // every run leaves a NEW permanent account behind: `audit_log` references `users` with
-  // ON DELETE SET NULL and the append-only trigger rejects that UPDATE, so users that sign up
-  // cannot be deleted. Once it IS set the rest are required, not defaulted: an ssh host and a
-  // container name are infrastructure this file must never guess.
+  // every run leaves a NEW account behind and only the sign-up test needs a readable inbox.
+  // (It used to leave a *permanent* one — `audit_log` references `users` with ON DELETE SET NULL
+  // and the append-only trigger rejected that UPDATE — until migration 062 fixed the trigger.
+  // Accounts are deletable now, which is what `tests/accountDeletion.spec.ts` proves and uses to
+  // clean up after itself.) Once it IS set the rest are required, not defaulted: an ssh host and
+  // a container name are infrastructure this file must never guess.
   signup: signupConfig(),
   users: {
     a: {

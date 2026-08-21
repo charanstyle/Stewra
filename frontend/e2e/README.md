@@ -116,6 +116,8 @@ use the first conversation in the list.
 | `flows/activity.yaml` | Settings → Activity; at least one feed row renders (today's recompute guarantees one). |
 | `flows/connections.yaml` | Settings shows the QA user's connected Google account and the connect button (not tapped — OAuth lives in the browser, covered by the web suite). |
 | `flows/pause.yaml` | Toggle **Pause Stewra** on, relaunch, assert the switch re-reads checked from the server; toggle off and assert the resume persisted the same way. |
+| `flows/create-org.yaml` | Commerce tab → name a business and **Create business**; the org appears and the commerce surface it gates becomes reachable. Creates only when the account has none (that branch is the only place the form exists), so it is safe to re-run; needs `E2E_ORG_NAME` on the first run. |
+| `flows/subscription.yaml` | Commerce → **Subscription and billing**; the screen mounts and reports plan state from `GET /orgs/:orgId/billing`. Needs an org, so it runs after `create-org.yaml`. Does not buy anything — see the flow's own header. |
 | `flows/logout.yaml` | Tap the header **Log out**; app returns to **Sign in** (guards the logout hardening). |
 | `flows/full.yaml` | Runs all four in order. |
 | `flows/optional/runner-session.yaml` | Opt-in — the in-chat "Run coding agent" card. See below. |

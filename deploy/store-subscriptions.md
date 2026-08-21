@@ -116,8 +116,20 @@ Users and Access → **Integrations** → **In-App Purchase** → add a key.
 - Record the **Key ID** shown next to it → `APPLE_STORE_KEY_ID`.
 - Record the **Issuer ID** shown at the top of that page → `APPLE_STORE_ISSUER_ID`.
 
-This is *not* the App Store Connect API key and not the push key. A key from the wrong section
-authenticates fine and then 401s against the App Store Server API.
+This is *not* the App Store Connect API key and not the push key.
+
+An earlier revision of this document claimed a key from the wrong section "authenticates fine and
+then 401s against the App Store Server API". **That is not true today** — measured 2026-08-18 by
+calling `GET /inApps/v1/subscriptions/{id}` on `api.storekit-sandbox.itunes.apple.com` with the
+Admin **team** key from §1.8: Apple answered `404 {"errorCode":4040010,"errorMessage":"Transaction
+id not found."}`, which is the authenticated response. An unauthenticated caller gets 401 before
+the lookup happens. So the team key would work.
+
+Use a dedicated In-App Purchase key anyway, for a reason that has nothing to do with whether it
+authenticates: the team key carries the **Admin** role over the whole account — it can create apps,
+change prices, and add users — and `APPLE_STORE_PRIVATE_KEY` lives in `stewra.env` on a public-
+facing host. An In-App Purchase key can do exactly one thing, which is the thing the backend
+actually needs. §1.8 says the team key must never appear in `stewra.env`; that still stands.
 
 ### 1.4 Server notifications
 
@@ -140,6 +152,17 @@ returns `ignored` from `handleNotification` — that is the success case, not a 
 Users and Access → **Sandbox** → Test Accounts → add one. Use an email address that has never
 been an Apple ID. Sign the **device** into it under Settings → Developer → Sandbox Apple Account
 (not the main iCloud login).
+
+**Done** — `GET /v2/sandboxTesters` returns one: `charanstyle+sandbox@gmail.com`, territory USA,
+renewal rate `MONTHLY_RENEWAL_EVERY_FIVE_MINUTES` (a sandbox month is five real minutes, which is
+what makes a renewal observable inside one sitting), `interruptPurchases=false`.
+
+Note which builds actually need it. A **TestFlight** build already runs StoreKit against the
+sandbox using the tester's own App Store Apple ID — the purchase sheet says `[Environment:
+Sandbox]` and charges nothing. The sandbox tester account is for builds installed **outside**
+TestFlight (Xcode run, or the `adhoc` profile in §3.1). Apple exposes testers read-only
+(`GET /v2/sandboxTesters`, `PATCH` for territory and renewal rate); there is no create endpoint,
+so a second one has to be added in the console.
 
 ### 1.6 Env
 
@@ -167,17 +190,34 @@ they bite:
 1. **Paid Applications agreement** (App Store Connect → Business). Must be *active*, with bank
    details and tax forms complete. Free apps do not need it; a subscription does. This is the one
    with real lead time — bank verification and tax review take days, and nothing about it is
-   visible from the API, so it has to be checked in the console.
-2. **Review assets** on the subscription — a screenshot of the subscription screen and a note
-   telling the reviewer how to reach it. Apple rejects subscriptions submitted without a
-   screenshot. This is what `MISSING_METADATA` refers to and it clears once both are supplied.
-3. **The In-App Purchase key** from §1.3 — still needed, and it is a *different key* from the App
-   Store Connect API key used to create all of the above. Same account, different section, and one
-   authenticates fine while 401ing against the App Store Server API. §1.3 is the right section.
-4. **Server notification URLs** (§1.4) and a **sandbox tester** (§1.5).
+   visible from the API, so it has to be checked in the console. **Does not block sandbox.**
+2. **The In-App Purchase key** from §1.3 — the one remaining blocker for a sandbox purchase,
+   because `claimPurchase` → `readSubscription` asks Apple's App Store Server API what the
+   reference actually is, and that call is authenticated with this key. Console-only, verified
+   2026-08-18 rather than assumed:
+   - Public ASC API has no key surface. `/v1/apiKeys`, `/v1/inAppPurchaseKeys`,
+     `/v1/subscriptionKeys`, `/v1/keys`, `/v1/integrations` all return 404, against a
+     `/v1/userInvitations` control that returns 200 with data on the same token.
+   - fastlane cannot either. `Spaceship::Portal::Key` (fastlane 2.238.0) covers *developer-portal*
+     keys only — its `create` takes `apns:`, `device_check:`, `music_id:` and hardcodes those three
+     service ids, with no passthrough. That is developer.apple.com → Keys, a different system from
+     ASC → Users and Access → Integrations. Spaceship's internal ASC client (`spaceship/tunes/`)
+     has `iap*.rb` and `sandbox_tester.rb` but no key model at all.
+3. **Server notification URLs** (§1.4). Not needed to make a first purchase, needed before a
+   renewal or a cancellation can be honoured.
 
-None of these block a sandbox purchase except the key in step 3, which the backend needs to verify
-one.
+**Done since this list was written:**
+
+- ~~Review assets~~ — the paywall screenshot was captured off the tethered iPhone 13 and uploaded
+  through `/v1/subscriptionAppStoreReviewScreenshots` (2026-08-18). The subscription moved
+  `MISSING_METADATA` → **`READY_TO_SUBMIT`**, confirming the missing screenshot was the sole cause.
+- ~~Sandbox tester~~ — see §1.5; one exists.
+
+Worth recording because it was an open question: **`MISSING_METADATA` never blocked StoreKit.**
+While the subscription was still in that state, the app on the device fetched the product and
+`SubscriptionScreen` rendered `$214.99` from `product.displayPrice`. That screen has no hardcoded
+price and no fallback — it renders "The store has no price for this product yet." when the fetch
+returns nothing — so a rendered price is proof of a live store fetch, not of a local constant.
 
 ### 1.8 The App Store Connect API key (tooling, not runtime)
 
@@ -203,16 +243,38 @@ are checked: signed by Google, minted for *this* endpoint (`aud`), minted by *ou
 subscription (`email`). Skip the third and every Google Cloud customer on earth can point a push
 subscription at the URL and be believed — which is why both Pub/Sub values are required at boot.
 
-### 2.1 The subscription
+### 2.1 The subscription — DONE 2026-08-18
 
-Play Console → your app → **Monetize** → **Subscriptions** → create.
+The app record itself is dashboard-only (Play exposes no create-app API), but everything after it
+was driven through the Android Publisher API, so the values are recorded rather than remembered:
 
-- **Product ID** → `GOOGLE_PLAY_PRODUCT_ID` and `EXPO_PUBLIC_STORE_PRODUCT_ID_ANDROID`.
-  Suggested: `stewra-pro-monthly`. Play's ids are issued independently of Apple's and need not
-  match; the two env vars exist precisely because they usually differ.
-- Add a **base plan**: auto-renewing, monthly, **$213.00 USD**, then set regional prices.
-- Activate the base plan. A subscription with no active base plan is invisible to the app and the
-  purchase flow fails with an unhelpful error.
+| | |
+|---|---|
+| App | **Stewra**, package `com.stewra.app` |
+| Product id | **`stewra.pro.monthly`** → `GOOGLE_PLAY_PRODUCT_ID`, `EXPO_PUBLIC_STORE_PRODUCT_ID_ANDROID` |
+| Listing | title "Stewra Pro", description "Your assistant for calendar, mail, money and WhatsApp." (en-US) |
+| Base plan | `monthly`, auto-renewing `P1M`, grace `P7D`, account hold `P30D`, resubscribe on |
+| State | **ACTIVE** — `newSubscriberAvailability` true |
+| Price | **$213.00 USD** + 172 regional prices, regions version `2025/03` |
+
+Three things Play enforces that are worth knowing before touching this by hand:
+
+- **A product id cannot contain hyphens.** It is `a-z`, `0-9`, `_` and `.` only — an earlier
+  revision of this file suggested `stewra-pro-monthly`, which the API rejects outright with
+  `Subscription ID is malformed`. Base plan ids are the opposite (RFC-1034, hyphens fine, no
+  underscores). Product ids are permanent and non-reusable, so this is worth getting right on the
+  first call rather than deleting and retrying.
+- **`state` is output-only.** A base plan is always created `DRAFT`; `basePlans:activate` is the
+  only way to make it `ACTIVE`, and a subscription with no active base plan is invisible to the
+  app — the purchase flow fails with an unhelpful error rather than saying so.
+- **Regional prices come from Play, not from arithmetic.** `pricing:convertRegionPrices` is the API
+  behind the console's "set regional prices" button; it returns all 173 regions *and* the current
+  `regionsVersion` (a required parameter), so neither is hardcoded. Note it suggests **$214.99**
+  for the US rather than $213 — its own rounding to a familiar price point. It is overridden: Play
+  accepts arbitrary prices and $213 = $149 ÷ 0.70 is the decision this file records.
+
+Play ids are issued independently of Apple's and need not match — the two env vars exist precisely
+because they differ, and here they do (`com.stewra.app.pro.monthly` vs `stewra.pro.monthly`).
 
 An app must have at least one build on a track (internal testing is enough) before Play will let
 purchases be made against it.
@@ -234,6 +296,21 @@ From the JSON: `client_email` → `GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL`, `private_
 
 Permission grants in Play take several minutes to propagate; a fresh grant 401ing is normal for
 the first few minutes and is not a configuration error.
+
+**The same JSON is what `eas submit` authenticates with**, so `eas.json`'s
+`submit.production.android.serviceAccountKeyPath` reads it from `$GOOGLE_PLAY_KEY_PATH` — a path,
+not a value, and an env reference rather than a literal for the same reason as the iOS
+`$ASC_KEY_PATH` beside it: the key must never be committed. Keep it with the Apple one, outside
+the repo, and export both before submitting:
+
+```
+set -a && . ~/.stewra-asc.env && . ./.env && set +a
+export GOOGLE_PLAY_KEY_PATH=~/.config/stewra/play-publisher.json
+```
+
+Google serves the private material exactly once at creation, unlike the Play *console* settings
+which can all be re-read through the API. A lost key is not recoverable — mint a new one
+(`gcloud iam service-accounts keys create`) and delete the orphan, which costs nothing.
 
 ### 2.3 Real-time developer notifications
 
@@ -271,7 +348,7 @@ real, free entitlement in production.
 ```
 GOOGLE_PLAY_ENABLED=true
 GOOGLE_PLAY_PACKAGE_NAME=com.stewra.app
-GOOGLE_PLAY_PRODUCT_ID=stewra-pro-monthly
+GOOGLE_PLAY_PRODUCT_ID=stewra.pro.monthly
 GOOGLE_PLAY_SERVICE_ACCOUNT_EMAIL=<client_email from 2.2>
 GOOGLE_PLAY_SERVICE_ACCOUNT_PRIVATE_KEY=<private_key from 2.2, newlines as literal \n>
 GOOGLE_PLAY_PUBSUB_AUDIENCE=https://www.stewra.com/api/webhooks/stores/google
@@ -289,7 +366,7 @@ the backend's:
 
 ```
 EXPO_PUBLIC_STORE_PRODUCT_ID_IOS=com.stewra.app.pro.monthly
-EXPO_PUBLIC_STORE_PRODUCT_ID_ANDROID=stewra-pro-monthly
+EXPO_PUBLIC_STORE_PRODUCT_ID_ANDROID=stewra.pro.monthly
 ```
 
 A mismatch is a purchase the customer pays for and cannot use, and **neither store will tell you**,
@@ -301,6 +378,37 @@ is the first moment it is actually needed.
 
 Store purchases do not work in a simulator or on Expo Go. Both halves of step 4 need a real device
 and a real signed build (TestFlight or an internal-track APK/AAB).
+
+### 3.1 Getting a build onto a tethered iPhone without TestFlight
+
+The `production` profile signs `method: app-store`. Such a profile carries no device list and sets
+`get-task-allow=false`, so iOS refuses to install that `.ipa` directly — it is reachable *only*
+through TestFlight, and TestFlight's Update button cannot be triggered from a script. Every
+iteration therefore costs an upload, Apple's processing, and a human tap on the phone.
+
+The `adhoc` profile exists to remove that loop. It `extends` `production`, so it keeps
+`environment: "production"` — the point is to test against the real backend, and `preview` would
+silently point the app at preview env vars and write test orgs into the wrong database. Two
+deliberate overrides: `distribution: "internal"` (ad hoc signing, embedding the registered devices)
+and `autoIncrement: false`, so device builds do not burn remote build numbers that TestFlight
+builds are counting on.
+
+```
+set -a && . ~/.stewra-asc.env && . ./.env && set +a
+eas build --platform ios --profile adhoc --local --non-interactive
+unzip -q build-*.ipa -d /tmp/stewra-adhoc
+xcrun devicectl device install app --device <udid> /tmp/stewra-adhoc/Payload/Stewra.app
+```
+
+`devicectl` installs an app *bundle*; it has no idea what an `.ipa` is, hence the unzip. `xcrun
+devicectl list devices` shows whether the phone is reachable, but note its `Identifier` column is
+the CoreDevice UUID, **not** the UDID — `--device` accepts either, the portal only knows the UDID.
+
+The device must already be registered in the Apple developer portal, or the ad hoc profile will not
+include it and the install fails at signature validation rather than at build time.
+
+Sandbox StoreKit works on an ad hoc build exactly as it does on TestFlight, so nothing in step 4
+changes — only who has to press the button.
 
 ---
 
@@ -317,9 +425,12 @@ tester from 1.5. Open the Subscription screen, buy. Then check:
 - the billing page at `/commerce/billing` shows the Apple note, **no payment-method section**, and
   no invoice — Apple's receipt is the bill.
 
-Sandbox subscriptions renew on an accelerated clock (a month is minutes), so leave it running and
-confirm a `DID_RENEW` notification lands and updates the row. Then cancel from
-Settings → Sandbox Account and confirm the expiry is observed.
+Sandbox subscriptions renew on an accelerated clock, but **the rate is a console setting, not a
+constant** — App Store Connect → Users and Access → Sandbox → the tester's renewal rate. Observed
+on this account 2026-08-18: renewal did **not** arrive on the "a month is five minutes" schedule
+the rate table implies, so check what the tester is actually set to before concluding the
+notification pipeline is broken. Leave it running, confirm a `DID_RENEW` lands and updates the
+row, then cancel from Settings → Sandbox Account and confirm the expiry is observed.
 
 **Android, internal track.** Upload a build to internal testing, install it as the license tester
 from 2.4, buy. Same three checks, with `collector: 'google'`. Cancel from Play → Subscriptions and
@@ -331,12 +442,61 @@ app, the store and any proxy in between, so the unique constraint is the real gu
 
 ## 5. Going live
 
+Three channels go live independently. Stripe does not wait for App Review; the stores do.
+
+### 5.1 The stores
+
 When the sandbox runs clean and the app has cleared review:
 
 1. Flip `APPLE_STORE_ENVIRONMENT` / `GOOGLE_PLAY_ENVIRONMENT` to `production`.
 2. Restart the backend and confirm it boots (the boot guard is the check that nothing is missing).
 3. Buy once, for real, on a production build, and refund it from the console.
 
-That last step is the only end-to-end proof that exists, and it is worth its $214.99 — **there is no
-refund surface in the product today.** A refund can only be issued from the store console (or the
-Stripe dashboard, for web). Whether to build one is still an open decision.
+Nothing else changes for Apple: the same `.p8`, issuer and key id serve both ledgers, and
+`apiBaseUrl` follows the environment. What the flip actually arms is the refusal in
+`appleStore.ts` — every notification and lookup carries the ledger it came from *inside the
+signed payload*, and `assertOurs` rejects any payload whose ledger disagrees with this env var.
+So a stale `sandbox` after launch does not quietly accept real purchases; it refuses them
+loudly. That is the intended failure, but it is still an outage — flip it in the same restart
+that ships the production build, not after.
+
+### 5.2 Stripe, test → live
+
+Independent of the stores, and the one channel that has never moved a real dollar. Four values
+change together, all in `stewra.env`:
+
+| Key | From | To |
+|---|---|---|
+| `STRIPE_SECRET_KEY` | `sk_test_…` | `sk_live_…` |
+| `STRIPE_PUBLISHABLE_KEY` | `pk_test_…` | `pk_live_…` |
+| `STRIPE_WEBHOOK_SECRET` | test endpoint's `whsec_…` | **live endpoint's** `whsec_…` |
+| `COMMERCE_BILLING_PROVIDER` | `stripe` | unchanged |
+
+Two traps, in order of how much they cost:
+
+**The webhook secret is per-endpoint, not per-account.** A live-mode endpoint is a *separate*
+endpoint in the Stripe dashboard with its own signing secret, and both modes' secrets are
+spelled `whsec_`. Carrying the test secret into live means every live delivery fails signature
+verification — charges succeed at Stripe and the invoice never settles here. The boot guard
+cannot catch this one (the string carries no mode), so it is on the person doing the cutover.
+Create the live endpoint at `https://www.stewra.com/api/webhooks/payments` subscribed to
+`payment_intent.succeeded` and `payment_intent.payment_failed` — the only two events
+`stripeProvider.verifyWebhook` consumes — and copy *that* endpoint's secret.
+
+**Mixed key modes are refused at boot.** `sk_live_` with `pk_test_` is caught by the guard in
+`unifiedConfig.ts` and the backend will not start. This is deliberate: the failure it prevents
+is a customer typing a card into a SetupIntent opened on the other ledger, which Stripe answers
+with "No such setupintent".
+
+The publishable key is served to the browser from `GET /orgs/:orgId/billing`, not baked into the
+website bundle — so no website rebuild is needed. Restart the backend and the card form picks up
+the live key on the next load.
+
+Then prove it: put a real card on file at `/commerce/billing`, have an operator charge one
+invoice from `POST /platform/billing/invoices/:invoiceId/charge`, confirm the `payment_intent.
+succeeded` delivery verified and the invoice settled, and refund it from the Stripe dashboard.
+
+### 5.3 What "live" still does not include
+
+**There is no refund surface in the product.** A refund can only be issued from the store console
+or the Stripe dashboard. Whether to build one is still an open decision.
