@@ -5,7 +5,9 @@ process.env['RUNNER_DOWNLOAD_URL'] = 'https://downloads.example.test/stewra-runn
 process.env['RUNNER_MIN_VERSION'] = '0.2.0';
 process.env['RUNNER_LATEST_VERSION'] = '0.2.0';
 
-const { looksLikeRunnerIntent, normalizeName } = await import('../services/runnerIntentService.js');
+const { looksLikeRunnerIntent, normalizeName, isClarifyingAsk, lastAssistantTurn } = await import(
+  '../services/runnerIntentService.js'
+);
 
 /**
  * The keyword gate in front of the runner classifier. It is the cheapest thing in the pipeline and the
@@ -67,5 +69,34 @@ describe('the runner intent gate', () => {
   it('normalizes the way a transcriber mangles a name', () => {
     expect(normalizeName('True Talk')).toBe('truetalk');
     expect(normalizeName('My-Money Worthy!')).toBe('mymoneyworthy');
+  });
+});
+
+describe('recognizing Stewra\'s own clarifying questions', () => {
+  // The exact sentences `resolve` produces. Answering one ("on the Mac mini") must be read as the original
+  // request with the blank filled in — there is no proposal to confirm, and "There's nothing waiting to
+  // start right now." was the bug this guards against.
+  it('matches the three which-machine / which-project / which-checkout asks', () => {
+    expect(
+      isClarifyingAsk('LookedTwice is ready on more than one machine — MacBook Pro or Mac mini. Which one?'),
+    ).toBe(true);
+    expect(isClarifyingAsk('Which project — Stewra, Truetalk? Or name a machine: Mac mini.')).toBe(true);
+    expect(isClarifyingAsk('Which checkout on Mac mini — rank or rank-v2?')).toBe(true);
+  });
+
+  it('does not match proposals, refusals, or ordinary replies', () => {
+    expect(isClarifyingAsk("There's nothing waiting to start right now.")).toBe(false);
+    expect(isClarifyingAsk('I\'ll run the test suite on LookedTwice on the Mac mini — shall I start?')).toBe(false);
+    expect(isClarifyingAsk(null)).toBe(false);
+  });
+
+  it('finds the latest Stewra line, skipping the user\'s own turns', () => {
+    const history = [
+      { role: 'assistant' as const, content: 'Hello' },
+      { role: 'assistant' as const, content: ' Which checkout on Mac mini — a or b? ' },
+      { role: 'user' as const, content: 'on the Mac mini' },
+    ];
+    expect(lastAssistantTurn(history)).toBe('Which checkout on Mac mini — a or b?');
+    expect(lastAssistantTurn([{ role: 'user' as const, content: 'hi' }])).toBeNull();
   });
 });
