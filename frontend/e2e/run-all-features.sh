@@ -29,7 +29,11 @@ EXPLICIT_UDID="${2:-}"
 # from a cleared state, which would otherwise sign the earlier flows out from under themselves.
 # today runs before pause (a lingering mid-failure pause would starve today's recompute), and both
 # before the messaging/call flows so a paused account can never be what a call failure means.
-ORDER=(login.yaml today.yaml activity.yaml connections.yaml subscription.yaml pause.yaml send-message.yaml call-smoke.yaml logout.yaml full.yaml)
+# create-org runs before subscription because subscription needs an org to exist: the Subscription
+# screen is reached from the Commerce tab, which renders the create form instead of the org surface
+# until the account belongs to one. On an account that already has an org, create-org skips its
+# create branch and just asserts the surface — so the pair is safe to re-run in either state.
+ORDER=(login.yaml today.yaml activity.yaml connections.yaml create-org.yaml subscription.yaml pause.yaml send-message.yaml call-smoke.yaml logout.yaml full.yaml)
 
 declare -a FLOWS=()
 for name in "${ORDER[@]}"; do

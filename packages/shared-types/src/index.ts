@@ -33,6 +33,7 @@ export type {
 } from './models/suggestion';
 export type {
   Organization,
+  OrgKind,
   OrgStatus,
   OrgRole,
   OrgMember,
@@ -40,7 +41,13 @@ export type {
   OrgInvite,
   OrgInviteStatus,
 } from './models/organization';
-export { ORG_STATUSES, ORG_ROLES, ORG_INVITE_STATUSES, roleMeetsMinimum } from './models/organization';
+export {
+  ORG_KINDS,
+  ORG_STATUSES,
+  ORG_ROLES,
+  ORG_INVITE_STATUSES,
+  roleMeetsMinimum,
+} from './models/organization';
 export type {
   CommercePlatform,
   ChannelAccount,
@@ -151,6 +158,7 @@ export type { Rating, InsightFeedback } from './models/feedback';
 export { RATINGS, RATING_REWARD, POSITIVE_RATINGS } from './models/feedback';
 export type { AgentMemory, MemorySource } from './models/memory';
 export type { RunnerDevice, RunnerSession } from './models/runner';
+export type { Project, ProjectWorkspaceBinding } from './models/project';
 export type {
   ProcessRule,
   ProcessDomain,
@@ -374,6 +382,11 @@ export type {
   GetRunnerStatusResponse,
   StartRunnerSessionRequest,
   StartRunnerSessionResponse,
+  StartOrgRunnerSessionRequest,
+  UpdateRunnerDeviceRequest,
+  UpdateRunnerDeviceResponse,
+  MoveRunnerDeviceRequest,
+  MoveRunnerDeviceResponse,
   PromptRunnerSessionRequest,
   DecideRunnerPermissionRequest,
   RunnerSessionActionResponse,
@@ -382,6 +395,20 @@ export type {
   OpenRunnerPrRequest,
   OpenRunnerPrResponse,
 } from './api/runner';
+export type {
+  CreateProjectRequest,
+  CreateProjectResponse,
+  UpdateProjectRequest,
+  UpdateProjectResponse,
+  ListProjectsResponse,
+  GetProjectResponse,
+  ArchiveProjectResponse,
+  BindProjectWorkspaceRequest,
+  BindProjectWorkspaceResponse,
+  ListProjectWorkspacesResponse,
+  UnbindProjectWorkspaceResponse,
+  ListOrgProjectBindingsResponse,
+} from './api/projects';
 export type {
   GithubRepoInfo,
   GetGithubAppStatusResponse,
@@ -432,6 +459,8 @@ export {
 export type {
   CreateOrgRequest,
   CreateOrgResponse,
+  ConvertOrgRequest,
+  ConvertOrgResponse,
   ListOrgsResponse,
   GetOrgResponse,
   SetActiveOrgRequest,
@@ -612,6 +641,7 @@ export {
   RUNNER_CREDENTIAL_FORMS,
   runnerCredentialProblem,
   RUNNER_DEVICE_KINDS,
+  RUNNER_ENVIRONMENTS,
   RUNNER_CONTAINER_STATUSES,
   RUNNER_SESSION_STATUSES,
   RUNNER_UPDATE_KINDS,
@@ -625,6 +655,7 @@ export type {
   RunnerHarnessId,
   RunnerCredentialForm,
   RunnerDeviceKind,
+  RunnerEnvironment,
   RunnerContainerStatus,
   RunnerSessionStatus,
   RunnerUpdateKind,

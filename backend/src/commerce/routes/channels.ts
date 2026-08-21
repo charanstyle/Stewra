@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { channelsController } from '../controllers/channelsController.js';
-import { requireOrgMember } from '../middleware/requireOrgMember.js';
+import { requireOrgMember } from '../../tenancy/middleware/requireOrgMember.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { requireEmailVerification } from '../../middleware/requireEmailVerification.js';
 

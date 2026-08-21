@@ -45,15 +45,21 @@ export interface RunnerRemoteSocketLike {
   timeout(ms: number): { emitWithAck(event: string, payload: unknown): Promise<unknown> };
 }
 
-/** The namespace, reduced to the questions we ask it: which of a user's runners are online, and reach them. */
+/** The namespace, reduced to the questions we ask it: which of an org's runners are online, and reach one. */
 export interface RunnerNamespaceLike {
   in(room: string): { fetchSockets(): Promise<RunnerRemoteSocketLike[]> };
 }
 
 /**
- * The room every one of a user's runners joins. Scoped by user, not device — but UNLIKE the bridge, work
- * is dispatched to a SPECIFIC device within this room (a runner's machines are not interchangeable: "run
- * this in my work laptop's repo" ≠ "my home desktop"). The room is how we enumerate a user's machines;
- * the `deviceId` is how we pick the one the user chose.
+ * Every runner socket joins two rooms.
+ *
+ * The DEVICE room is how work is addressed: a runner's machines are not interchangeable ("run this in my
+ * work laptop's repo" ≠ "my home desktop"), so dispatch names one device and nothing else. Authorization
+ * happened before this point — the repository lookup that produced the device id was scoped by org — so
+ * the room itself carries no tenant and needs none.
+ *
+ * The ORG room is how a tenant's machines are enumerated for the online dots on the fleet page. It is
+ * keyed by org, not by the user who paired the machine, because the machine is the organization's.
  */
-export const runnerUserRoom = (userId: string): string => `runner_user_${userId}`;
+export const runnerDeviceRoom = (deviceId: string): string => `runner_device_${deviceId}`;
+export const runnerOrgRoom = (orgId: string): string => `runner_org_${orgId}`;

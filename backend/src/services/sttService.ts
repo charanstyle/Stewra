@@ -38,8 +38,15 @@ export class SttService {
     });
   }
 
-  /** Transcribe the audio file at `audioPath` (absolute) and return the plain-text transcript. */
-  async transcribe(audioPath: string): Promise<string> {
+  /**
+   * Transcribe the audio file at `audioPath` (absolute) and return the plain-text transcript.
+   *
+   * `vocabulary` is handed to whisper as its initial prompt: proper nouns the model would otherwise
+   * split into ordinary words — "Truetalk" comes back as "true talk", "LookedTwice" as "looked twice" —
+   * and the chat layer then has nothing to match against a project. The caller passes the names the
+   * person actually uses (their projects and aliases); an empty list means no prompt.
+   */
+  async transcribe(audioPath: string, vocabulary: readonly string[] = []): Promise<string> {
     // 1. Normalize any container/codec/rate → 16 kHz mono s16 WAV that whisper.cpp can decode.
     const wav16 = `${audioPath}.16k.wav`;
     await this.run(this.ffmpeg, [
@@ -57,7 +64,8 @@ export class SttService {
     const outBase = `${audioPath}.whisper`;
     const outTxt = `${outBase}.txt`;
     try {
-      await this.run(this.binary, ['-m', this.model, '-f', wav16, '-otxt', '-of', outBase, '-nt']);
+      const prompt = vocabulary.length > 0 ? ['--prompt', vocabulary.join(', ')] : [];
+      await this.run(this.binary, ['-m', this.model, '-f', wav16, '-otxt', '-of', outBase, '-nt', ...prompt]);
       const transcript = await readFile(outTxt, 'utf8');
       return transcript.trim();
     } finally {

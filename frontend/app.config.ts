@@ -46,6 +46,19 @@ const config: ExpoConfig = {
     infoPlist: {
       NSMicrophoneUsageDescription: 'Stewra uses your microphone for voice messages and calls.',
       NSCameraUsageDescription: 'Stewra uses your camera for video calls.',
+      // US export-compliance declaration. `false` asserts the app uses only
+      // encryption exempt under EAR 740.17(b)(1) — i.e. nothing proprietary and
+      // nothing beyond what the OS and standard protocols provide. True of this
+      // binary as built: HTTPS/TLS for the API and socket, WebRTC DTLS-SRTP for
+      // calls, Keychain via expo-secure-store, CommonCrypto digests/random via
+      // expo-crypto, biometrics via expo-local-authentication. package.json ships
+      // no third-party crypto implementation.
+      //
+      // Stated here rather than answered per-upload in App Store Connect: without
+      // it every single build stalls behind a manual compliance question before
+      // testers can install it. Revisit this line — do not leave it stale — if a
+      // dependency that implements its own cipher is ever added.
+      ITSAppUsesNonExemptEncryption: false,
     },
   },
   android: {

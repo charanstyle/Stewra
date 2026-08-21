@@ -3,6 +3,7 @@ import type {
   RunnerContainerStatus,
   RunnerDevice,
   RunnerDeviceKind,
+  RunnerEnvironment,
   RunnerHarnessInfo,
   RunnerWorkspace,
 } from '@stewra/shared-types';
@@ -48,11 +49,13 @@ function generatePairCode(): string {
 function toModel(row: Selectable<RunnerDevicesTable>, online: boolean): RunnerDevice {
   return {
     id: row.id,
+    orgId: row.org_id,
     name: row.name,
     os: row.os,
     appVersion: row.app_version,
     online,
     kind: row.kind,
+    environment: row.environment,
     containerStatus: row.container_status,
     harnesses: row.harnesses,
     workspaces: row.workspaces,
@@ -79,12 +82,27 @@ function toHostedRow(row: Selectable<RunnerDevicesTable>, online: boolean): Host
   return { device: toModel(row, online), userId: row.user_id };
 }
 
+/** What the runner-socket middleware learns from a token: the device, its tenant, who paired it, what it is. */
+export interface RunnerTokenIdentity {
+  readonly deviceId: string;
+  readonly orgId: string;
+  readonly userId: string;
+  readonly kind: RunnerDeviceKind;
+}
+
 /**
- * The runner devices a user has registered, and the single-use codes that authorise a new one.
+ * The runner devices an organization owns, and the single-use codes that authorise a new one.
  *
- * SECURITY: `findByToken` is the one function that turns a runner's raw token into a userId — the
+ * TENANCY. Every read and every user-initiated write here is scoped by a REQUIRED, non-nullable `orgId`.
+ * No method accepts `orgId: string | null` — one `undefined` and a query reads across tenants. The org id
+ * reaches a mutation from the `:orgId` route segment (via `requireOrgMember`) and from nowhere else; it
+ * is never taken from a request body. `user_id` on a row means "who paired this machine", which is a
+ * different question from "whose is it" and never substitutes for the org scope. Writes the RUNNER
+ * itself originates (`updateCapabilities`) are scoped by the device id its token resolved to.
+ *
+ * SECURITY: `findByToken` is the one function that turns a runner's raw token into an identity — the
  * `/runner` namespace trusts its answer completely. A row may therefore only ever be created by
- * `registerDevice`, which requires a burned pairing code minted only for an authenticated account owner.
+ * `registerDevice`, which requires a burned pairing code minted only for an authenticated org admin.
  * There is no other entrance.
  *
  * This repository never imports the socket layer: `online` is not a fact it owns, so its callers (the
@@ -97,6 +115,7 @@ class RunnerDeviceRepository {
    * its hash is stored. A user who loses it re-pairs; there is no "show me the token again".
    */
   async registerDevice(params: {
+    orgId: string;
     userId: string;
     name: string;
     appVersion: string;
@@ -117,6 +136,7 @@ class RunnerDeviceRepository {
     const row = await db
       .insertInto('runner_devices')
       .values({
+        org_id: params.orgId,
         user_id: params.userId,
         name: params.name,
         token_hash: hashToken(token),
@@ -140,43 +160,102 @@ class RunnerDeviceRepository {
    * `kind` travels with the answer because the endpoints this authenticates decide on it: a git
    * credential Stewra minted may be handed to a hosted container and to nothing else.
    */
-  async findByToken(
-    token: string,
-  ): Promise<{ deviceId: string; userId: string; kind: RunnerDeviceKind } | null> {
+  async findByToken(token: string): Promise<RunnerTokenIdentity | null> {
     const row = await db
       .selectFrom('runner_devices')
-      .select(['id', 'user_id', 'kind'])
+      .select(['id', 'org_id', 'user_id', 'kind'])
       .where('token_hash', '=', hashToken(token))
       .executeTakeFirst();
-    return row === undefined ? null : { deviceId: row.id, userId: row.user_id, kind: row.kind };
+    return row === undefined
+      ? null
+      : { deviceId: row.id, orgId: row.org_id, userId: row.user_id, kind: row.kind };
   }
 
-  /** The user's runners, newest first, with `online` overlaid from the set of currently-connected ids. */
-  async listByUser(userId: string, onlineIds: ReadonlySet<string>): Promise<RunnerDevice[]> {
+  /** The org's runners, newest first, with `online` overlaid from the set of currently-connected ids. */
+  async listByOrg(orgId: string, onlineIds: ReadonlySet<string>): Promise<RunnerDevice[]> {
     const rows = await db
       .selectFrom('runner_devices')
       .selectAll()
-      .where('user_id', '=', userId)
+      .where('org_id', '=', orgId)
       .orderBy('created_at', 'desc')
       .execute();
     return rows.map((row) => toModel(row, onlineIds.has(row.id)));
   }
 
+  /** One device, scoped to its org, so a foreign id resolves to nothing rather than to a row. */
+  async findInOrg(orgId: string, deviceId: string, online: boolean): Promise<RunnerDevice | null> {
+    const row = await db
+      .selectFrom('runner_devices')
+      .selectAll()
+      .where('id', '=', deviceId)
+      .where('org_id', '=', orgId)
+      .executeTakeFirst();
+    return row === undefined ? null : toModel(row, online);
+  }
+
   /**
-   * Revoke a runner. Scoped by `user_id` in the WHERE clause rather than checked beforehand, so a caller
-   * who passes someone else's device id changes nothing rather than being told it exists.
+   * Revoke a runner. Scoped by `org_id` in the WHERE clause rather than checked beforehand, so a caller
+   * who passes another tenant's device id changes nothing rather than being told it exists.
    */
-  async revoke(userId: string, deviceId: string): Promise<boolean> {
+  async revoke(orgId: string, deviceId: string): Promise<boolean> {
     const result = await db
       .deleteFrom('runner_devices')
       .where('id', '=', deviceId)
-      .where('user_id', '=', userId)
+      .where('org_id', '=', orgId)
       .executeTakeFirst();
     return Number(result.numDeletedRows) > 0;
   }
 
+  /** Rename a device and/or relabel its environment. Returns the updated model, or null if not in the org. */
+  async updateDevice(
+    orgId: string,
+    deviceId: string,
+    patch: { name?: string; environment?: RunnerEnvironment },
+    online: boolean,
+  ): Promise<RunnerDevice | null> {
+    const row = await db
+      .updateTable('runner_devices')
+      .set({
+        ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.environment !== undefined ? { environment: patch.environment } : {}),
+      })
+      .where('id', '=', deviceId)
+      .where('org_id', '=', orgId)
+      .returningAll()
+      .executeTakeFirst();
+    return row === undefined ? null : toModel(row, online);
+  }
+
   /**
-   * Record the runner's reported capabilities and liveness — driven by `runner:hello`.
+   * Move a device to another organization. The WHERE clause requires all three of: the device is in
+   * `fromOrgId`, it was paired by `pairerUserId`, and it is a local device (hosted runners are per person
+   * and are not moved). Matching zero rows is the answer "no", and the caller turns that into a 409.
+   *
+   * Sessions are NOT reassigned: history records what was true when it happened. Workspace bindings die
+   * by the composite FK cascade in `project_workspaces` — a binding is a fact about a project and a
+   * machine under ONE tenant, and it is no longer true once the machine leaves.
+   */
+  async moveToOrg(params: {
+    deviceId: string;
+    fromOrgId: string;
+    toOrgId: string;
+    pairerUserId: string;
+  }): Promise<RunnerDevice | null> {
+    const row = await db
+      .updateTable('runner_devices')
+      .set({ org_id: params.toOrgId })
+      .where('id', '=', params.deviceId)
+      .where('org_id', '=', params.fromOrgId)
+      .where('user_id', '=', params.pairerUserId)
+      .where('kind', '=', 'local')
+      .returningAll()
+      .executeTakeFirst();
+    return row === undefined ? null : toModel(row, false);
+  }
+
+  /**
+   * Record the runner's reported capabilities and liveness — driven by `runner:hello`. Scoped by the
+   * device id the socket's token resolved to, which is the runner's whole authority.
    *
    * `app_version` is refreshed here, not only at pairing. A runner that the user upgrades reports its new
    * build on the next hello, and without this the row kept the version it paired with forever — so the
@@ -205,11 +284,15 @@ class RunnerDeviceRepository {
   }
 
   // ── Hosted runners (migration 037) ──────────────────────────────────────────────────────────────────
+  //
+  // Hosted runners are deliberately NOT org-scoped: the partial unique index, the provisioner's naming,
+  // its limits and its cost model are all one-per-person. Their rows still carry the pairer's org (the
+  // column is NOT NULL) so they appear in that org's fleet list, but lookup stays by user.
 
   /**
    * The user's ONE hosted runner, or null. The partial unique index is what makes "one" true.
    *
-   * `onlineIds` is passed in for the same reason `listByUser` takes it: whether a socket is connected is
+   * `onlineIds` is passed in for the same reason `listByOrg` takes it: whether a socket is connected is
    * not a fact this repository owns. The sweeps, which have no socket view, pass an empty set and never
    * read the resulting flag.
    */
@@ -322,11 +405,15 @@ class RunnerDeviceRepository {
     await db.deleteFrom('runner_devices').where('id', '=', deviceId).execute();
   }
 
+  // ── Pairing codes ───────────────────────────────────────────────────────────────────────────────────
+
   /**
-   * Mint a fresh single-use pairing code, invalidating any earlier unconsumed one so only the most recent
-   * code the user was shown can work. Retries on the (astronomically unlikely) collision.
+   * Mint a fresh single-use pairing code for `orgId`, invalidating any earlier unconsumed code this user
+   * minted so only the most recent code they were shown can work. The code carries the org: the machine
+   * that redeems it lands in THAT org, and never learns an org id exists. Retries on the (astronomically
+   * unlikely) collision.
    */
-  async mintPairCode(userId: string, ttlMs: number): Promise<{ code: string; expiresAt: Date }> {
+  async mintPairCode(userId: string, orgId: string, ttlMs: number): Promise<{ code: string; expiresAt: Date }> {
     await db
       .deleteFrom('runner_pair_codes')
       .where('user_id', '=', userId)
@@ -339,7 +426,7 @@ class RunnerDeviceRepository {
       try {
         await db
           .insertInto('runner_pair_codes')
-          .values({ user_id: userId, code, expires_at: expiresAt })
+          .values({ user_id: userId, org_id: orgId, code, expires_at: expiresAt })
           .execute();
         return { code, expiresAt };
       } catch {
@@ -350,19 +437,20 @@ class RunnerDeviceRepository {
   }
 
   /**
-   * Burn a pairing code and return whose it was. The UPDATE's WHERE clause is the atomic guard: two
-   * runners racing on the same code cannot both win, because the second matches zero rows.
+   * Burn a pairing code and return who minted it and for which org. The UPDATE's WHERE clause is the
+   * atomic guard: two runners racing on the same code cannot both win, because the second matches zero
+   * rows.
    */
-  async consumePairCode(code: string): Promise<string | null> {
+  async consumePairCode(code: string): Promise<{ userId: string; orgId: string } | null> {
     const burned = await db
       .updateTable('runner_pair_codes')
       .set({ consumed_at: new Date() })
       .where('code', '=', code)
       .where('consumed_at', 'is', null)
       .where('expires_at', '>', new Date())
-      .returning('user_id')
+      .returning(['user_id', 'org_id'])
       .executeTakeFirst();
-    return burned?.user_id ?? null;
+    return burned === undefined ? null : { userId: burned.user_id, orgId: burned.org_id };
   }
 }
 

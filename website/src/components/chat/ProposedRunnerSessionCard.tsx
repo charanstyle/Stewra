@@ -65,6 +65,15 @@ export function ProposedRunnerSessionCard({
         Run coding agent
       </div>
 
+      {/* The project is what the person said ("Truetalk"); the repo is what the checkout is called. */}
+      {proposal.projectName !== null && (
+        <div className={styles.field}>
+          <span className={styles.label}>Project</span>
+          <span className={styles.value} data-testid="runner-session-project">
+            {proposal.projectName}
+          </span>
+        </div>
+      )}
       <div className={styles.field}>
         <span className={styles.label}>Machine</span>
         <span className={styles.value}>{proposal.deviceName}</span>

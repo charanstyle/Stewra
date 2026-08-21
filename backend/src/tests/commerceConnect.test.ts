@@ -137,15 +137,17 @@ const database = (await import('../database/index.js')) as {
 const { db } = database;
 const { config } = await import('../config/unifiedConfig.js');
 const { errorHandler } = await import('../middleware/errorHandler.js');
-const orgRoutes = (await import('../commerce/routes/organizations.js')).default;
+const orgRoutes = (await import('../tenancy/routes/organizations.js')).default;
+const commerceOrgRoutes = (await import('../commerce/routes/orgSurface.js')).default;
 const { organizationRepository } = await import(
-  '../commerce/repositories/organizationRepository.js'
+  '../tenancy/repositories/organizationRepository.js'
 );
 const { vault } = await import('../control-plane/vault/vault.js');
 
 const app = express();
 app.use(express.json());
 app.use('/orgs', orgRoutes);
+app.use('/orgs/:orgId', commerceOrgRoutes);
 app.use(errorHandler);
 const server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -175,6 +177,7 @@ async function tenant(role: 'owner' | 'viewer' = 'owner'): Promise<Tenant> {
   createdUsers.push(user.id);
 
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Acme Coffee',
     slug: `acme-${randomUUID().slice(0, 8)}`,
     createdBy: user.id,

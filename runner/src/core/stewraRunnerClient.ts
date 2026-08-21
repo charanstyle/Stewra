@@ -138,9 +138,7 @@ export class StewraRunnerClient {
           },
     );
 
-    socket.on('connect', () => {
-      console.error('Stewra Runner: connected to Stewra.');
-      events.onConnected();
+    const sayHello = (): void => {
       void helloProvider()
         .then((hello) => {
           this.workspaces = hello.workspaces;
@@ -152,6 +150,18 @@ export class StewraRunnerClient {
             error instanceof Error ? error.message : String(error),
           );
         });
+    };
+
+    socket.on('connect', () => {
+      console.error('Stewra Runner: connected to Stewra.');
+      events.onConnected();
+      sayHello();
+    });
+    // The user pressed Rescan in the fleet page — typically after mounting the volume the checkouts live
+    // on. Same report as a connect, without a reconnect.
+    socket.on(RUNNER_SERVER_EVENTS.RESCAN, () => {
+      console.error('Stewra Runner: rescan requested; re-reading workspaces.');
+      sayHello();
     });
     socket.on('disconnect', (reason) => {
       console.error(`Stewra Runner: disconnected from Stewra (${reason}).`);

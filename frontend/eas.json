@@ -25,9 +25,29 @@
       "android": {
         "buildType": "app-bundle"
       }
+    },
+    "adhoc": {
+      "extends": "production",
+      "distribution": "internal",
+      "autoIncrement": false,
+      "android": {
+        "buildType": "apk"
+      }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6802676118",
+        "bundleIdentifier": "com.stewra.app",
+        "ascApiKeyPath": "$ASC_KEY_PATH",
+        "ascApiKeyId": "$ASC_KEY_ID",
+        "ascApiKeyIssuerId": "$ASC_ISSUER_ID"
+      },
+      "android": {
+        "track": "internal",
+        "serviceAccountKeyPath": "$GOOGLE_PLAY_KEY_PATH"
+      }
+    }
   }
 }

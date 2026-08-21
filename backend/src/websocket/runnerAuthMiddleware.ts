@@ -45,6 +45,7 @@ export function runnerAuthMiddleware(
       socket.data.userId = identity.userId;
       socket.data.deviceId = identity.deviceId;
       socket.data.deviceKind = identity.kind;
+      socket.data.orgId = identity.orgId;
       next();
     })
     .catch((error: unknown) => {

@@ -46,9 +46,10 @@ const database = (await import('../database/index.js')) as {
 const { db } = database;
 const { config } = await import('../config/unifiedConfig.js');
 const { errorHandler } = await import('../middleware/errorHandler.js');
-const orgRoutes = (await import('../commerce/routes/organizations.js')).default;
+const orgRoutes = (await import('../tenancy/routes/organizations.js')).default;
+const commerceOrgRoutes = (await import('../commerce/routes/orgSurface.js')).default;
 const { organizationRepository } = await import(
-  '../commerce/repositories/organizationRepository.js'
+  '../tenancy/repositories/organizationRepository.js'
 );
 const { jobRepository } = await import('../commerce/repositories/jobRepository.js');
 const { contactImportHandler } = await import('../commerce/jobs/contactImportHandler.js');
@@ -57,6 +58,7 @@ const { parseContactCsv } = await import('../commerce/services/csvContacts.js');
 const app = express();
 app.use(express.json());
 app.use('/orgs', orgRoutes);
+app.use('/orgs/:orgId', commerceOrgRoutes);
 app.use(errorHandler);
 const server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -98,6 +100,7 @@ interface Tenant {
 async function createTenant(): Promise<Tenant> {
   const owner = await createUser();
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Import Co',
     slug: `import-${randomUUID().slice(0, 8)}`,
     createdBy: owner.id,

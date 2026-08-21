@@ -708,6 +708,40 @@ if (env.COMMERCE_BILLING_PROVIDER === 'stripe') {
   if (missing.length > 0) {
     throw new Error(`COMMERCE_BILLING_PROVIDER=stripe requires: ${missing.join(', ')}`);
   }
+
+  /**
+   * Both Stripe keys must name the same ledger.
+   *
+   * A live secret key with a test publishable key (or the reverse) is the standard way a
+   * test→live cutover goes wrong: half the environment is switched and nothing complains,
+   * because each key is individually valid. It surfaces later as "No such setupintent" — the
+   * server opens the SetupIntent on one ledger and the browser confirms it on the other — at
+   * the exact moment a customer is typing their card number. Refuse at boot instead.
+   *
+   * `STRIPE_WEBHOOK_SECRET` cannot join this check: test and live signing secrets are both
+   * `whsec_` and carry no mode, so a mismatched one is only discoverable by a delivery failing
+   * to verify. That gap is real and named here rather than papered over.
+   *
+   * The mode is only compared when both keys actually state one. Tests drive this adapter
+   * against a local stand-in (`commercePayments.test.ts` repoints STRIPE_API_BASE_URL) with
+   * keys that carry no `test`/`live` marker at all — there is no mode to disagree about, so
+   * there is no verdict to reach. Absence propagates; it is not scored as a pass.
+   */
+  const stripeMode = (key: string): 'test' | 'live' | null => {
+    // `rk_` is a restricted key, which is a legitimate thing to run billing with.
+    const match = /^(?:sk|rk|pk)_(test|live)_/.exec(key);
+    return match === null ? null : (match[1] === 'live' ? 'live' : 'test');
+  };
+  const secretMode = stripeMode(env.STRIPE_SECRET_KEY ?? '');
+  const publishableMode = stripeMode(env.STRIPE_PUBLISHABLE_KEY ?? '');
+  if (secretMode !== null && publishableMode !== null && secretMode !== publishableMode) {
+    throw new Error(
+      `STRIPE_SECRET_KEY is a ${secretMode} key but STRIPE_PUBLISHABLE_KEY is a ` +
+        `${publishableMode} key. Both must name the same Stripe ledger — a card confirmed on ` +
+        'one ledger cannot be charged on the other. Check that every Stripe value, including ' +
+        'STRIPE_WEBHOOK_SECRET (which carries no mode of its own), came from the same mode.',
+    );
+  }
 }
 
 // Fail loud when the money surface is enabled but under-configured. Without the client id + secret

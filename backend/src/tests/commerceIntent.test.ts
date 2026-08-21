@@ -143,7 +143,7 @@ const { db } = database;
 const { errorHandler } = await import('../middleware/errorHandler.js');
 const metaWebhookRoutes = (await import('../commerce/routes/metaWebhook.js')).default;
 const { organizationRepository } = await import(
-  '../commerce/repositories/organizationRepository.js'
+  '../tenancy/repositories/organizationRepository.js'
 );
 const { conversationRepository } = await import('../repositories/conversationRepository.js');
 const { messageRepository } = await import('../repositories/messageRepository.js');
@@ -297,6 +297,7 @@ async function tenant(
 
   const orgName = 'Acme Coffee';
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: orgName,
     slug: `acme-${randomUUID().slice(0, 8)}`,
     createdBy: user.id,

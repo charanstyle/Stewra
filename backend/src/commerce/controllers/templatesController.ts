@@ -9,7 +9,7 @@ import type {
 import { TEMPLATE_CATEGORIES } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { templateService } from '../services/templateService.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 
 const templateParamsSchema = z.object({ templateId: z.string().uuid() });

@@ -7,7 +7,7 @@ import type {
 } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { spendCapService } from '../services/spendCapService.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 import { AuthenticationError } from '../../utils/errors.js';
 

@@ -21,7 +21,7 @@ import { BASE_URL, readTokens, ApiError } from './api';
  * agents. Mirrors the whatsapp-personal bridge calls in `api.ts`, and reuses that module's configured
  * `BASE_URL` / bearer-token / `ApiError` plumbing rather than hardcoding any of it.
  */
-async function request<T>(
+export async function runnerRequest<T>(
   path: string,
   options: { method?: string; body?: unknown } = {},
 ): Promise<T> {
@@ -47,6 +47,13 @@ async function request<T>(
   return payload.data;
 }
 
+const request = runnerRequest;
+
+/**
+ * The legacy, org-less surface. Every call resolves the caller's ACTING org server-side; a user in
+ * several orgs with none chosen gets a 409 the panel shows verbatim. The fleet page uses the
+ * org-scoped calls in `projectService.ts` instead, where the org is always the path segment.
+ */
 export const runnerService = {
   getStatus: (): Promise<GetRunnerStatusResponse> => request('/runner'),
 

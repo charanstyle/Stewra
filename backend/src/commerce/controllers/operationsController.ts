@@ -11,7 +11,7 @@ import { BaseController } from '../../controllers/baseController.js';
 import { commerceInboxRepository } from '../repositories/commerceInboxRepository.js';
 import { messageCostRepository } from '../repositories/messageCostRepository.js';
 import { jobRepository } from '../repositories/jobRepository.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 import { ValidationError } from '../../utils/errors.js';
 

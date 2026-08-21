@@ -96,6 +96,8 @@ import type {
   ListOrgsResponse,
   CreateOrgRequest,
   CreateOrgResponse,
+  ConvertOrgRequest,
+  ConvertOrgResponse,
   SetActiveOrgRequest,
   SetActiveOrgResponse,
   ListOrgMembersResponse,
@@ -606,6 +608,10 @@ export const api = {
 
   createOrg: (body: CreateOrgRequest): Promise<CreateOrgResponse> =>
     request('/orgs', { method: 'POST', body }),
+
+  /** An individual org becomes a business one, under a company name. Owner only. */
+  convertOrg: (orgId: string, body: ConvertOrgRequest): Promise<ConvertOrgResponse> =>
+    request(`/orgs/${orgId}/convert`, { method: 'POST', body }),
 
   /** Which org the CONVERSATIONAL surface acts on. Per-user, not per-tab — a WhatsApp text has no tab. */
   setActiveOrg: (body: SetActiveOrgRequest): Promise<SetActiveOrgResponse> =>

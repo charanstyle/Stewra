@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type {
   ChannelAccount,
@@ -42,8 +50,19 @@ export default function CommerceScreen({
   navigation,
 }: BottomTabScreenProps<MainTabParamList, 'Commerce'>): React.JSX.Element {
   const [memberships, setMemberships] = useState<ReadonlyArray<OrgMembership>>([]);
+  /**
+   * Whether `listOrgs` has answered at least once. Without it "no memberships yet" and "haven't
+   * asked yet" are the same state, and every launch flashes the create-a-business form at owners
+   * who already have one.
+   */
+  const [orgsLoaded, setOrgsLoaded] = useState(false);
   const [orgId, setOrgId] = useState<string | null>(null);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+
+  const [newOrgName, setNewOrgName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+  const [converting, setConverting] = useState(false);
 
   const [accounts, setAccounts] = useState<ReadonlyArray<ChannelAccount>>([]);
   const [conversations, setConversations] = useState<ReadonlyArray<CommerceConversationSummary>>(
@@ -60,22 +79,27 @@ export default function CommerceScreen({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const role = memberships.find((m) => m.org.id === orgId)?.role ?? null;
+  const selectedMembership = memberships.find((m) => m.org.id === orgId) ?? null;
+  const role = selectedMembership?.role ?? null;
   const openThread = conversations.find((c) => c.id === openThreadId) ?? null;
   const replyWindow = openThread === null ? null : windowRemaining(openThread.serviceWindowExpiresAt);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await api.listOrgs();
-        setMemberships(res.memberships);
-        setActiveOrgId(res.activeOrgId);
-        setOrgId((current) => current ?? res.activeOrgId ?? res.memberships[0]?.org.id ?? null);
-      } catch (err) {
-        setError(describeError(err));
-      }
-    })();
+  const loadOrgs = useCallback(async (): Promise<void> => {
+    try {
+      const res = await api.listOrgs();
+      setMemberships(res.memberships);
+      setActiveOrgId(res.activeOrgId);
+      setOrgId((current) => current ?? res.activeOrgId ?? res.memberships[0]?.org.id ?? null);
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setOrgsLoaded(true);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadOrgs();
+  }, [loadOrgs]);
 
   const loadOrg = useCallback(async (id: string): Promise<void> => {
     try {
@@ -100,6 +124,49 @@ export default function CommerceScreen({
     setMessages([]);
     void loadOrg(orgId);
   }, [orgId, loadOrg]);
+
+  /**
+   * Create the caller's first (or next) business. Named the same as the website's handler and
+   * hitting the same POST /orgs — there is exactly one way to become an org owner, and this screen
+   * is not allowed to grow a second one.
+   */
+  const createOrg = useCallback(async (): Promise<void> => {
+    const name = newOrgName.trim();
+    if (name === '' || creating) return;
+    setError(null);
+    setNotice(null);
+    setCreating(true);
+    try {
+      const res = await api.createOrg({ name });
+      setNewOrgName('');
+      setOrgId(res.org.id);
+      setNotice(`Created ${res.org.name}. You are its owner.`);
+      await loadOrgs();
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setCreating(false);
+    }
+  }, [newOrgName, creating, loadOrgs]);
+
+  /** Same action, same endpoint as the website: a personal org becomes a business one, by name. */
+  const convertOrg = useCallback(async (): Promise<void> => {
+    const name = companyName.trim();
+    if (orgId === null || name === '' || converting) return;
+    setError(null);
+    setNotice(null);
+    setConverting(true);
+    try {
+      const res = await api.convertOrg(orgId, { companyName: name });
+      setCompanyName('');
+      setNotice(`${res.org.name} is now a business organization. You can invite your team.`);
+      await loadOrgs();
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setConverting(false);
+    }
+  }, [orgId, companyName, converting, loadOrgs]);
 
   const makeActive = useCallback(async (): Promise<void> => {
     if (orgId === null) return;
@@ -182,17 +249,57 @@ export default function CommerceScreen({
     [orgId, loadOrg],
   );
 
+  // Until listOrgs has answered, "no businesses" is not yet a fact — say nothing rather than
+  // inviting someone to create a second business they already have.
+  if (!orgsLoaded) {
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom']}>
+        <View style={styles.empty}>
+          <ActivityIndicator color={theme.colors.primary} />
+          {error !== null && <Text style={styles.emptyError}>{error}</Text>}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (memberships.length === 0) {
     return (
       <SafeAreaView style={styles.container} edges={['bottom']}>
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>No business yet</Text>
           <Text style={styles.muted}>
-            {error ??
-              'Create an organization and connect its WhatsApp number on the Stewra website — ' +
-                'Meta only allows that step in a browser. Everything after that works from here, ' +
-                'or by just texting Stewra.'}
+            Name your business to get started — you become its owner. Connecting its WhatsApp
+            number comes after, and that one step needs the website: Meta’s signup is a browser
+            dialog. Everything else works from here, or by just texting Stewra.
           </Text>
+          <TextInput
+            style={styles.orgNameInput}
+            placeholder="Business name"
+            placeholderTextColor={theme.colors.textSecondary}
+            value={newOrgName}
+            onChangeText={setNewOrgName}
+            autoCapitalize="words"
+            autoCorrect={false}
+            returnKeyType="go"
+            editable={!creating}
+            onSubmitEditing={() => void createOrg()}
+            testID="create-org-name"
+          />
+          <Pressable
+            accessibilityRole="button"
+            disabled={creating || newOrgName.trim() === ''}
+            onPress={() => void createOrg()}
+            style={({ pressed }) => [
+              styles.smallButton,
+              styles.emptyAction,
+              pressed && styles.pressed,
+              (creating || newOrgName.trim() === '') && styles.disabled,
+            ]}
+            testID="create-org"
+          >
+            <Text style={styles.smallButtonLabel}>{creating ? 'Creating…' : 'Create business'}</Text>
+          </Pressable>
+          {error !== null && <Text style={styles.emptyError}>{error}</Text>}
         </View>
       </SafeAreaView>
     );
@@ -228,6 +335,47 @@ export default function CommerceScreen({
             <Text style={styles.smallButtonLabel}>Use this business when I text Stewra</Text>
           </Pressable>
         )}
+
+        {selectedMembership !== null &&
+          selectedMembership.org.kind === 'individual' &&
+          selectedMembership.role === 'owner' && (
+            <View style={styles.section} testID="org-convert">
+              <Text style={styles.sectionTitle}>Personal account</Text>
+              <Text style={styles.muted}>
+                This organization is you. To invite a team, convert it to a business organization
+                under the company&apos;s name.
+              </Text>
+              <TextInput
+                style={styles.orgNameInput}
+                placeholder="Company name"
+                placeholderTextColor={theme.colors.textSecondary}
+                value={companyName}
+                onChangeText={setCompanyName}
+                autoCapitalize="words"
+                autoCorrect={false}
+                returnKeyType="go"
+                editable={!converting}
+                onSubmitEditing={() => void convertOrg()}
+                testID="org-convert-name"
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={converting || companyName.trim() === ''}
+                onPress={() => void convertOrg()}
+                style={({ pressed }) => [
+                  styles.smallButton,
+                  styles.standalone,
+                  pressed && styles.pressed,
+                  (converting || companyName.trim() === '') && styles.disabled,
+                ]}
+                testID="org-convert-submit"
+              >
+                <Text style={styles.smallButtonLabel}>
+                  {converting ? 'Converting…' : 'Convert to a business organization'}
+                </Text>
+              </Pressable>
+            </View>
+          )}
 
         {/*
           The only billing control on this screen, and deliberately a link rather than a section:
@@ -472,6 +620,27 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     fontSize: 18,
     fontWeight: '600',
+    textAlign: 'center',
+  },
+  orgNameInput: {
+    backgroundColor: theme.colors.surface,
+    borderColor: theme.colors.border,
+    borderWidth: 1,
+    borderRadius: theme.radius.md,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    color: theme.colors.textPrimary,
+    fontSize: 15,
+    marginTop: theme.spacing.sm,
+  },
+  emptyAction: {
+    alignSelf: 'center',
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+  },
+  emptyError: {
+    color: theme.colors.danger,
+    fontSize: 13,
     textAlign: 'center',
   },
   orgRow: {

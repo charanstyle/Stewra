@@ -10,7 +10,13 @@ import { organizationRepository, slugify } from '../repositories/organizationRep
 import { orgInviteEmailRegistry } from '../../ports/orgInviteEmail.js';
 import { config } from '../../config/unifiedConfig.js';
 import { logger } from '../../utils/logger.js';
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../utils/errors.js';
+import {
+  ChoiceRequiredError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '../../utils/errors.js';
 
 /**
  * How long an invite link stays redeemable. A behaviour knob, not a target — seven days is long
@@ -33,6 +39,10 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  * verified `actorRole` and never re-derives it.
  */
 class OrganizationService {
+  /**
+   * POST /orgs: a further organization, created by name. Always `business` — the one `individual`
+   * org a person has is created at signup, and there is never a second.
+   */
   async createOrg(userId: string, name: string, slug?: string): Promise<{ org: Organization; role: OrgRole }> {
     const trimmed = name.trim();
     if (trimmed.length === 0) {
@@ -43,8 +53,36 @@ class OrganizationService {
     return organizationRepository.create({
       name: trimmed,
       slug: slugify(slug ?? trimmed),
+      kind: 'business',
       createdBy: userId,
     });
+  }
+
+  /**
+   * Turn an `individual` org into a `business` one under a company name — the one way a personal
+   * account grows a team. Owner only, checked here rather than left to the route so a future caller
+   * cannot forget it. One-way: a business is never converted back, because by then it may have
+   * members who are not the person.
+   */
+  async convertToBusiness(params: {
+    orgId: string;
+    actorRole: OrgRole;
+    companyName: string;
+  }): Promise<Organization> {
+    if (params.actorRole !== 'owner') {
+      throw new ForbiddenError('Only an owner can convert an organization.', 'OWNER_ROLE_REQUIRED');
+    }
+    const companyName = params.companyName.trim();
+    if (companyName.length === 0) {
+      throw new ValidationError('Validation failed', [
+        { field: 'companyName', message: 'A company name is required' },
+      ]);
+    }
+    const org = await organizationRepository.convertToBusiness(params.orgId, companyName);
+    if (org === null) {
+      throw new ConflictError('This organization is already a business organization.');
+    }
+    return org;
   }
 
   async listOrgs(userId: string): Promise<{ memberships: OrgMembership[]; activeOrgId: string | null }> {
@@ -53,6 +91,42 @@ class OrganizationService {
       organizationRepository.findActiveOrgId(userId),
     ]);
     return { memberships, activeOrgId };
+  }
+
+  /**
+   * Which organization a request that carries NO `:orgId` is acting on — the legacy `/runner/*` routes,
+   * the mobile app, and the conversational surface (chat, voice, WhatsApp), none of which name a tenant.
+   *
+   * The rule, in order, and with no fourth step:
+   *   1. exactly one membership → that org (the common case: every account has its individual org);
+   *   2. otherwise the org the user explicitly chose ("use this one when I text Stewra"), if they are
+   *      still a member of it;
+   *   3. otherwise ASK — a 409 `CHOICE_REQUIRED` listing the orgs, so the client puts the question to
+   *      the person.
+   *
+   * There is deliberately no "first membership" default. Picking for the user would start a coding
+   * session under the wrong company, and which company is "first" changes with `created_at` ordering —
+   * a silent choice that drifts is exactly the fallback this codebase forbids.
+   */
+  async resolveActingOrg(userId: string): Promise<{ orgId: string; role: OrgRole }> {
+    const memberships = await organizationRepository.listForUser(userId);
+    if (memberships.length === 0) {
+      // Registration creates the org in the same transaction as the user, so this is a broken account.
+      throw new ConflictError('This account belongs to no organization.');
+    }
+    const only = memberships[0];
+    if (memberships.length === 1 && only !== undefined) {
+      return { orgId: only.org.id, role: only.role };
+    }
+    const activeOrgId = await organizationRepository.findActiveOrgId(userId);
+    const active = memberships.find((m) => m.org.id === activeOrgId);
+    if (active !== undefined) {
+      return { orgId: active.org.id, role: active.role };
+    }
+    throw new ChoiceRequiredError(
+      'Which organization do you mean? Choose one, or set an active organization.',
+      memberships.map((m) => ({ field: m.org.id, message: m.org.name })),
+    );
   }
 
   /**
@@ -100,6 +174,16 @@ class OrganizationService {
       ]);
     }
     this.assertMayAssignRole(params.actorRole, params.role);
+
+    // An individual org IS the person; an invite into it would make a team out of an account whose
+    // owner never asked for one. The database trigger from migration 063 refuses the insert too —
+    // this check exists so the refusal arrives as a sentence rather than a constraint error.
+    if ((await organizationRepository.findKind(params.orgId)) === 'individual') {
+      throw new ConflictError(
+        'This is an individual account and cannot have members. Convert it to a business ' +
+          'organization first.',
+      );
+    }
 
     // Fetched before minting, so a missing identity (a real anomaly — the actor was just verified
     // as a member) fails the request while there is still nothing to clean up.

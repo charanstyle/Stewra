@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import type { OrgKind } from '@stewra/shared-types';
 import { useAuth } from '../../hooks/useAuth';
 import { ApiError } from '../../services/api';
 import styles from './LoginPage.module.css';
@@ -11,6 +12,7 @@ const schema = z.object({
   email: z.string().email('Enter a valid email'),
   password: z.string().min(8, 'At least 8 characters'),
   displayName: z.string().min(1, 'Tell us your name').optional(),
+  companyName: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -27,11 +29,15 @@ export default function LoginPage(): React.JSX.Element {
   const rawNext = searchParams.get('next');
   const next = rawNext !== null && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : null;
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  // The Amazon-seller question: are you signing up for yourself, or for a company? Stated by the
+  // person, sent explicitly, never inferred from whether a company name happened to be typed.
+  const [accountKind, setAccountKind] = useState<OrgKind>('individual');
   const [serverError, setServerError] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema) });
 
@@ -39,11 +45,18 @@ export default function LoginPage(): React.JSX.Element {
     setServerError(null);
     try {
       if (mode === 'register') {
-        const requiresVerification = await registerUser(
-          values.email,
-          values.password,
-          values.displayName ?? '',
-        );
+        const companyName = values.companyName?.trim() ?? '';
+        if (accountKind === 'business' && companyName === '') {
+          setError('companyName', { message: 'Tell us the company name' });
+          return;
+        }
+        const requiresVerification = await registerUser({
+          email: values.email,
+          password: values.password,
+          displayName: values.displayName ?? '',
+          accountKind,
+          ...(accountKind === 'business' ? { companyName } : {}),
+        });
         // A fresh account that still has to verify goes through /verify-email regardless — the
         // destination (e.g. an invite-accept page) sits behind the verified gate anyway. The link in
         // the invite email stays valid, so re-opening it after verifying picks the flow back up.
@@ -82,11 +95,54 @@ export default function LoginPage(): React.JSX.Element {
 
         <form onSubmit={onSubmit} className={styles.form}>
           {mode === 'register' && (
-            <label className={styles.field}>
-              <span>Name</span>
-              <input type="text" autoComplete="name" {...register('displayName')} />
-              {errors.displayName && <em className={styles.err}>{errors.displayName.message}</em>}
-            </label>
+            <>
+              <div
+                className={styles.tabs}
+                role="radiogroup"
+                aria-label="Account type"
+                data-testid="register-account-kind"
+              >
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={accountKind === 'individual'}
+                  className={accountKind === 'individual' ? styles.tabActive : styles.tab}
+                  onClick={() => setAccountKind('individual')}
+                  data-testid="register-kind-individual"
+                >
+                  Individual
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={accountKind === 'business'}
+                  className={accountKind === 'business' ? styles.tabActive : styles.tab}
+                  onClick={() => setAccountKind('business')}
+                  data-testid="register-kind-business"
+                >
+                  Business
+                </button>
+              </div>
+
+              <label className={styles.field}>
+                <span>Name</span>
+                <input type="text" autoComplete="name" {...register('displayName')} />
+                {errors.displayName && <em className={styles.err}>{errors.displayName.message}</em>}
+              </label>
+
+              {accountKind === 'business' && (
+                <label className={styles.field}>
+                  <span>Company name</span>
+                  <input
+                    type="text"
+                    autoComplete="organization"
+                    data-testid="register-company-name"
+                    {...register('companyName')}
+                  />
+                  {errors.companyName && <em className={styles.err}>{errors.companyName.message}</em>}
+                </label>
+              )}
+            </>
           )}
 
           <label className={styles.field}>

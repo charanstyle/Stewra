@@ -19,7 +19,7 @@ import type {
 import { logger } from '../../utils/logger.js';
 import { channelAccountService } from './channelAccountService.js';
 import { commerceInboxService } from './commerceInboxService.js';
-import { organizationService } from './organizationService.js';
+import { organizationService } from '../../tenancy/services/organizationService.js';
 
 /**
  * Cheap pre-filter: only spend a model call when the turn plausibly concerns the business inbox. A

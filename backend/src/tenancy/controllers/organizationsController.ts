@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import type {
   AcceptOrgInviteResponse,
+  ConvertOrgResponse,
   CreateOrgInviteResponse,
   CreateOrgResponse,
   DeleteOrgInviteResponse,
@@ -26,6 +27,7 @@ const createOrgSchema = z.object({
   name: z.string().min(1).max(120),
   slug: z.string().min(1).max(48).optional(),
 });
+const convertOrgSchema = z.object({ companyName: z.string().min(1).max(120) });
 const setActiveOrgSchema = z.object({ orgId: z.string().uuid() });
 const createInviteSchema = z.object({ email: z.string().email(), role: roleSchema });
 const acceptInviteSchema = z.object({ token: z.string().min(1).max(200) });
@@ -105,6 +107,19 @@ class OrganizationsController extends BaseController {
       this.handleSuccess(res, body);
     } catch (error) {
       this.handleError(error, res, 'OrganizationsController.get');
+    }
+  }
+
+  /** POST /orgs/:orgId/convert — an individual org becomes a business one. Owner only. */
+  async convert(req: Request, res: Response): Promise<void> {
+    try {
+      const { orgId, role } = orgContext(req);
+      const { companyName } = parse(convertOrgSchema, req.body);
+      const org = await organizationService.convertToBusiness({ orgId, actorRole: role, companyName });
+      const body: ConvertOrgResponse = { org };
+      this.handleSuccess(res, body);
+    } catch (error) {
+      this.handleError(error, res, 'OrganizationsController.convert');
     }
   }
 

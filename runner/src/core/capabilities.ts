@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { stat } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -9,7 +10,7 @@ import type { RunnerHarnessId, RunnerHarnessInfo, RunnerWorkspace } from '@stewr
 import type { RunnerConfig } from '../config.js';
 import { harnessCommand } from './harnessCommand.js';
 import { fetchHostedWorkspaces } from './hostedApi.js';
-import { describeGitDir, ensureClone } from './workspace.js';
+import { describeGitDir, ensureClone, isGitWorktreeRoot } from './workspace.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -70,7 +71,8 @@ export interface BackendWorkspaceContext {
 /**
  * The repositories this runner exposes for sessions. Three modes, chosen by `STEWRA_RUNNER_WORKSPACE_MODE`:
  *
- *   `local` (default) — a laptop: repos already on disk, from `STEWRA_RUNNER_WORKSPACES`.
+ *   `local` (default) — a laptop: repos already on disk, under `STEWRA_RUNNER_WORKSPACE_ROOTS` and/or
+ *                       listed in `STEWRA_RUNNER_WORKSPACES`.
  *   `clone`           — a cloud VM the user owns: repos cloned from `STEWRA_RUNNER_CLONE_REPOS`.
  *   `backend`         — a Stewra-hosted container: repos Stewra names, from the user's GitHub App install.
  *
@@ -99,25 +101,42 @@ export async function detectWorkspaces(context?: BackendWorkspaceContext): Promi
   return detectLocalWorkspaces();
 }
 
-/**
- * Local repos from `STEWRA_RUNNER_WORKSPACES` — an OS-path-separated list of directories (e.g.
- * `/home/me/proj-a:/home/me/proj-b`). Empty when unset: a runner with no declared workspaces still pairs
- * and reports its harnesses; it simply has nowhere to run yet. Non-existent or non-directory entries are
- * dropped with a warning rather than reported — offering the server a workspace that isn't there would only
- * produce a session that fails on start. Each real git checkout is enriched with its remote + base branch.
- */
-async function detectLocalWorkspaces(): Promise<RunnerWorkspace[]> {
-  const raw = process.env['STEWRA_RUNNER_WORKSPACES'];
+/** Split an OS-path-separated env value (`a:b;c,d`) into trimmed, non-empty entries. */
+function pathList(name: string): string[] {
+  const raw = process.env[name];
   if (raw === undefined || raw.trim().length === 0) return [];
-
-  const entries = raw
+  return raw
     .split(/[:;,]/)
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
+}
+
+/**
+ * Local checkouts, from two declarations that may be combined:
+ *
+ *   `STEWRA_RUNNER_WORKSPACE_ROOTS` — directories whose IMMEDIATE children are scanned, and every child
+ *     that is a git worktree root is reported. This is how a machine exposes "everything under
+ *     `/Volumes/charan/projects`" without a list that goes stale every time a repo is added. Which of
+ *     them belong to which project is the SERVER'S knowledge (a project binding), not this machine's.
+ *   `STEWRA_RUNNER_WORKSPACES` — individual directories, reported as-is. Kept for single-repo setups
+ *     and the smoke drivers.
+ *
+ * Empty when neither is set: a runner with nothing declared still pairs and reports its harnesses; it
+ * simply has nowhere to run yet. A root or entry that is missing or not a directory is reported on
+ * stderr and skipped — an unmounted external volume is exactly this case, and the fleet page shows it
+ * as a bound workspace the machine is no longer reporting. `$HOME` is never guessed as a root.
+ *
+ * Re-run on every hello and on `runner:rescan`, so remounting the volume needs a Rescan, not a restart.
+ */
+async function detectLocalWorkspaces(): Promise<RunnerWorkspace[]> {
+  const declared = new Set<string>();
+  for (const root of pathList('STEWRA_RUNNER_WORKSPACE_ROOTS')) {
+    for (const child of await gitChildrenOf(resolve(root))) declared.add(child);
+  }
+  for (const entry of pathList('STEWRA_RUNNER_WORKSPACES')) declared.add(resolve(entry));
 
   const workspaces: RunnerWorkspace[] = [];
-  for (const entry of entries) {
-    const absPath = resolve(entry);
+  for (const absPath of [...declared].sort()) {
     try {
       const info = await stat(absPath);
       if (!info.isDirectory()) {
@@ -130,6 +149,24 @@ async function detectLocalWorkspaces(): Promise<RunnerWorkspace[]> {
     }
   }
   return workspaces;
+}
+
+/** The depth-1 git worktree roots under `root`; empty (and loud) when the root itself is not there. */
+async function gitChildrenOf(root: string): Promise<string[]> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    process.stderr.write(`Stewra Runner: workspace root is not readable (unmounted?): ${root}\n`);
+    return [];
+  }
+  const found: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    const dir = join(root, entry.name);
+    if (await isGitWorktreeRoot(dir)) found.push(dir);
+  }
+  return found;
 }
 
 /** Where cloud-VM clones live. Overridable so it can be a mounted, persistent volume; a data-dir default. */

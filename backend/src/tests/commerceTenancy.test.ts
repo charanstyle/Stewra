@@ -7,11 +7,12 @@ import request from 'supertest';
 import { config } from '../config/unifiedConfig.js';
 import { db, closeDb } from '../database/index.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import orgRoutes from '../commerce/routes/organizations.js';
+import orgRoutes from '../tenancy/routes/organizations.js';
+import commerceOrgRoutes from '../commerce/routes/orgSurface.js';
 import rateCardRoutes from '../commerce/routes/rateCards.js';
 import spendCapRoutes from '../commerce/routes/spendCaps.js';
 import billingRoutes from '../commerce/routes/billing.js';
-import { organizationRepository } from '../commerce/repositories/organizationRepository.js';
+import { organizationRepository } from '../tenancy/repositories/organizationRepository.js';
 import { invoiceRepository } from '../commerce/repositories/invoiceRepository.js';
 import { orgInviteEmailRegistry } from '../ports/orgInviteEmail.js';
 
@@ -38,6 +39,7 @@ orgInviteEmailRegistry.register({ send: async () => {} });
 const app = express();
 app.use(express.json());
 app.use('/orgs', orgRoutes);
+app.use('/orgs/:orgId', commerceOrgRoutes);
 // The platform-operator surfaces, mounted exactly as app.ts mounts them — this suite proves an
 // org role, owner included, does not exist to them.
 app.use('/platform/rate-cards', rateCardRoutes);
@@ -83,6 +85,7 @@ async function createUser(opts: { verified?: boolean } = {}): Promise<TestUser> 
 async function createOrg(name = 'Acme Coffee'): Promise<{ owner: TestUser; orgId: string }> {
   const owner = await createUser();
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name,
     slug: `acme-${randomUUID().slice(0, 8)}`,
     createdBy: owner.id,

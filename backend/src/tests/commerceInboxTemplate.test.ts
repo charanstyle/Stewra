@@ -73,7 +73,7 @@ const database = (await import('../database/index.js')) as {
 };
 const { db } = database;
 const { organizationRepository } = await import(
-  '../commerce/repositories/organizationRepository.js'
+  '../tenancy/repositories/organizationRepository.js'
 );
 const { channelAccountRepository } = await import(
   '../commerce/repositories/channelAccountRepository.js'
@@ -170,6 +170,7 @@ async function tenant(): Promise<Tenant> {
   createdUsers.push(user.id);
 
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Inbox Template Test Org',
     slug: `inboxtpl-${randomUUID().slice(0, 12)}`,
     createdBy: user.id,

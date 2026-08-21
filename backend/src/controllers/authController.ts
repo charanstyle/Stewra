@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import {
+  ORG_KINDS,
   PASSWORD_RESET_CODE_LENGTH,
   PASSWORD_RESET_MIN_PASSWORD_LENGTH,
 } from '@stewra/shared-types';
@@ -13,11 +14,33 @@ import { authService } from '../services/authService.js';
 import { passwordResetService } from '../services/passwordResetService.js';
 import { parse } from '../utils/validate.js';
 
-const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-  displayName: z.string().min(1).max(255),
-});
+// The two halves of the account-kind choice are validated TOGETHER: a business with no company
+// name has nothing to call its organization, and an individual with one is a client that does not
+// know which kind it asked for. Both are refused rather than reconciled.
+const registerSchema = z
+  .object({
+    email: z.string().email(),
+    password: z.string().min(8, 'Password must be at least 8 characters'),
+    displayName: z.string().min(1).max(255),
+    accountKind: z.enum(ORG_KINDS),
+    companyName: z.string().trim().min(1).max(120).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.accountKind === 'business' && value.companyName === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['companyName'],
+        message: 'A business account needs a company name',
+      });
+    }
+    if (value.accountKind === 'individual' && value.companyName !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['companyName'],
+        message: 'An individual account has no company name',
+      });
+    }
+  });
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -50,7 +73,15 @@ class AuthController extends BaseController {
   async register(req: Request, res: Response): Promise<void> {
     try {
       const body = parse(registerSchema, req.body);
-      const result = await authService.register(body);
+      // Spread conditionally: `RegisterRequest.companyName` is optional-absent, not optional-undefined,
+      // and an individual signup must not carry the key at all.
+      const result = await authService.register({
+        email: body.email,
+        password: body.password,
+        displayName: body.displayName,
+        accountKind: body.accountKind,
+        ...(body.companyName === undefined ? {} : { companyName: body.companyName }),
+      });
       this.handleSuccess(res, result, 201);
     } catch (error) {
       this.handleError(error, res, 'AuthController.register');

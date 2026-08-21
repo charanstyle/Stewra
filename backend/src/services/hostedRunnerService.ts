@@ -13,7 +13,8 @@ import { runnerDeviceRepository } from '../repositories/runnerDeviceRepository.j
 import type { HostedRunnerRow } from '../repositories/runnerDeviceRepository.js';
 import { githubAppService } from './githubAppService.js';
 import { ProvisionerError, provisionerClient } from './provisionerClient.js';
-import { listOnlineDeviceIds, notifyRunnerRevoked } from '../websocket/runnerEmitter.js';
+import { organizationService } from '../tenancy/services/organizationService.js';
+import { isDeviceOnline, notifyRunnerRevoked } from '../websocket/runnerEmitter.js';
 import { ConflictError, NotFoundError, ServiceUnavailableError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
@@ -85,14 +86,21 @@ class HostedRunnerService {
     }
   }
 
-  /** Whether this user's hosted runner has a socket connected right now. */
-  private async isOnline(userId: string, deviceId: string): Promise<boolean> {
-    return (await listOnlineDeviceIds(userId)).has(deviceId);
+  /**
+   * The user's hosted runner with a truthful `online`, or null. Hosted runners are per PERSON (one row
+   * per user), so the lookup is by user; `online` is composed from that one device's socket, not from an
+   * org room — the person may have moved orgs since, and the row's org is the pairer's at provision time.
+   */
+  private async findHosted(userId: string): Promise<HostedRunnerRow | null> {
+    const row = await runnerDeviceRepository.findHostedByUser(userId, EMPTY_ONLINE);
+    if (row === null) return null;
+    const online = await isDeviceOnline(row.device.id);
+    return online ? await runnerDeviceRepository.findHostedByUser(userId, new Set([row.device.id])) : row;
   }
 
   /** The user's hosted runner, or a loud 404 — every lifecycle action needs one to act on. */
   private async requireHosted(userId: string): Promise<HostedRunnerRow> {
-    const row = await runnerDeviceRepository.findHostedByUser(userId, await listOnlineDeviceIds(userId));
+    const row = await this.findHosted(userId);
     if (row === null) throw new NotFoundError('You have no cloud runner yet');
     return row;
   }
@@ -102,7 +110,7 @@ class HostedRunnerService {
     if (!config.hostedRunner.enabled) {
       return { enabled: false, runner: null, idleStopMinutes: 0 };
     }
-    const row = await runnerDeviceRepository.findHostedByUser(userId, await listOnlineDeviceIds(userId));
+    const row = await this.findHosted(userId);
     return {
       enabled: true,
       runner: row?.device ?? null,
@@ -138,10 +146,15 @@ class HostedRunnerService {
       );
     }
 
+    // A hosted runner is per person, but every device row carries a tenant. It lands in the org the
+    // person is acting in; with several orgs and no active one, that is a question, not a guess.
+    const { orgId } = await organizationService.resolveActingOrg(userId);
+
     const deviceId = randomUUID();
     // Only the token is kept: it is returned exactly once, and it is the credential the container will
     // authenticate with. The device model is re-read at the end, by which point the row has moved on.
     const { token } = await runnerDeviceRepository.registerDevice({
+      orgId,
       userId,
       id: deviceId,
       name: HOSTED_DEVICE_NAME,
@@ -191,7 +204,7 @@ class HostedRunnerService {
       summary: 'You set up a Stewra Cloud Runner (Stewra now hosts a container that runs coding agents for you).',
       success: true,
       // The harness NAMES, never the secrets — an audit row records that a login was attached, not what it was.
-      metadata: { deviceId, harnessesConfigured: written.join(','), repos: repos.length },
+      metadata: { orgId, deviceId, harnessesConfigured: written.join(','), repos: repos.length },
     });
     logger.info('hosted-runner: provisioned', { userId, deviceId, repos: repos.length });
 
@@ -266,7 +279,7 @@ class HostedRunnerService {
     if (hosted === null) return false;
 
     await runnerDeviceRepository.deleteById(hosted.device.id);
-    await notifyRunnerRevoked(userId, hosted.device.id);
+    await notifyRunnerRevoked(hosted.device.id);
     await this.destroyContainer(hosted.device.id, { removeVolumes: true });
 
     await auditWriter.write({
@@ -335,9 +348,9 @@ class HostedRunnerService {
    * on timeout rather than throwing, so the caller can record an honest `runner_wake_timeout` on the
    * session instead of a generic error.
    */
-  async wakeAndAwait(userId: string, deviceId: string): Promise<boolean> {
+  async wakeAndAwait(deviceId: string): Promise<boolean> {
     if (!config.hostedRunner.enabled) return false;
-    if (await this.isOnline(userId, deviceId)) return true;
+    if (await isDeviceOnline(deviceId)) return true;
 
     try {
       const view = await provisionerClient.startRunner(deviceId);
@@ -347,7 +360,6 @@ class HostedRunnerService {
     } catch (error) {
       Sentry.captureException(error);
       logger.error('hosted-runner: wake could not start the container', {
-        userId,
         deviceId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -358,13 +370,12 @@ class HostedRunnerService {
     const deadline = Date.now() + config.hostedRunner.wakeTimeoutMs;
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, WAKE_POLL_INTERVAL_MS));
-      if (await this.isOnline(userId, deviceId)) {
-        logger.info('hosted-runner: woke and connected', { userId, deviceId });
+      if (await isDeviceOnline(deviceId)) {
+        logger.info('hosted-runner: woke and connected', { deviceId });
         return true;
       }
     }
     logger.warn('hosted-runner: wake timed out waiting for the runner to connect', {
-      userId,
       deviceId,
       timeoutMs: config.hostedRunner.wakeTimeoutMs,
     });
@@ -463,7 +474,7 @@ class HostedRunnerService {
     for (const candidate of candidates) {
       // A device with a live socket is not idle no matter what the timestamps say — it may be connected
       // and simply between sessions, and the timestamps only record the last hello.
-      if (await this.isOnline(candidate.userId, candidate.device.id)) continue;
+      if (await isDeviceOnline(candidate.device.id)) continue;
       try {
         const view = await provisionerClient.stopRunner(candidate.device.id);
         await runnerDeviceRepository.setContainerStatus(candidate.device.id, toContainerStatus(view.status));

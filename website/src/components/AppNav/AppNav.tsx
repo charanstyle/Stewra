@@ -34,6 +34,9 @@ export function AppNav(): React.JSX.Element {
           <NavLink to="/memory" className={linkClass}>
             What I’ve learned
           </NavLink>
+          <NavLink to="/fleet" className={linkClass}>
+            Fleet
+          </NavLink>
           <NavLink to="/commerce" className={linkClass}>
             Commerce
           </NavLink>

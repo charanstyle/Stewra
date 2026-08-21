@@ -47,10 +47,11 @@ const database = (await import('../database/index.js')) as {
 const { db } = database;
 const { config } = await import('../config/unifiedConfig.js');
 const { errorHandler } = await import('../middleware/errorHandler.js');
-const orgRoutes = (await import('../commerce/routes/organizations.js')).default;
+const orgRoutes = (await import('../tenancy/routes/organizations.js')).default;
+const commerceOrgRoutes = (await import('../commerce/routes/orgSurface.js')).default;
 const metaWebhookRoutes = (await import('../commerce/routes/metaWebhook.js')).default;
 const { organizationRepository } = await import(
-  '../commerce/repositories/organizationRepository.js'
+  '../tenancy/repositories/organizationRepository.js'
 );
 const { whatsappInboundAdapter } = await import('../commerce/services/inbound/whatsappAdapter.js');
 const { commerceInboundService } = await import('../commerce/services/commerceInboundService.js');
@@ -63,6 +64,7 @@ const app = express();
 app.use('/webhooks/meta', metaWebhookRoutes);
 app.use(express.json());
 app.use('/orgs', orgRoutes);
+app.use('/orgs/:orgId', commerceOrgRoutes);
 app.use(errorHandler);
 const server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -113,6 +115,7 @@ interface Tenant {
 async function createTenant(phone = '+1 555 010 0200'): Promise<Tenant> {
   const owner = await createUser();
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Opt-in Co',
     slug: `optin-${randomUUID().slice(0, 8)}`,
     createdBy: owner.id,

@@ -6,83 +6,59 @@ import type {
 } from '@stewra/shared-types';
 import * as Sentry from '@sentry/node';
 import { messageRepository } from '../repositories/messageRepository.js';
+import { runnerChatRelayRepository } from '../repositories/runnerChatRelayRepository.js';
+import type { PendingRunnerPermission, RunnerOrigin } from '../repositories/runnerChatRelayRepository.js';
 import { emitToConversation } from '../websocket/emitter.js';
 import { whatsappBridgeService } from './whatsappBridgeService.js';
 import { logger } from '../utils/logger.js';
 
+export type { PendingRunnerPermission, RunnerOrigin } from '../repositories/runnerChatRelayRepository.js';
 /**
  * Which medium a chat-initiated runner session is being watched on, so its later, unsolicited moments
  * (a permission gate, the final result) are relayed back to the SAME place the user asked from — the
  * core "ask on WhatsApp, get answered on WhatsApp" property. `stewra_chat` is the in-app/web Stewra
  * thread (a live socket); `whatsapp` additionally pushes the line into the user's self-chat.
  */
-export type RunnerChatChannel = 'stewra_chat' | 'whatsapp';
-
-/** Where a session's relayed lines go, captured when it is started from a conversation. */
-interface RunnerOrigin {
-  readonly userId: string;
-  readonly conversationId: string;
-  readonly channel: RunnerChatChannel;
-  readonly deviceName: string;
-  readonly workspaceName: string;
-}
-
-/**
- * The permission gate a chat-watched session is currently blocked on — enough to resolve a
- * natural-language "yes"/"no" reply into a concrete decision without the user ever seeing an id.
- */
-export interface PendingRunnerPermission {
-  readonly userId: string;
-  readonly sessionId: string;
-  readonly promptId: string;
-  readonly allowOptionId: string | null;
-  readonly denyOptionId: string | null;
-  readonly title: string;
-}
+export type { RunnerChatChannel } from '../repositories/runnerChatRelayRepository.js';
 
 /**
  * Bridges a runner session's async lifecycle back into the CHAT the user started it from.
  *
- * The socket already streams every `runner-ui:*` event to a Runners screen; this service is the parallel
+ * The socket already streams every `runner-ui:*` event to the fleet page; this service is the parallel
  * path for the conversational surfaces (WhatsApp, and the Stewra chat thread) that don't hold that
- * screen open. It relays only the moments that need the human — a permission request and the final
+ * page open. It relays only the moments that need the human — a permission request and the final
  * result — so a button-less channel stays quiet until it actually needs a reply, and it remembers the
- * pending permission so a plain "yes" resolves against it. Purely in-memory: a session is short-lived,
- * and if the process restarts mid-session the app still has the authoritative socket stream; the chat
- * relay simply goes quiet, which is a safe degradation, never a wrong action.
+ * pending permission so a plain "yes" resolves against it.
+ *
+ * Both facts are rows (migration 066), not fields on this object: a backend restart mid-session must
+ * not lose the WhatsApp target, because a founder driving a session from their phone has no other
+ * surface to notice the gate on. Every method is therefore async.
  */
-class RunnerChatRelayService {
-  private readonly origins = new Map<string, RunnerOrigin>();
-  private readonly pending = new Map<string, PendingRunnerPermission>();
-
+export class RunnerChatRelayService {
   /** Remember where a session's relayed lines should go. Called when a session is started from a chat. */
-  registerOrigin(sessionId: string, origin: RunnerOrigin): void {
-    this.origins.set(sessionId, origin);
+  async registerOrigin(sessionId: string, origin: RunnerOrigin): Promise<void> {
+    await runnerChatRelayRepository.saveOrigin(sessionId, origin);
   }
 
   /** The most recent permission a session of this user is blocked on, or null. */
-  latestPendingPermission(userId: string): PendingRunnerPermission | null {
-    let latest: PendingRunnerPermission | null = null;
-    for (const p of this.pending.values()) {
-      if (p.userId === userId) latest = p;
-    }
-    return latest;
+  latestPendingPermission(userId: string): Promise<PendingRunnerPermission | null> {
+    return runnerChatRelayRepository.latestPendingForUser(userId);
   }
 
   /** Forget a session's pending permission once it has been decided. */
-  clearPermission(sessionId: string): void {
-    this.pending.delete(sessionId);
+  async clearPermission(sessionId: string): Promise<void> {
+    await runnerChatRelayRepository.deletePending(sessionId);
   }
 
   /**
    * A runner hit a permission gate. Remember it (so a "yes" can resolve) and, if the session is being
-   * watched from a chat, relay a natural-language ask to that medium. Best-effort: a relay failure must
-   * never stop the socket path that already delivered the prompt to a Runners screen.
+   * watched from a chat, relay a natural-language ask to that medium. Best-effort on delivery: a relay
+   * failure must never stop the socket path that already delivered the prompt to the fleet page.
    */
   async onPermission(userId: string, payload: RunnerPermissionPromptPayload): Promise<void> {
     const allow = payload.options.find((o) => o.kind === 'allow_once' || o.kind === 'allow_always');
     const deny = payload.options.find((o) => o.kind === 'reject_once' || o.kind === 'reject_always');
-    this.pending.set(payload.sessionId, {
+    await runnerChatRelayRepository.savePending({
       userId,
       sessionId: payload.sessionId,
       promptId: payload.promptId,
@@ -91,10 +67,10 @@ class RunnerChatRelayService {
       title: payload.title,
     });
 
-    const origin = this.origins.get(payload.sessionId);
-    if (origin === undefined) return;
+    const origin = await runnerChatRelayRepository.findOrigin(payload.sessionId);
+    if (origin === null) return;
     const detail = payload.detail.trim().length > 0 ? ` (${payload.detail.trim()})` : '';
-    const line = `Permission needed on ${origin.workspaceName}: ${payload.title}${detail}. Reply "yes" to allow or "no" to deny.`;
+    const line = `Permission needed on ${subject(origin)}: ${payload.title}${detail}. Reply "yes" to allow or "no" to deny.`;
     await this.deliver(origin, line);
   }
 
@@ -103,11 +79,12 @@ class RunnerChatRelayService {
    * nudge that it can be pushed by just saying so) to the chat it came from, then forget it.
    */
   async onDone(payload: RunnerSessionDonePayload): Promise<void> {
-    const origin = this.origins.get(payload.sessionId);
-    this.pending.delete(payload.sessionId);
-    if (origin === undefined) return;
-    this.origins.delete(payload.sessionId);
+    const origin = await runnerChatRelayRepository.findOrigin(payload.sessionId);
+    await runnerChatRelayRepository.deletePending(payload.sessionId);
+    if (origin === null) return;
+    await runnerChatRelayRepository.deleteOrigin(payload.sessionId);
 
+    const where = `${origin.deviceName} (${subject(origin)})`;
     let line: string;
     if (payload.status === 'completed') {
       const summary = payload.summary && payload.summary.trim().length > 0 ? ` ${payload.summary.trim()}` : '';
@@ -115,12 +92,12 @@ class RunnerChatRelayService {
         payload.committed && payload.branch
           ? ` The work is on branch ${payload.branch} — say "push it" to push, or "open a PR".`
           : '';
-      line = `Done on ${origin.deviceName} (${origin.workspaceName}).${summary}${pushable}`;
+      line = `Done on ${where}.${summary}${pushable}`;
     } else if (payload.status === 'cancelled') {
-      line = `Session on ${origin.deviceName} (${origin.workspaceName}) was cancelled.`;
+      line = `Session on ${where} was cancelled.`;
     } else {
       const why = payload.error && payload.error.trim().length > 0 ? `: ${payload.error.trim()}` : '';
-      line = `Session on ${origin.deviceName} (${origin.workspaceName}) failed${why}.`;
+      line = `Session on ${where} failed${why}.`;
     }
     await this.deliver(origin, line);
   }
@@ -155,6 +132,11 @@ class RunnerChatRelayService {
       logger.warn('runner chat relay failed', { err: String(err), conversationId: origin.conversationId });
     }
   }
+}
+
+/** What the person called it: the project when there is one, else the checkout. */
+function subject(origin: RunnerOrigin): string {
+  return origin.projectName ?? origin.workspaceName;
 }
 
 export const runnerChatRelayService = new RunnerChatRelayService();

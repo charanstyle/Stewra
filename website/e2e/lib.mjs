@@ -51,7 +51,11 @@ export async function loginAll() {
   await Promise.all([login(A), login(B)]);
 }
 
-/** Thin authenticated JSON fetch against the backend. Defaults to user A. */
+/**
+ * Thin authenticated JSON fetch against the backend. Defaults to user A.
+ * @param {string} path
+ * @param {{ method?: string, token?: string, body?: unknown }} [options]
+ */
 export async function apiCall(path, { method = 'GET', token = A.accessToken, body } = {}) {
   const res = await fetch(`${API}${path}`, {
     method,

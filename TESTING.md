@@ -301,10 +301,18 @@ reintroduce a skip lands inside that slack and goes green. This suite lived that
 budget now fails with the one-line edit spelled out in the message — one red run at the moment the
 good news arrives, in exchange for a number that can never drift above reality.
 
-The main suite's budget is pinned in the (gitignored) `.env.e2e` (`E2E_MAX_SKIPS=4` — the sign-up and
-re-consent-banner tests across the two browser profiles, each conditional by design). It assumes a
-paired, online runner; without one the two runner-session tests skip again and the budget is `6`. A
-real environment variable still wins, which is how CI holds the commerce suite to `0`.
+The main suite's budget is pinned in the (gitignored) `.env.e2e` (`E2E_MAX_SKIPS=2` — the
+re-consent-banner test across the two browser profiles, conditional by design). It assumes a paired,
+online runner; without one the two runner-session tests skip again and the budget is `4`. It also
+assumes `E2E_SIGNUP_MAILBOX` is set: without it the sign-up test and the two organization cases in
+`accountDeletion.spec.ts` skip as well, adding `6`. A real environment variable still wins, which is
+how CI holds the commerce suite to `0`.
+
+> That mailbox setting is the reason this number moved from `4`. It was pinned when sign-up skipped
+> on every run because the account it created could never be deleted; migration `062` made accounts
+> deletable, `accountDeletion.spec.ts` proved it against production, and the skip that budget was
+> paying for stopped existing. This is the "one red run at the moment the good news arrives" the
+> paragraph above describes, arriving.
 
 > The reporter fails the run by returning `{ status: 'failed' }` from `onEnd()`. Setting
 > `process.exitCode` there is silently discarded — Playwright computes the exit code from the

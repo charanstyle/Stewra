@@ -192,6 +192,12 @@ export interface ProposedRunnerSession {
   readonly deviceName: string;
   readonly workspaceId: string;
   readonly workspaceName: string;
+  /**
+   * The project the checkout is bound to, when it is — so the card says "Truetalk" when the user said
+   * Truetalk, not `product_advisor`. Null for a checkout no project is bound to.
+   */
+  readonly projectId: UUID | null;
+  readonly projectName: string | null;
   readonly harness: RunnerHarnessId;
   readonly prompt: string;
   /** The started session's id once confirmed (`status='sent'`); null while pending/cancelled/failed. */

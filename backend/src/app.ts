@@ -23,9 +23,12 @@ import mediaRoutes from './routes/media.js';
 import homeRoutes from './routes/home.js';
 import channelsRoutes from './routes/channels.js';
 import runnerRoutes from './routes/runner.js';
+import orgRunnerRoutes from './routes/orgRunner.js';
+import projectRoutes from './routes/projects.js';
 import githubAppRoutes from './routes/githubApp.js';
 import whatsappWebhookRoutes from './routes/whatsappWebhook.js';
-import orgRoutes from './commerce/routes/organizations.js';
+import orgRoutes from './tenancy/routes/organizations.js';
+import commerceOrgRoutes from './commerce/routes/orgSurface.js';
 import rateCardRoutes from './commerce/routes/rateCards.js';
 import spendCapRoutes from './commerce/routes/spendCaps.js';
 import billingRoutes from './commerce/routes/billing.js';
@@ -35,6 +38,8 @@ import metaWebhookRoutes from './commerce/routes/metaWebhook.js';
 import { commerceIntentService } from './commerce/services/commerceIntentService.js';
 import { commerceProposalExecutorRegistry, turnIntentRegistry } from './ports/turnIntent.js';
 import { orgInviteEmailRegistry } from './ports/orgInviteEmail.js';
+import { orgBillingRegistry } from './ports/orgBilling.js';
+import { orgBillingReader } from './commerce/services/orgBillingReader.js';
 import { emailService } from './services/emailService.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
@@ -66,6 +71,10 @@ export function createApp(): Express {
   orgInviteEmailRegistry.register({
     send: (email) => emailService.sendOrgInvite(email),
   });
+  // And back again: account deletion (a personal-assistant service) must warn when an org it is about
+  // to destroy is still being charged by a store, and only the commerce plane knows what "still
+  // charged" means. Same overwrite semantics as the invite sender above.
+  orgBillingRegistry.register(orgBillingReader);
 
   app.use(helmet());
   app.use(cors({ origin: config.web.appUrl, credentials: false }));
@@ -106,9 +115,21 @@ export function createApp(): Express {
   app.use('/process-rules', processRulesRoutes);
   app.use('/preferences', preferencesRoutes);
   app.use('/contacts', contactsRoutes);
+  // Organizations — an install-wide primitive (backend/src/tenancy/), not a commerce concept: every
+  // account is a tenant, so both planes scope by the same org id.
+  app.use('/orgs', orgRoutes);
+  // Org-scoped runner plane and projects (migrations 064/065). Both routers use `mergeParams`, so the
+  // `:orgId` captured here reaches their `requireOrgMember`. The legacy `/runner` above resolves the
+  // caller's acting org and calls the same services.
+  app.use('/orgs/:orgId/runner', orgRunnerRoutes);
+  app.use('/orgs/:orgId/projects', projectRoutes);
   // Commerce plane — a separate bounded context (backend/src/commerce/), scoped by org_id rather
   // than user_id. Nothing under here shares tables with the personal-assistant routes above.
-  app.use('/orgs', orgRoutes);
+  //
+  // It hangs off the same tenant path, but tenancy may not import commerce, so the join happens here
+  // rather than inside the org router. Both mounts see the same `:orgId`, and each commerce route
+  // still runs its own requireOrgMember. The URLs are unchanged by the split.
+  app.use('/orgs/:orgId', commerceOrgRoutes);
   // Platform-operator surface (migration 050): the price list every org is billed from. Gated by
   // requireInstallAdmin, never by org role — a client must not edit the price they pay.
   app.use('/platform/rate-cards', rateCardRoutes);

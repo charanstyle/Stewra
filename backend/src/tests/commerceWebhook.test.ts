@@ -39,7 +39,7 @@ const { db } = database;
 const { errorHandler } = await import('../middleware/errorHandler.js');
 const metaWebhookRoutes = (await import('../commerce/routes/metaWebhook.js')).default;
 const { organizationRepository } = await import(
-  '../commerce/repositories/organizationRepository.js'
+  '../tenancy/repositories/organizationRepository.js'
 );
 
 const app = express();
@@ -121,6 +121,7 @@ async function orgWithChannel(): Promise<{ orgId: string; wabaId: string; accoun
   createdUsers.push(user.id);
 
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Webhook Test Co',
     slug: `webhook-${randomUUID().slice(0, 8)}`,
     createdBy: user.id,

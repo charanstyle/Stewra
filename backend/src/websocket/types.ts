@@ -24,6 +24,12 @@ export interface SocketData {
    * door, from the same row that authenticated the token.
    */
   deviceKind?: RunnerDeviceKind;
+  /**
+   * The organization the `/runner` device belongs to, from the same row that authenticated its token.
+   * Present only on runner sockets. It is what puts the socket in its org's room, which is how the
+   * fleet page's online dots are composed per tenant.
+   */
+  orgId?: string;
 }
 
 /**

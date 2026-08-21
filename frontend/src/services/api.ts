@@ -64,6 +64,8 @@ import type {
   SetEmailOverWhatsappRequest,
   SetEmailOverWhatsappResponse,
   CreateOrgRequest,
+  ConvertOrgRequest,
+  ConvertOrgResponse,
   CreateOrgResponse,
   ListOrgsResponse,
   SetActiveOrgRequest,
@@ -509,6 +511,10 @@ export const api = {
    * derives it from the name and resolves collisions by suffixing, so a phone keyboard never has to
    * produce a URL-safe handle or retry on a taken one.
    */
+  /** An individual org becomes a business one, under a company name. Owner only. */
+  convertOrg: (orgId: string, body: ConvertOrgRequest): Promise<ConvertOrgResponse> =>
+    request(`/orgs/${orgId}/convert`, { method: 'POST', body }),
+
   createOrg: (body: CreateOrgRequest): Promise<CreateOrgResponse> =>
     request('/orgs', { method: 'POST', body }),
 

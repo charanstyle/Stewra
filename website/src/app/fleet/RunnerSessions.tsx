@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
-  GetRunnerStatusResponse,
-  RunnerDevice,
-  RunnerHarnessId,
   RunnerPermissionPromptPayload,
   RunnerSession,
   RunnerSessionUpdatePayload,
 } from '@stewra/shared-types';
 import { RUNNER_UI_EVENTS } from '@stewra/shared-types';
 import { ApiError } from '../../services/api';
-import { runnerService } from '../../services/runnerService';
+import { orgRunnerService } from '../../services/projectService';
 import { useSocket } from '../../hooks/useSocket';
 import styles from './RunnerSessions.module.css';
 
@@ -31,25 +28,27 @@ interface LogItem {
   readonly tool?: string;
 }
 
+interface RunnerSessionsProps {
+  /** The org whose sessions are shown — the fleet page's selected org, always the path segment. */
+  readonly orgId: string;
+  /** A session the page just started (from the matrix or the launcher): open its live view. */
+  readonly focusSessionId: string | null;
+  readonly canWrite: boolean;
+}
+
 /**
- * The runner Sessions surface: start a coding agent on one of your machines, watch its output stream live,
- * and answer the permission prompts it raises — all against a throwaway git worktree on your own box.
+ * The sessions workbench: watch a coding agent's output stream live, answer the permission prompts it
+ * raises, send follow-ups, and push / open a PR from the isolated branch it worked on. Sessions are
+ * STARTED elsewhere on the fleet page — by project, or from a matrix cell — and land here.
  *
- * The live stream and permission prompts arrive over the shared app socket (the server relays each runner's
- * reports as `runner-ui:*` events); starting/prompting/cancelling/answering go back over REST.
+ * The live stream and permission prompts arrive over the shared app socket (the server relays each
+ * runner's reports as `runner-ui:*` events to the member who started the session); everything the
+ * user does goes back over REST.
  */
-export default function RunnerSessions(): React.JSX.Element | null {
+export default function RunnerSessions({ orgId, focusSessionId, canWrite }: RunnerSessionsProps): React.JSX.Element {
   const socket = useSocket();
-  const [status, setStatus] = useState<GetRunnerStatusResponse | null>(null);
   const [sessions, setSessions] = useState<readonly RunnerSession[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  // Composer state.
-  const [deviceId, setDeviceId] = useState<string>('');
-  const [harness, setHarness] = useState<RunnerHarnessId | ''>('');
-  const [workspaceId, setWorkspaceId] = useState<string>('');
-  const [prompt, setPrompt] = useState<string>('');
   const [followUp, setFollowUp] = useState<string>('');
 
   // Git follow-through state (push / open-PR on a finished session).
@@ -65,22 +64,29 @@ export default function RunnerSessions(): React.JSX.Element | null {
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
-      const [statusRes, sessionsRes] = await Promise.all([
-        runnerService.getStatus(),
-        runnerService.listSessions().catch(() => ({ sessions: [] })),
-      ]);
-      setStatus(statusRes);
-      setSessions(sessionsRes.sessions);
-    } catch {
-      // Background poll — stay quiet; user actions surface their own errors.
+      const res = await orgRunnerService.listSessions(orgId);
+      setSessions(res.sessions);
+    } catch (err) {
+      // A background poll that fails is still a fact the user should see — once, not every 5s.
+      setError((current) => current ?? describeError(err));
     }
-  }, []);
+  }, [orgId]);
 
   useEffect(() => {
+    setSessions([]);
+    setActiveId(null);
     void refresh();
     const timer = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    if (focusSessionId !== null) {
+      logsRef.current.set(focusSessionId, logsRef.current.get(focusSessionId) ?? []);
+      setActiveId(focusSessionId);
+      void refresh();
+    }
+  }, [focusSessionId, refresh]);
 
   // Subscribe to the live runner-session stream once, for the lifetime of the socket.
   useEffect(() => {
@@ -116,72 +122,41 @@ export default function RunnerSessions(): React.JSX.Element | null {
     };
   }, [socket, refresh]);
 
-  const onlineDevices = useMemo(
-    () => (status?.devices ?? []).filter((d) => d.online),
-    [status],
-  );
-  const selectedDevice: RunnerDevice | undefined = useMemo(
-    () => onlineDevices.find((d) => d.id === deviceId),
-    [onlineDevices, deviceId],
-  );
-
-  const startSession = useCallback(async (): Promise<void> => {
-    if (!selectedDevice || harness === '' || workspaceId === '' || prompt.trim() === '') return;
-    setError(null);
-    setBusy(true);
-    try {
-      const { session } = await runnerService.startSession({
-        deviceId: selectedDevice.id,
-        harness,
-        workspaceId,
-        prompt: prompt.trim(),
-      });
-      logsRef.current.set(session.id, []);
-      setActiveId(session.id);
-      setPrompt('');
-      await refresh();
-    } catch (err) {
-      setError(describeError(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [selectedDevice, harness, workspaceId, prompt, refresh]);
-
   const answer = useCallback(
     async (optionId: string): Promise<void> => {
       if (permission === null) return;
       const current = permission;
       setPermission(null);
       try {
-        await runnerService.decidePermission(current.sessionId, { promptId: current.promptId, optionId });
+        await orgRunnerService.decidePermission(orgId, current.sessionId, { promptId: current.promptId, optionId });
       } catch (err) {
         setError(describeError(err));
         setPermission(current); // let the user try again
       }
     },
-    [permission],
+    [orgId, permission],
   );
 
   const sendFollowUp = useCallback(async (): Promise<void> => {
     if (activeId === null || followUp.trim() === '') return;
     try {
-      await runnerService.promptSession(activeId, { text: followUp.trim() });
+      await orgRunnerService.promptSession(orgId, activeId, { text: followUp.trim() });
       setFollowUp('');
     } catch (err) {
       setError(describeError(err));
     }
-  }, [activeId, followUp]);
+  }, [orgId, activeId, followUp]);
 
   const cancel = useCallback(
     async (id: string): Promise<void> => {
       try {
-        await runnerService.cancelSession(id);
+        await orgRunnerService.cancelSession(orgId, id);
         await refresh();
       } catch (err) {
         setError(describeError(err));
       }
     },
-    [refresh],
+    [orgId, refresh],
   );
 
   // Replace one session in local state with the server's refreshed copy (after a push / PR).
@@ -194,7 +169,7 @@ export default function RunnerSessions(): React.JSX.Element | null {
       setFollowBusy(true);
       setFollowMsg(null);
       try {
-        const res = await runnerService.pushSession(id);
+        const res = await orgRunnerService.pushSession(orgId, id);
         mergeSession(res.session);
         setFollowMsg(res.remoteUrl !== null ? `Pushed to ${res.remoteUrl}` : 'Branch pushed');
       } catch (err) {
@@ -203,7 +178,7 @@ export default function RunnerSessions(): React.JSX.Element | null {
         setFollowBusy(false);
       }
     },
-    [mergeSession],
+    [orgId, mergeSession],
   );
 
   const openPr = useCallback(
@@ -213,7 +188,7 @@ export default function RunnerSessions(): React.JSX.Element | null {
       setFollowMsg(null);
       try {
         const body = `Opened from a Stewra runner session on ${session.deviceName}.\n\n> ${session.prompt}`;
-        const res = await runnerService.openPr(session.id, { title: prTitle.trim(), body });
+        const res = await orgRunnerService.openPr(orgId, session.id, { title: prTitle.trim(), body });
         mergeSession(res.session);
         setFollowMsg(`Opened ${res.prUrl}`);
       } catch (err) {
@@ -222,7 +197,7 @@ export default function RunnerSessions(): React.JSX.Element | null {
         setFollowBusy(false);
       }
     },
-    [prTitle, mergeSession],
+    [orgId, prTitle, mergeSession],
   );
 
   // Prefill the PR title from the session's opening prompt when switching sessions; clear stale follow-up UI.
@@ -233,123 +208,33 @@ export default function RunnerSessions(): React.JSX.Element | null {
     // Intentionally keyed on activeId only: re-running on every `sessions` poll would clobber a title edit.
   }, [activeId]);
 
-  if (status === null || !status.enabled) return null;
-
   const activeSession = sessions.find((s) => s.id === activeId) ?? null;
   const activeLog = activeId !== null ? (logsRef.current.get(activeId) ?? []) : [];
 
   return (
-    <div className={styles.card}>
-      <h2 className={styles.cardTitle}>
-        Runner sessions
-        <span className={styles.badge}>Experimental</span>
-      </h2>
+    <div className={styles.card} data-testid="fleet-sessions">
+      <h2 className={styles.cardTitle}>Sessions</h2>
 
       {error && <div className={styles.error}>{error}</div>}
 
-      {onlineDevices.length === 0 ? (
-        <p className={styles.muted}>
-          No runner is online. Start a runner on one of your machines (<code>stewra-runner run</code>) to
-          begin a session.
-        </p>
+      {sessions.length === 0 ? (
+        <p className={styles.muted}>No sessions yet. Start one from a project above.</p>
       ) : (
-        <div className={styles.composer}>
-          <div className={styles.row}>
-            <label className={styles.field}>
-              <span className={styles.label}>Machine</span>
-              <select
-                className={styles.select}
-                value={deviceId}
-                onChange={(e) => {
-                  setDeviceId(e.target.value);
-                  setHarness('');
-                  setWorkspaceId('');
-                }}
-              >
-                <option value="">Choose a machine…</option>
-                {onlineDevices.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} ({d.os})
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className={styles.field}>
-              <span className={styles.label}>Agent</span>
-              <select
-                className={styles.select}
-                value={harness}
-                disabled={!selectedDevice}
-                onChange={(e) => {
-                  const found = (selectedDevice?.harnesses ?? []).find((h) => h.id === e.target.value);
-                  setHarness(found ? found.id : '');
-                }}
-              >
-                <option value="">Choose an agent…</option>
-                {(selectedDevice?.harnesses ?? [])
-                  .filter((h) => h.available)
-                  .map((h) => (
-                    <option key={h.id} value={h.id}>
-                      {h.id}
-                    </option>
-                  ))}
-              </select>
-            </label>
-
-            <label className={styles.field}>
-              <span className={styles.label}>Workspace</span>
-              <select
-                className={styles.select}
-                value={workspaceId}
-                disabled={!selectedDevice}
-                onChange={(e) => setWorkspaceId(e.target.value)}
-              >
-                <option value="">Choose a repo…</option>
-                {(selectedDevice?.workspaces ?? []).map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <textarea
-            className={styles.prompt}
-            placeholder="What should the agent do? e.g. 'Add a health-check endpoint and a test for it.'"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={3}
-          />
-          <div className={styles.actions}>
-            <button
-              type="button"
-              className={styles.primary}
-              disabled={busy || !selectedDevice || harness === '' || workspaceId === '' || prompt.trim() === ''}
-              onClick={() => void startSession()}
-            >
-              {busy ? 'Starting…' : 'Start session'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {sessions.length > 0 && (
         <ul className={styles.sessionList}>
           {sessions.map((s) => (
             <li
               key={s.id}
               className={`${styles.sessionRow} ${s.id === activeId ? styles.sessionActive : ''}`}
+              data-testid="fleet-session-row"
             >
               <button type="button" className={styles.sessionOpen} onClick={() => setActiveId(s.id)}>
                 <span className={`${styles.status} ${styles[`status_${s.status}`] ?? ''}`}>{s.status}</span>
                 <span className={styles.sessionPrompt}>{s.prompt}</span>
                 <span className={styles.sessionMeta}>
-                  {s.harness} · {s.workspaceName} · {s.deviceName}
+                  {s.projectName ?? s.workspaceName} · {s.harness} · {s.deviceName}
                 </span>
               </button>
-              {isActive(s) && (
+              {canWrite && isActive(s) && (
                 <button type="button" className={styles.ghost} onClick={() => void cancel(s.id)}>
                   Cancel
                 </button>
@@ -362,8 +247,10 @@ export default function RunnerSessions(): React.JSX.Element | null {
       {activeSession !== null && (
         <div className={styles.viewer}>
           <div className={styles.viewerHead}>
-            <strong>{activeSession.workspaceName}</strong>
-            <span className={styles.sessionMeta}>{activeSession.harness} · {activeSession.deviceName}</span>
+            <strong>{activeSession.projectName ?? activeSession.workspaceName}</strong>
+            <span className={styles.sessionMeta}>
+              {activeSession.workspaceName} · {activeSession.harness} · {activeSession.deviceName}
+            </span>
           </div>
 
           <div className={styles.log}>
@@ -376,8 +263,8 @@ export default function RunnerSessions(): React.JSX.Element | null {
             ))}
           </div>
 
-          {permission !== null && permission.sessionId === activeSession.id && (
-            <div className={styles.permission}>
+          {canWrite && permission !== null && permission.sessionId === activeSession.id && (
+            <div className={styles.permission} data-testid="fleet-permission">
               <div className={styles.permTitle}>Permission needed: {permission.title}</div>
               {permission.detail !== permission.title && (
                 <pre className={styles.permDetail}>{permission.detail}</pre>
@@ -397,7 +284,7 @@ export default function RunnerSessions(): React.JSX.Element | null {
             </div>
           )}
 
-          {isActive(activeSession) && (
+          {canWrite && isActive(activeSession) && (
             <div className={styles.followUp}>
               <input
                 className={styles.followInput}
@@ -433,30 +320,32 @@ export default function RunnerSessions(): React.JSX.Element | null {
                   View pull request →
                 </a>
               ) : (
-                <div className={styles.followActions}>
-                  <input
-                    className={styles.followInput}
-                    placeholder="Pull request title"
-                    value={prTitle}
-                    onChange={(e) => setPrTitle(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className={styles.secondary}
-                    disabled={followBusy}
-                    onClick={() => void push(activeSession.id)}
-                  >
-                    {activeSession.pushed ? 'Re-push' : 'Push'}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.primary}
-                    disabled={followBusy || prTitle.trim() === ''}
-                    onClick={() => void openPr(activeSession)}
-                  >
-                    Open PR
-                  </button>
-                </div>
+                canWrite && (
+                  <div className={styles.followActions}>
+                    <input
+                      className={styles.followInput}
+                      placeholder="Pull request title"
+                      value={prTitle}
+                      onChange={(e) => setPrTitle(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className={styles.secondary}
+                      disabled={followBusy}
+                      onClick={() => void push(activeSession.id)}
+                    >
+                      {activeSession.pushed ? 'Re-push' : 'Push'}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.primary}
+                      disabled={followBusy || prTitle.trim() === ''}
+                      onClick={() => void openPr(activeSession)}
+                    >
+                      Open PR
+                    </button>
+                  </div>
+                )
               )}
 
               {followMsg !== null && <div className={styles.followMsg}>{followMsg}</div>}

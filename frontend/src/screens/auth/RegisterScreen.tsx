@@ -11,6 +11,8 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useKeyboardHeight } from '../../hooks/useKeyboardHeight';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { OrgKind } from '@stewra/shared-types';
+import { ORG_KINDS } from '@stewra/shared-types';
 import type { RootStackParamList } from '../../navigation/types';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../services/api';
@@ -21,6 +23,9 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
 
 export default function RegisterScreen({ navigation }: Props): React.JSX.Element {
   const { register } = useAuth();
+  // Individual or business — said by the person, sent explicitly, never inferred.
+  const [accountKind, setAccountKind] = useState<OrgKind>('individual');
+  const [companyName, setCompanyName] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -37,7 +42,13 @@ export default function RegisterScreen({ navigation }: Props): React.JSX.Element
     setError(null);
     setSubmitting(true);
     try {
-      const requiresVerification = await register(email.trim(), password, displayName.trim());
+      const requiresVerification = await register({
+        email: email.trim(),
+        password,
+        displayName: displayName.trim(),
+        accountKind,
+        ...(accountKind === 'business' ? { companyName: companyName.trim() } : {}),
+      });
       if (requiresVerification) {
         navigation.replace('VerifyEmail');
       }
@@ -49,7 +60,11 @@ export default function RegisterScreen({ navigation }: Props): React.JSX.Element
   };
 
   const canSubmit =
-    displayName.trim().length > 0 && email.length > 0 && password.length >= 8 && passwordsMatch;
+    displayName.trim().length > 0 &&
+    email.length > 0 &&
+    password.length >= 8 &&
+    passwordsMatch &&
+    (accountKind === 'individual' || companyName.trim().length > 0);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -59,6 +74,23 @@ export default function RegisterScreen({ navigation }: Props): React.JSX.Element
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Create your account</Text>
 
+          <View style={styles.kindRow} accessibilityRole="radiogroup" testID="register-account-kind">
+            {ORG_KINDS.map((kind) => (
+              <Pressable
+                key={kind}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: accountKind === kind }}
+                onPress={() => setAccountKind(kind)}
+                style={[styles.kindChip, accountKind === kind && styles.kindChipActive]}
+                testID={`register-kind-${kind}`}
+              >
+                <Text style={[styles.kindLabel, accountKind === kind && styles.kindLabelActive]}>
+                  {kind === 'individual' ? 'Individual' : 'Business'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
           <TextInput
             style={styles.input}
             placeholder="Display name"
@@ -67,6 +99,18 @@ export default function RegisterScreen({ navigation }: Props): React.JSX.Element
             value={displayName}
             onChangeText={setDisplayName}
           />
+          {accountKind === 'business' ? (
+            <TextInput
+              style={styles.input}
+              placeholder="Company name"
+              placeholderTextColor={theme.colors.textSecondary}
+              autoComplete="organization"
+              autoCapitalize="words"
+              value={companyName}
+              onChangeText={setCompanyName}
+              testID="register-company-name"
+            />
+          ) : null}
           <TextInput
             style={styles.input}
             placeholder="Email"
@@ -139,6 +183,32 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     textAlign: 'center',
     marginBottom: theme.spacing.xl,
+  },
+  kindRow: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.md,
+  },
+  kindChip: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: theme.spacing.sm,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  kindChipActive: {
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primary,
+  },
+  kindLabel: {
+    color: theme.colors.textPrimary,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  kindLabelActive: {
+    color: theme.colors.onPrimary,
   },
   input: {
     backgroundColor: theme.colors.surface,

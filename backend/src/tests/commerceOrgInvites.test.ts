@@ -7,8 +7,9 @@ import request from 'supertest';
 import { config } from '../config/unifiedConfig.js';
 import { db, closeDb } from '../database/index.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import orgRoutes from '../commerce/routes/organizations.js';
-import { organizationRepository } from '../commerce/repositories/organizationRepository.js';
+import orgRoutes from '../tenancy/routes/organizations.js';
+import commerceOrgRoutes from '../commerce/routes/orgSurface.js';
+import { organizationRepository } from '../tenancy/repositories/organizationRepository.js';
 import { orgInviteEmailRegistry } from '../ports/orgInviteEmail.js';
 import type { OrgInviteEmail } from '../ports/orgInviteEmail.js';
 
@@ -25,6 +26,7 @@ import type { OrgInviteEmail } from '../ports/orgInviteEmail.js';
 const app = express();
 app.use(express.json());
 app.use('/orgs', orgRoutes);
+app.use('/orgs/:orgId', commerceOrgRoutes);
 app.use(errorHandler);
 const server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -75,6 +77,7 @@ async function createUser(displayName = 'Invite Test User'): Promise<TestUser> {
 async function createOrg(name = 'Bluebird Bakery'): Promise<{ owner: TestUser; orgId: string }> {
   const owner = await createUser('Odette Owner');
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name,
     slug: `bluebird-${randomUUID().slice(0, 8)}`,
     createdBy: owner.id,

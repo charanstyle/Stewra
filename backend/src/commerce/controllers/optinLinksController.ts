@@ -8,7 +8,7 @@ import type {
 } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { optinLinkService } from '../services/optinLinkService.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 
 const linkParamsSchema = z.object({ linkId: z.string().uuid() });

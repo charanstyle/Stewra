@@ -27,6 +27,7 @@ const SettingsPage = lazy(() => import('./app/settings/SettingsPage'));
 const RunnerDownloadPage = lazy(() => import('./app/runner/RunnerDownloadPage'));
 const GithubSetupPage = lazy(() => import('./app/github/GithubSetupPage'));
 const CommercePage = lazy(() => import('./app/commerce/CommercePage'));
+const FleetPage = lazy(() => import('./app/fleet/FleetPage'));
 const AudiencePage = lazy(() => import('./app/commerce/AudiencePage'));
 const CampaignsPage = lazy(() => import('./app/commerce/CampaignsPage'));
 const TeamPage = lazy(() => import('./app/commerce/TeamPage'));
@@ -117,6 +118,16 @@ export default function App(): React.JSX.Element {
               element={
                 <ProtectedRoute>
                   <StewraPage />
+                </ProtectedRoute>
+              }
+            />
+            {/* Projects × machines for an organization, and the sessions run on them. Its own page:
+              /activity is the personal account page with no org context, and a matrix needs width. */}
+            <Route
+              path="/fleet"
+              element={
+                <ProtectedRoute>
+                  <FleetPage />
                 </ProtectedRoute>
               }
             />

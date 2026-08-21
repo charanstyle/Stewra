@@ -8,8 +8,9 @@ import { sql } from 'kysely';
 import { config } from '../config/unifiedConfig.js';
 import { db, closeDb } from '../database/index.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import orgRoutes from '../commerce/routes/organizations.js';
-import { organizationRepository } from '../commerce/repositories/organizationRepository.js';
+import orgRoutes from '../tenancy/routes/organizations.js';
+import commerceOrgRoutes from '../commerce/routes/orgSurface.js';
+import { organizationRepository } from '../tenancy/repositories/organizationRepository.js';
 import { commerceInboxRepository } from '../commerce/repositories/commerceInboxRepository.js';
 import { normalizeE164 } from '../commerce/services/callingCodes.js';
 
@@ -38,6 +39,7 @@ import { normalizeE164 } from '../commerce/services/callingCodes.js';
 const app = express();
 app.use(express.json());
 app.use('/orgs', orgRoutes);
+app.use('/orgs/:orgId', commerceOrgRoutes);
 app.use(errorHandler);
 const server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -79,6 +81,7 @@ interface Tenant {
 async function createTenant(): Promise<Tenant> {
   const owner = await createUser();
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Contact Create Co',
     slug: `contacts-${randomUUID().slice(0, 8)}`,
     createdBy: owner.id,

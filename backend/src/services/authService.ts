@@ -19,6 +19,11 @@ import { userRepository, toUserModel } from '../repositories/userRepository.js';
 import type { AuditWriter } from '../control-plane/audit/auditWriter.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
 import { emailVerificationService } from './emailVerificationService.js';
+import { db } from '../database/index.js';
+import {
+  organizationRepository,
+  slugify,
+} from '../tenancy/repositories/organizationRepository.js';
 
 const TokenClaimsSchema = z.object({
   sub: z.string().min(1),
@@ -81,11 +86,31 @@ export class AuthService {
       throw new ConflictError('An account with that email already exists');
     }
     const passwordHash = await bcrypt.hash(req.password, config.auth.bcryptRounds);
-    const row = await this.users.create({
-      email: req.email,
-      displayName: req.displayName,
-      passwordHash,
-      role: 'user',
+
+    // Every account is a tenant: the user and their organization are created in ONE transaction, so
+    // a person with no org is not a state the database can hold, even transiently. An individual
+    // org takes the person's name; a business takes the company's. The controller already refused
+    // a business with no company name, but this is the line that must not trust that, hence the
+    // throw rather than a substitute.
+    const orgName = req.accountKind === 'business' ? req.companyName : req.displayName;
+    if (orgName === undefined || orgName.trim().length === 0) {
+      throw new Error('register: a business account reached the service with no company name');
+    }
+    const { row, org } = await db.transaction().execute(async (trx) => {
+      const userRow = await this.users.create(
+        { email: req.email, displayName: req.displayName, passwordHash, role: 'user' },
+        trx,
+      );
+      const created = await organizationRepository.create(
+        {
+          name: orgName.trim(),
+          slug: slugify(orgName),
+          kind: req.accountKind,
+          createdBy: userRow.id,
+        },
+        trx,
+      );
+      return { row: userRow, org: created.org };
     });
     const user = toUserModel(row);
     await this.audit.write({
@@ -93,9 +118,12 @@ export class AuthService {
       action: 'auth.register',
       resourceType: 'auth',
       resourceId: user.id,
-      summary: 'You created your Stewra account.',
+      summary:
+        req.accountKind === 'business'
+          ? `You created your Stewra account and the organization ${org.name}.`
+          : 'You created your Stewra account.',
       success: true,
-      metadata: {},
+      metadata: { accountKind: req.accountKind, orgId: org.id },
     });
     // Email the first verification code. A transient send failure must NOT fail registration — the
     // account exists and is audited; the user lands on the verify screen and can resend.

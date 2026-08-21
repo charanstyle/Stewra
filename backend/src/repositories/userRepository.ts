@@ -1,5 +1,7 @@
+import type { Kysely } from 'kysely';
 import type { PublicUser, User, UserRole } from '@stewra/shared-types';
 import { db } from '../database/index.js';
+import type { Database } from '../database/types.js';
 
 export interface UserRow {
   readonly id: string;
@@ -67,8 +69,12 @@ export function toPublicUser(row: PublicUserRow): PublicUser {
 }
 
 export class UserRepository {
-  async create(input: NewUserRow): Promise<UserRow> {
-    return db
+  /**
+   * `executor` lets registration create the user inside the same transaction that creates their
+   * organization — a user with no org must never be a reachable state, even for a failed request.
+   */
+  async create(input: NewUserRow, executor: Kysely<Database> = db): Promise<UserRow> {
+    return executor
       .insertInto('users')
       .values({
         email: input.email,

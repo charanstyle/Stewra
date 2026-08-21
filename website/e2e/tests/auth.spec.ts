@@ -47,9 +47,10 @@ test.describe('auth', () => {
   // code out of the real mailbox the way a person reads their inbox, type it into
   // /verify-email, land on /today.
   //
-  // Gated on E2E_SIGNUP_MAILBOX because it is not free to run: accounts cannot be deleted
-  // afterwards (`audit_log` references `users` with ON DELETE SET NULL, and the append-only
-  // trigger rejects that UPDATE), so each run leaves one permanent account behind.
+  // Gated on E2E_SIGNUP_MAILBOX because it needs a mailbox a machine can read. Each run leaves
+  // one account behind — no longer a *permanent* one: migration 062 fixed the append-only trigger
+  // that rejected the `audit_log` SET NULL, so these can now be removed the way a user would, and
+  // `accountDeletion.spec.ts` does exactly that with an account it creates itself.
   test('complete sign-up / email verification via UI', async ({ browser }) => {
     // The suite default is 120s, and `waitForVerificationCode` alone budgets DEFAULT_TIMEOUT_MS =
     // 120_000 (mailbox.mjs) — so on a perfectly healthy site the mail poll can consume the entire
@@ -59,7 +60,7 @@ test.describe('auth', () => {
     test.skip(
       !config.signup.enabled,
       'set E2E_SIGNUP_MAILBOX (+ E2E_SIGNUP_SSH_HOST, E2E_SIGNUP_IMAP_CONTAINER) to run — ' +
-        'each run permanently creates one account that cannot be deleted',
+        'each run creates one real account',
     );
 
     // A fresh address per run: re-using one would hit "email already registered" and test

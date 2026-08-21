@@ -1,0 +1,4 @@
+{
+  "//": "Scopes ES-module semantics to this directory only. The suite is native ESM with .ts imports (Node strips the types), while frontend/ itself is a Metro-bundled Expo app whose module type must not change. No name/version: this is a module-type marker, not a package — frontend/ is listed verbatim in the root workspaces array, so nothing globs this in.",
+  "type": "module"
+}
