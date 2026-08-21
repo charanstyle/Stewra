@@ -23,6 +23,8 @@ import mediaRoutes from './routes/media.js';
 import homeRoutes from './routes/home.js';
 import channelsRoutes from './routes/channels.js';
 import runnerRoutes from './routes/runner.js';
+import orgRunnerRoutes from './routes/orgRunner.js';
+import projectRoutes from './routes/projects.js';
 import githubAppRoutes from './routes/githubApp.js';
 import whatsappWebhookRoutes from './routes/whatsappWebhook.js';
 import orgRoutes from './tenancy/routes/organizations.js';
@@ -116,6 +118,11 @@ export function createApp(): Express {
   // Organizations — an install-wide primitive (backend/src/tenancy/), not a commerce concept: every
   // account is a tenant, so both planes scope by the same org id.
   app.use('/orgs', orgRoutes);
+  // Org-scoped runner plane and projects (migrations 064/065). Both routers use `mergeParams`, so the
+  // `:orgId` captured here reaches their `requireOrgMember`. The legacy `/runner` above resolves the
+  // caller's acting org and calls the same services.
+  app.use('/orgs/:orgId/runner', orgRunnerRoutes);
+  app.use('/orgs/:orgId/projects', projectRoutes);
   // Commerce plane — a separate bounded context (backend/src/commerce/), scoped by org_id rather
   // than user_id. Nothing under here shares tables with the personal-assistant routes above.
   //

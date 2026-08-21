@@ -13,7 +13,10 @@ import { config } from '../config/unifiedConfig.js';
 import { modelClient } from '../agent-host/modelClient.js';
 import { messageRepository } from '../repositories/messageRepository.js';
 import { runnerService } from './runnerService.js';
+import type { OrgActor } from './runnerService.js';
 import { runnerSessionService } from './runnerSessionService.js';
+import { organizationService } from '../tenancy/services/organizationService.js';
+import { ChoiceRequiredError } from '../utils/errors.js';
 import {
   runnerChatRelayService,
   type RunnerChatChannel,
@@ -178,12 +181,17 @@ class RunnerIntentService {
       return null;
     }
 
-    const { devices } = await runnerService.listDevices(userId);
+    // A chat carries no `:orgId`. The org is the one the person is acting in; with several and no
+    // active one, the honest answer is a question — never the first membership.
+    const actor = await this.resolveActor(userId);
+    if (typeof actor === 'string') return { reply: actor, proposal: null };
+
+    const { devices } = await runnerService.listDevices(actor.orgId);
     // A cloud runner counts as available even when its container is stopped: starting it is Stewra's
     // job, and `startSession` wakes it. Only a machine of the user's own is genuinely unreachable when
     // offline — nothing here can turn a laptop on.
     const online = devices.filter((d) => d.online || d.kind === 'hosted');
-    const sessions = (await runnerSessionService.listSessions(userId)).sessions;
+    const sessions = (await runnerSessionService.listSessions(actor.orgId)).sessions;
 
     const context = this.buildContext(
       online,
@@ -248,18 +256,35 @@ class RunnerIntentService {
       case 'decline_proposal':
         return this.decline(pendingProposalMessage, data.reply);
       case 'permission_allow':
-        return this.decidePermission(userId, pendingPermission, true, data.reply);
+        return this.decidePermission(actor, pendingPermission, true, data.reply);
       case 'permission_deny':
-        return this.decidePermission(userId, pendingPermission, false, data.reply);
+        return this.decidePermission(actor, pendingPermission, false, data.reply);
       case 'push_session':
-        return this.push(userId, sessions, data.reply);
+        return this.push(actor, sessions, data.reply);
       case 'open_pr':
-        return this.openPr(userId, sessions, data.reply);
+        return this.openPr(actor, sessions, data.reply);
       case 'cancel_session':
-        return this.cancelSession(userId, sessions, data.reply);
+        return this.cancelSession(actor, sessions, data.reply);
       case 'none':
       default:
         return null;
+    }
+  }
+
+  /**
+   * The org a chat turn acts in, or the sentence to send back when that is a question. Zero memberships
+   * is impossible by construction (every account is an org) and so is left to throw.
+   */
+  private async resolveActor(userId: string): Promise<OrgActor | string> {
+    try {
+      const { orgId } = await organizationService.resolveActingOrg(userId);
+      return { orgId, userId };
+    } catch (error) {
+      if (error instanceof ChoiceRequiredError) {
+        const names = error.details.map((d) => d.message).join(', ');
+        return `Which organization do you mean — ${names}? Pick one in Stewra under Organizations ("Use this one when I text Stewra"), then ask again.`;
+      }
+      throw error;
     }
   }
 
@@ -365,8 +390,10 @@ class RunnerIntentService {
     conversationId: string,
     channel: RunnerChatChannel,
   ): Promise<{ started: boolean; reply: string }> {
+    const actor = await this.resolveActor(userId);
+    if (typeof actor === 'string') return { started: false, reply: actor };
     try {
-      const session = await runnerSessionService.startSession(userId, {
+      const session = await runnerSessionService.startSession(actor, {
         deviceId: proposal.deviceId,
         harness: proposal.harness,
         workspaceId: proposal.workspaceId,
@@ -436,7 +463,7 @@ class RunnerIntentService {
 
   /** Relay the user's yes/no on a blocked session's permission gate back down to the runner. */
   private async decidePermission(
-    userId: string,
+    { orgId, userId }: OrgActor,
     pending: ReturnType<typeof runnerChatRelayService.latestPendingPermission>,
     allow: boolean,
     modelReply: string,
@@ -449,7 +476,7 @@ class RunnerIntentService {
       return { reply: 'I couldn\'t find a matching option for that on the session.', proposal: null };
     }
     try {
-      await runnerSessionService.decidePermission(userId, pending.sessionId, pending.promptId, optionId);
+      await runnerSessionService.decidePermission(orgId, pending.sessionId, pending.promptId, optionId);
       runnerChatRelayService.clearPermission(pending.sessionId);
       const fallback = allow ? 'Approved — carrying on.' : 'Denied — I told it not to.';
       return { reply: modelReply.trim().length > 0 ? modelReply.trim() : fallback, proposal: null };
@@ -471,7 +498,7 @@ class RunnerIntentService {
 
   /** Push the most recent finished-with-branch session's branch to its remote. */
   private async push(
-    userId: string,
+    { orgId }: OrgActor,
     sessions: readonly RunnerSession[],
     modelReply: string,
   ): Promise<RunnerIntentOutcome | null> {
@@ -482,7 +509,7 @@ class RunnerIntentService {
       return { reply: 'There\'s no finished session with a branch to push.', proposal: null };
     }
     try {
-      const { remoteUrl } = await runnerSessionService.pushSession(userId, target.id);
+      const { remoteUrl } = await runnerSessionService.pushSession(orgId, target.id);
       const where = remoteUrl ? ` to ${remoteUrl}` : '';
       return {
         reply: modelReply.trim().length > 0 ? modelReply.trim() : `Pushed ${target.branch}${where}.`,
@@ -495,7 +522,7 @@ class RunnerIntentService {
 
   /** Open a PR for the most recent finished-with-branch session. */
   private async openPr(
-    userId: string,
+    { orgId }: OrgActor,
     sessions: readonly RunnerSession[],
     modelReply: string,
   ): Promise<RunnerIntentOutcome | null> {
@@ -509,7 +536,7 @@ class RunnerIntentService {
     const title = firstLine !== undefined && firstLine.length > 0 ? firstLine.slice(0, 120) : 'Stewra runner session';
     const body = target.summary ?? target.prompt;
     try {
-      const { prUrl } = await runnerSessionService.openPr(userId, target.id, title, body);
+      const { prUrl } = await runnerSessionService.openPr(orgId, target.id, title, body);
       return {
         reply: modelReply.trim().length > 0 ? modelReply.trim() : `Opened a pull request: ${prUrl}`,
         proposal: null,
@@ -521,7 +548,7 @@ class RunnerIntentService {
 
   /** Stop the most recent still-running session. */
   private async cancelSession(
-    userId: string,
+    { orgId }: OrgActor,
     sessions: readonly RunnerSession[],
     modelReply: string,
   ): Promise<RunnerIntentOutcome | null> {
@@ -530,7 +557,7 @@ class RunnerIntentService {
       return { reply: 'You don\'t have a running session to stop.', proposal: null };
     }
     try {
-      await runnerSessionService.cancel(userId, target.id);
+      await runnerSessionService.cancel(orgId, target.id);
       return {
         reply: modelReply.trim().length > 0 ? modelReply.trim() : `Stopping the session on ${target.deviceName}.`,
         proposal: null,

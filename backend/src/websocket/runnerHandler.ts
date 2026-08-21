@@ -22,7 +22,7 @@ import { hostedRunnerService } from '../services/hostedRunnerService.js';
 import { runnerService } from '../services/runnerService.js';
 import { runnerSessionService } from '../services/runnerSessionService.js';
 import { logger } from '../utils/logger.js';
-import { runnerUserRoom } from './runnerTypes.js';
+import { runnerDeviceRoom, runnerOrgRoom } from './runnerTypes.js';
 import type { RunnerSocketLike } from './runnerTypes.js';
 
 /**
@@ -134,25 +134,27 @@ function normalizeWorkspace(w: z.infer<typeof workspaceSchema>): RunnerWorkspace
  * session-done, and permission-request.
  */
 export function registerRunnerHandler(socket: RunnerSocketLike): void {
-  const { userId, deviceId, deviceKind } = socket.data;
+  const { userId, deviceId, deviceKind, orgId } = socket.data;
 
-  // The door check. `runnerAuthMiddleware` sets `deviceId` on every socket that gets this far, so this can
-  // only fire if something is wired wrong — and a runner whose device we cannot name is one we cannot
-  // revoke or address. It gets no events.
-  if (deviceId === undefined) {
+  // The door check. `runnerAuthMiddleware` sets `deviceId` and `orgId` on every socket that gets this
+  // far, so this can only fire if something is wired wrong — and a runner whose device or tenant we
+  // cannot name is one we cannot revoke, address, or list. It gets no events.
+  if (deviceId === undefined || orgId === undefined) {
     // Same wiring fault as bridgeHandler's door check, and the same reason it must page rather than log.
-    Sentry.captureMessage('runner: connection without a device id; refusing', {
+    Sentry.captureMessage('runner: connection without a device or org id; refusing', {
       level: 'error',
       tags: { surface: 'runner_handler' },
       extra: { userId, socketId: socket.id },
     });
-    logger.error('runner: connection without a device id; refusing', { userId, socketId: socket.id });
+    logger.error('runner: connection without a device or org id; refusing', { userId, socketId: socket.id });
     socket.disconnect();
     return;
   }
 
-  // Joined so the user's machines can be enumerated (online dots) and a session can be addressed to one.
-  void socket.join(runnerUserRoom(userId));
+  // The device room is how a session is addressed to THIS machine; the org room is how the org's
+  // machines are enumerated for the online dots.
+  void socket.join(runnerDeviceRoom(deviceId));
+  void socket.join(runnerOrgRoom(orgId));
 
   /** Run a handler, capturing anything it throws — a bad frame must never take the connection down. */
   const guard = (event: string, fn: () => Promise<void>): void => {
@@ -217,12 +219,16 @@ export function registerRunnerHandler(socket: RunnerSocketLike): void {
 
   // ── Session lifecycle: a runner's reports about the agent runs it is hosting ─────────────────────────
   // Each is validated (a bad frame is dropped, never allowed to move a session), then handed to the
-  // session service, which persists the transition and relays it to the user watching on the main socket.
+  // session service, which persists the transition and relays it to the member who started the session.
+  // The service is given the DEVICE id, never the pairer's user id: a runner's authority is "this
+  // machine", and the session row — not the socket — says which person is watching.
 
   socket.on(RUNNER_CLIENT_EVENTS.SESSION_UPDATE, (raw: unknown) => {
     const parsed = updateSchema.safeParse(raw);
     if (!parsed.success) return;
-    runnerSessionService.handleUpdate(userId, toUpdatePayload(parsed.data));
+    guard(RUNNER_CLIENT_EVENTS.SESSION_UPDATE, () =>
+      runnerSessionService.handleUpdate(deviceId, toUpdatePayload(parsed.data)),
+    );
   });
 
   socket.on(RUNNER_CLIENT_EVENTS.PERMISSION_REQUEST, (raw: unknown) => {
@@ -232,7 +238,7 @@ export function registerRunnerHandler(socket: RunnerSocketLike): void {
       return;
     }
     guard(RUNNER_CLIENT_EVENTS.PERMISSION_REQUEST, () =>
-      runnerSessionService.handlePermissionRequest(userId, toPermissionPayload(parsed.data)),
+      runnerSessionService.handlePermissionRequest(deviceId, toPermissionPayload(parsed.data)),
     );
   });
 
@@ -243,7 +249,7 @@ export function registerRunnerHandler(socket: RunnerSocketLike): void {
       return;
     }
     guard(RUNNER_CLIENT_EVENTS.SESSION_DONE, () =>
-      runnerSessionService.handleDone(userId, toDonePayload(parsed.data)),
+      runnerSessionService.handleDone(deviceId, toDonePayload(parsed.data)),
     );
   });
 

@@ -17,6 +17,7 @@ import type { redis } from '../services/redisClient.js';
 import type { runnerService } from '../services/runnerService.js';
 import type { runnerDeviceRepository } from '../repositories/runnerDeviceRepository.js';
 import type { initSockets } from '../websocket/index.js';
+import type { organizationRepository } from '../tenancy/repositories/organizationRepository.js';
 
 /**
  * The server side of the Stewra Runner, end to end and with nothing stood in for.
@@ -50,6 +51,7 @@ process.env['RUNNER_MIN_VERSION'] = MIN_VERSION;
 process.env['RUNNER_LATEST_VERSION'] = LATEST_VERSION;
 
 interface Graph {
+  readonly organizationRepository: typeof organizationRepository;
   readonly initSockets: typeof initSockets;
   readonly service: typeof runnerService;
   readonly repository: typeof runnerDeviceRepository;
@@ -68,7 +70,9 @@ async function loadGraph(enabled: boolean): Promise<Graph> {
   const { redis } = await import('../services/redisClient.js');
   const errors = await import('../utils/errors.js');
   const database = await import('../database/index.js');
+  const { organizationRepository } = await import('../tenancy/repositories/organizationRepository.js');
   return {
+    organizationRepository,
     initSockets,
     service: runnerService,
     repository: runnerDeviceRepository,
@@ -139,7 +143,24 @@ async function createUser(): Promise<string> {
     .returning('id')
     .executeTakeFirstOrThrow();
   createdUsers.push(row.id);
+  // Every account is a tenant: the runner plane is org-scoped, so a user without an org cannot pair.
+  const { org } = await on.organizationRepository.create({
+    name: 'Runner Test Org',
+    slug: `runner-test-${randomUUID()}`,
+    kind: 'individual',
+    createdBy: row.id,
+  });
+  orgOf.set(row.id, org.id);
   return row.id;
+}
+
+const orgOf = new Map<string, string>();
+
+/** The `{orgId, userId}` pair the services take, for a user made by `createUser`. */
+function actor(userId: string): { orgId: string; userId: string } {
+  const orgId = orgOf.get(userId);
+  if (orgId === undefined) throw new Error(`no org recorded for test user ${userId}`);
+  return { orgId, userId };
 }
 
 /** Pairing code minted and burned through the real service — the state most tests start from. */
@@ -147,7 +168,7 @@ async function pairDevice(
   userId: string,
   appVersion = MIN_VERSION,
 ): Promise<{ token: string; deviceId: string }> {
-  const { code } = await on.service.startPairing(userId);
+  const { code } = await on.service.startPairing(actor(userId));
   const claimed = await on.service.claimToken({
     code,
     deviceName: "Robin's MacBook",
@@ -284,7 +305,7 @@ describe('pairing', () => {
   it('mints a copyable code, burns it for a token, and registers the device for real', async () => {
     const userId = await createUser();
 
-    const pairing = await on.service.startPairing(userId);
+    const pairing = await on.service.startPairing(actor(userId));
     // The user copies this by hand into a terminal — the alphabet has no O/0, I/1, S/5, B/8.
     expect(pairing.code).toMatch(/^STEWRA-[ACDEFGHJKLMNPQRTUVWXYZ2346789]{8}$/);
     expect(pairing.downloadUrl).toBe(DOWNLOAD_URL);
@@ -308,6 +329,8 @@ describe('pairing', () => {
       .where('id', '=', claimed.device.id)
       .executeTakeFirstOrThrow();
     expect(row.user_id).toBe(userId);
+    // The org travels from the pairing code onto the device — the machine never supplied it.
+    expect(row.org_id).toBe(actor(userId).orgId);
     expect(row.token_hash).not.toContain(claimed.token);
 
     // Linking a machine that can run code is audited.
@@ -321,7 +344,7 @@ describe('pairing', () => {
 
   it('refuses a build below the version floor BEFORE burning the code', async () => {
     const userId = await createUser();
-    const { code } = await on.service.startPairing(userId);
+    const { code } = await on.service.startPairing(actor(userId));
 
     await expect(
       on.service.claimToken({ code, deviceName: 'Old Build', appVersion: '0.1.0', os: 'darwin' }),
@@ -346,14 +369,14 @@ describe('pairing', () => {
     ).rejects.toBeInstanceOf(on.errors.AuthenticationError);
 
     // Already used.
-    const { code } = await on.service.startPairing(userId);
+    const { code } = await on.service.startPairing(actor(userId));
     await on.service.claimToken({ code, deviceName: 'First', appVersion: MIN_VERSION, os: 'darwin' });
     await expect(
       on.service.claimToken({ code, deviceName: 'Second', appVersion: MIN_VERSION, os: 'darwin' }),
     ).rejects.toBeInstanceOf(on.errors.AuthenticationError);
 
     // Expired — the clock is moved on the real row, and the WHERE clause is what enforces it.
-    const { code: expired } = await on.service.startPairing(userId);
+    const { code: expired } = await on.service.startPairing(actor(userId));
     await on.db
       .updateTable('runner_pair_codes')
       .set({ expires_at: new Date(Date.now() - 60_000) })
@@ -366,8 +389,8 @@ describe('pairing', () => {
 
   it('invalidates the previous unconsumed code when a new one is minted', async () => {
     const userId = await createUser();
-    const first = await on.service.startPairing(userId);
-    const second = await on.service.startPairing(userId);
+    const first = await on.service.startPairing(actor(userId));
+    const second = await on.service.startPairing(actor(userId));
 
     // Only the code the user was most recently shown can work.
     await expect(
@@ -384,7 +407,7 @@ describe('pairing', () => {
 
   it('lets exactly one of two racing claims win the same code', async () => {
     const userId = await createUser();
-    const { code } = await on.service.startPairing(userId);
+    const { code } = await on.service.startPairing(actor(userId));
 
     // The atomic guard is the UPDATE's WHERE clause — two racing claims cannot both match the row.
     const results = await Promise.allSettled([
@@ -420,7 +443,12 @@ describe('authenticateRunner', () => {
 
     // `kind` travels with the identity because hosted-only endpoints decide on it. A device that came
     // through PAIRING is 'local', always — that is the laptop invariant's first link.
-    await expect(on.service.authenticateRunner(token)).resolves.toEqual({ deviceId, userId, kind: 'local' });
+    await expect(on.service.authenticateRunner(token)).resolves.toEqual({
+      deviceId,
+      orgId: actor(userId).orgId,
+      userId,
+      kind: 'local',
+    });
     await expect(on.service.authenticateRunner('stwrn_forged')).resolves.toBeNull();
   });
 });
@@ -439,18 +467,18 @@ describe('a runner on the /runner namespace', () => {
     const userId = await createUser();
     const { token, deviceId } = await pairDevice(userId);
 
-    const before = await on.service.listDevices(userId);
+    const before = await on.service.listDevices(actor(userId).orgId);
     expect(before.devices.find((d) => d.id === deviceId)?.online).toBe(false);
 
     const runner = await connectRunner(token);
     await waitFor('the device to show online', async () => {
-      const { devices } = await on.service.listDevices(userId);
+      const { devices } = await on.service.listDevices(actor(userId).orgId);
       return devices.find((d) => d.id === deviceId)?.online === true;
     });
 
     runner.socket.disconnect();
     await waitFor('the device to show offline', async () => {
-      const { devices } = await on.service.listDevices(userId);
+      const { devices } = await on.service.listDevices(actor(userId).orgId);
       return devices.find((d) => d.id === deviceId)?.online === false;
     });
   });
@@ -463,7 +491,7 @@ describe('a runner on the /runner namespace', () => {
     runner.hello(LATEST_VERSION);
 
     const device = await waitFor('the hello to be persisted', async () => {
-      const { devices } = await on.service.listDevices(userId);
+      const { devices } = await on.service.listDevices(actor(userId).orgId);
       const d = devices.find((x) => x.id === deviceId);
       return d !== undefined && d.harnesses.length > 0 ? d : null;
     });
@@ -485,7 +513,7 @@ describe('a runner on the /runner namespace', () => {
     // Without this the row keeps MIN_VERSION forever, and the panel goes on telling a user who HAS
     // upgraded that they are out of date — a nag with no action that clears it.
     const device = await waitFor('the reported version to be persisted', async () => {
-      const { devices } = await on.service.listDevices(userId);
+      const { devices } = await on.service.listDevices(actor(userId).orgId);
       const d = devices.find((x) => x.id === deviceId);
       return d !== undefined && d.appVersion === LATEST_VERSION ? d : null;
     });
@@ -519,7 +547,7 @@ describe('revokeDevice', () => {
     const { token, deviceId } = await pairDevice(userId);
     const runner = await connectRunner(token);
 
-    const revoked = await on.service.revokeDevice(userId, deviceId);
+    const revoked = await on.service.revokeDevice(actor(userId), deviceId);
     expect(revoked).toBe(true);
 
     // The runner is told to stop NOW, then cut off.
@@ -532,14 +560,14 @@ describe('revokeDevice', () => {
     await expect(refusedRunner({ token })).resolves.toBeInstanceOf(Error);
   });
 
-  it("changes nothing when the device id is someone else's, or nobody's", async () => {
+  it("changes nothing when the device id is another org's, or nobody's", async () => {
     const owner = await createUser();
-    const stranger = await createUser();
+    const stranger = await createUser(); // Their own org — the device is not in it.
     const { token, deviceId } = await pairDevice(owner);
     const runner = await connectRunner(token);
 
-    await expect(on.service.revokeDevice(stranger, deviceId)).resolves.toBe(false);
-    await expect(on.service.revokeDevice(owner, randomUUID())).resolves.toBe(false);
+    await expect(on.service.revokeDevice(actor(stranger), deviceId)).resolves.toBe(false);
+    await expect(on.service.revokeDevice(actor(owner), randomUUID())).resolves.toBe(false);
 
     // A revoke that deleted nothing must not knock a live runner off.
     await sleep(QUIET_MS);
@@ -557,7 +585,7 @@ describe('with RUNNER_ENABLED=false', () => {
     const userId = await createUser();
     const { token } = await pairDevice(userId); // Minted through the enabled graph; same database.
 
-    await expect(off.service.startPairing(userId)).rejects.toBeInstanceOf(
+    await expect(off.service.startPairing(actor(userId))).rejects.toBeInstanceOf(
       off.errors.ServiceUnavailableError,
     );
     await expect(
@@ -566,7 +594,7 @@ describe('with RUNNER_ENABLED=false', () => {
     // Even a genuinely valid token is nothing here — the flag gates the trust root itself.
     await expect(off.service.authenticateRunner(token)).resolves.toBeNull();
 
-    const status = await off.service.getStatus(userId);
+    const status = await off.service.getStatus(actor(userId).orgId);
     expect(status.enabled).toBe(false);
     expect(status.devices).toEqual([]);
   });

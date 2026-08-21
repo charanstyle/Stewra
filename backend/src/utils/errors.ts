@@ -1,8 +1,19 @@
 /** Operational error hierarchy. Controllers throw these; the error middleware renders them. */
+export interface ErrorDetail {
+  readonly field: string;
+  readonly message: string;
+}
+
 export abstract class AppError extends Error {
   abstract readonly statusCode: number;
   abstract readonly code: string;
   readonly isOperational = true;
+  /**
+   * Structured, client-renderable particulars. Empty for most errors; a validation error lists the
+   * offending fields, a choice-required error lists the candidates. The error middleware serialises this
+   * for every AppError, so a subclass that has something to say only has to set it.
+   */
+  readonly details: ReadonlyArray<ErrorDetail> = [];
 
   constructor(message: string) {
     super(message);
@@ -14,11 +25,29 @@ export abstract class AppError extends Error {
 export class ValidationError extends AppError {
   readonly statusCode = 400;
   readonly code = 'VALIDATION_ERROR';
-  readonly details: ReadonlyArray<{ field: string; message: string }>;
+  override readonly details: ReadonlyArray<ErrorDetail>;
 
-  constructor(message: string, details: ReadonlyArray<{ field: string; message: string }> = []) {
+  constructor(message: string, details: ReadonlyArray<ErrorDetail> = []) {
     super(message);
     this.details = details;
+  }
+}
+
+/**
+ * The request is valid but under-specified, and the server refuses to pick: a project bound on two
+ * machines with no machine named, a member of two orgs with no org named. `details` carries the
+ * candidates (`field` = the id the client must send back, `message` = its human name) so the client can
+ * ask the person instead of the server guessing — picking for them would be behaviour that changes with
+ * transient state, which is a fallback by another name.
+ */
+export class ChoiceRequiredError extends AppError {
+  readonly statusCode = 409;
+  readonly code = 'CHOICE_REQUIRED';
+  override readonly details: ReadonlyArray<ErrorDetail>;
+
+  constructor(message: string, candidates: ReadonlyArray<ErrorDetail>) {
+    super(message);
+    this.details = candidates;
   }
 }
 

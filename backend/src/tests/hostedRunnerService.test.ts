@@ -296,6 +296,7 @@ const errors = (await import('../utils/errors.js')) as typeof errorTypes;
 const database = (await import('../database/index.js')) as { db: typeof db; closeDb: typeof closeDb };
 const { redis: redisClient } = (await import('../services/redisClient.js')) as { redis: typeof redis };
 const runnerRouter = (await import('../routes/runner.js')).default;
+const { organizationRepository: orgRepo } = await import('../tenancy/repositories/organizationRepository.js');
 const { errorHandler } = await import('../middleware/errorHandler.js');
 
 /**
@@ -330,7 +331,24 @@ async function createUser(): Promise<string> {
     .returning('id')
     .executeTakeFirstOrThrow();
   createdUsers.push(row.id);
+  // Every account is a tenant: provisioning resolves the user's acting org, so the user needs one.
+  const { org } = await orgRepo.create({
+    name: 'Hosted Runner Test Org',
+    slug: `hosted-runner-test-${randomUUID()}`,
+    kind: 'individual',
+    createdBy: row.id,
+  });
+  orgOf.set(row.id, org.id);
   return row.id;
+}
+
+const orgOf = new Map<string, string>();
+
+/** The `{orgId, userId}` pair the services take, for a user made by `createUser`. */
+function actor(userId: string): { orgId: string; userId: string } {
+  const orgId = orgOf.get(userId);
+  if (orgId === undefined) throw new Error(`no org recorded for test user ${userId}`);
+  return { orgId, userId };
 }
 
 /** A user with the GitHub App installed on `repoCount` repositories — the precondition for provisioning. */
@@ -369,6 +387,7 @@ async function deviceRow(deviceId: string): Promise<{
 /** Register a local (paired) device the way the pairing path does, to prove the two kinds stay apart. */
 async function pairLocalDevice(userId: string): Promise<{ deviceId: string; token: string }> {
   const { device, token } = await deviceRepo.registerDevice({
+    orgId: actor(userId).orgId,
     userId,
     name: "Robin's laptop",
     appVersion: '0.2.0',
@@ -434,6 +453,8 @@ describe('provision', () => {
     expect(deviceToken).toMatch(/^stwrn_/);
     await expect(runners.authenticateRunner(deviceToken)).resolves.toEqual({
       deviceId: runner.id,
+      // A hosted runner is provisioned into the user's acting org — resolved, never supplied.
+      orgId: actor(userId).orgId,
       userId,
       kind: 'hosted',
     });
@@ -586,7 +607,7 @@ describe('lifecycle', () => {
     const container = containers.get(runner.id);
     const deviceToken = container?.env['STEWRA_RUNNER_DEVICE_TOKEN'] ?? '';
 
-    await expect(runners.revokeDevice(userId, runner.id)).resolves.toBe(true);
+    await expect(runners.revokeDevice(actor(userId),runner.id)).resolves.toBe(true);
 
     // The token died with the row — that is the security-relevant half, and it does not wait on Docker.
     await expect(runners.authenticateRunner(deviceToken)).resolves.toBeNull();
@@ -599,7 +620,7 @@ describe('lifecycle', () => {
     const { deviceId } = await pairLocalDevice(userId);
     const destroyedBefore = destroyed.length;
 
-    await expect(runners.revokeDevice(userId, deviceId)).resolves.toBe(true);
+    await expect(runners.revokeDevice(actor(userId),deviceId)).resolves.toBe(true);
 
     expect(destroyed.length).toBe(destroyedBefore);
   });
@@ -660,7 +681,7 @@ describe('runner-facing endpoints', () => {
     const userId = await createUserWithGithub();
     const runner = await service.provision(userId, {});
     const token = containers.get(runner.id)?.env['STEWRA_RUNNER_DEVICE_TOKEN'] ?? '';
-    await runners.revokeDevice(userId, runner.id);
+    await runners.revokeDevice(actor(userId),runner.id);
 
     expect((await call('POST', '/api/runner/git-credentials', token)).status).toBe(401);
     expect((await call('POST', '/api/runner/git-credentials', 'stwrn_forged')).status).toBe(401);
@@ -773,6 +794,7 @@ describe('idleStop', () => {
     await database.db
       .insertInto('runner_sessions')
       .values({
+        org_id: actor(userId).orgId,
         user_id: userId,
         device_id: runner.id,
         device_name: 'Stewra Cloud Runner',
@@ -802,7 +824,7 @@ describe('wakeAndAwait', () => {
 
     // No socket namespace is mounted in this suite, so the runner can never say hello — which is
     // exactly the timeout path, and it must answer false rather than hang or throw.
-    const woke = await service.wakeAndAwait(userId, runner.id);
+    const woke = await service.wakeAndAwait(runner.id);
 
     expect(woke).toBe(false);
     // It DID start the container: the failure is "did not connect in time", not "did not try".
@@ -815,7 +837,7 @@ describe('wakeAndAwait', () => {
     await service.stop(userId);
     failOnce.add('POST /v1/runners/:id/start');
 
-    await expect(service.wakeAndAwait(userId, runner.id)).resolves.toBe(false);
+    await expect(service.wakeAndAwait(runner.id)).resolves.toBe(false);
     expect((await deviceRow(runner.id))?.container_status).toBe('failed');
   });
 });

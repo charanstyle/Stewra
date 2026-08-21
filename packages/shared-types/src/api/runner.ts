@@ -1,5 +1,5 @@
 import type { RunnerDevice, RunnerSession } from '../models/runner';
-import type { RunnerHarnessId } from '../realtime/runner';
+import type { RunnerEnvironment, RunnerHarnessId } from '../realtime/runner';
 import type { ISODateString } from '../common/base';
 
 /**
@@ -22,6 +22,38 @@ export interface StartRunnerPairingResponse {
   readonly expiresAt: ISODateString;
   /** Where to get the runner. Config-driven — never a hardcoded URL in a client. */
   readonly downloadUrl: string;
+  /**
+   * The organization a machine redeeming this code will join. Shown on the pairing screen so the person
+   * typing the code knows which tenant they are handing the machine to. The runner itself never learns
+   * it — `/runner/runner-token` keeps its shape.
+   */
+  readonly orgId: string;
+  readonly orgName: string;
+}
+
+// ── Org-scoped device management (`/orgs/:orgId/runner/devices`) ───────────────────────────────────
+
+/** PATCH /orgs/:orgId/runner/devices/:id — rename, or relabel development/production. Admin. */
+export interface UpdateRunnerDeviceRequest {
+  readonly name?: string;
+  readonly environment?: RunnerEnvironment;
+}
+
+export interface UpdateRunnerDeviceResponse {
+  readonly device: RunnerDevice;
+}
+
+/**
+ * POST /orgs/:orgId/runner/devices/:id/move — move a machine to another organization the caller is an
+ * admin of. Only the person who PAIRED the device may move it (it is their machine), and only out of
+ * the org in the path. Existing sessions are not reassigned: history records what was true.
+ */
+export interface MoveRunnerDeviceRequest {
+  readonly toOrgId: string;
+}
+
+export interface MoveRunnerDeviceResponse {
+  readonly device: RunnerDevice;
 }
 
 /**
@@ -81,6 +113,20 @@ export interface StartRunnerSessionRequest {
 
 export interface StartRunnerSessionResponse {
   readonly session: RunnerSession;
+}
+
+/**
+ * POST /orgs/:orgId/runner/sessions — start a session on a PROJECT. The server finds where the project
+ * is bound; `deviceId` is needed only when it is bound on more than one machine. When it is and none
+ * is named, the server answers 409 with code `CHOICE_REQUIRED` and one `details` entry per candidate
+ * (`field` = the device id, `message` = its name). It does not pick: choosing the online one would be
+ * behaviour that changes with transient state.
+ */
+export interface StartOrgRunnerSessionRequest {
+  readonly projectId: string;
+  readonly deviceId?: string;
+  readonly harness: RunnerHarnessId;
+  readonly prompt: string;
 }
 
 /** POST /runner/sessions/:id/prompt — a follow-up turn in an existing session. */

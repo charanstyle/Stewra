@@ -100,6 +100,15 @@ export const RUNNER_DEVICE_KINDS = ['local', 'hosted'] as const;
 export type RunnerDeviceKind = (typeof RUNNER_DEVICE_KINDS)[number];
 
 /**
+ * What a machine is FOR, as labelled by the user in the fleet UI. The label is a gate, not a note: a
+ * session on a `production` machine requires a typed confirmation before it starts, because the
+ * alternative is a label that means nothing. Every device starts as `development`; promoting one is a
+ * deliberate act on its row.
+ */
+export const RUNNER_ENVIRONMENTS = ['development', 'production'] as const;
+export type RunnerEnvironment = (typeof RUNNER_ENVIRONMENTS)[number];
+
+/**
  * What Stewra last saw of a hosted runner's container. Advisory, not authoritative — Docker (through
  * the provisioner) is the truth, and an hourly reconcile corrects drift such as a host reboot.
  *
@@ -187,6 +196,12 @@ export const RUNNER_SERVER_EVENTS = {
    * instruction would be an update channel with the attack surface of remote code execution.
    */
   UPDATE_AVAILABLE: 'runner:update-available',
+  /**
+   * Re-scan the declared workspace roots and say `hello` again. Sent when a person presses Rescan on the
+   * fleet page — typically after remounting the volume the checkouts live on — so the runner's reported
+   * workspaces catch up without a restart. `hello` otherwise fires only on connect.
+   */
+  RESCAN: 'runner:rescan',
 } as const;
 export type RunnerServerEvent = (typeof RUNNER_SERVER_EVENTS)[keyof typeof RUNNER_SERVER_EVENTS];
 

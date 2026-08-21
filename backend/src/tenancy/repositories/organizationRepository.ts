@@ -192,6 +192,12 @@ class OrganizationRepository {
     return row === undefined ? null : toOrg(row);
   }
 
+  /** One organization by id, or null. Membership is NOT checked here — callers that need that use `findMembership`. */
+  async findById(orgId: string): Promise<Organization | null> {
+    const row = await db.selectFrom('organizations').selectAll().where('id', '=', orgId).executeTakeFirst();
+    return row === undefined ? null : toOrg(row);
+  }
+
   /** The org's kind, or null when there is no such org. */
   async findKind(orgId: string): Promise<OrgKind | null> {
     const row = await db

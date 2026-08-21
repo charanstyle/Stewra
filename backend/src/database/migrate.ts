@@ -67,6 +67,8 @@ import * as m060 from './migrations/060_commerce_store_subscriptions.js';
 import * as m061 from './migrations/061_store_subscription_pending.js';
 import * as m062 from './migrations/062_account_deletion_unblock.js';
 import * as m063 from './migrations/063_account_orgs.js';
+import * as m064 from './migrations/064_runner_org_scope.js';
+import * as m065 from './migrations/065_projects.js';
 import { logger } from '../utils/logger.js';
 
 interface Migration {
@@ -139,6 +141,8 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '061_store_subscription_pending', up: m061.up },
   { name: '062_account_deletion_unblock', up: m062.up },
   { name: '063_account_orgs', up: m063.up },
+  { name: '064_runner_org_scope', up: m064.up },
+  { name: '065_projects', up: m065.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

@@ -53,6 +53,7 @@ import type {
   ResourceKind,
   RunnerContainerStatus,
   RunnerDeviceKind,
+  RunnerEnvironment,
   RunnerHarnessId,
   RunnerHarnessInfo,
   RunnerSessionStatus,
@@ -731,8 +732,13 @@ export interface WhatsappOutboundTable {
  */
 export interface RunnerDevicesTable {
   id: Generated<string>;
+  /** Who PAIRED the machine. Not the tenant — that is `org_id` (064). */
   user_id: string;
+  /** The tenant. Required on insert; there is no personal-vs-org case, every account is an org. */
+  org_id: string;
   name: string;
+  /** development | production, user-labelled (064). Starts as development. */
+  environment: Generated<RunnerEnvironment>;
   /** SHA-256 of the runner token. The plaintext token exists only in the pairing response. */
   token_hash: string;
   app_version: string;
@@ -761,6 +767,8 @@ export interface RunnerDevicesTable {
 export interface RunnerPairCodesTable {
   id: Generated<string>;
   user_id: string;
+  /** The org the redeeming machine will join (064). Written from the `:orgId` path segment only. */
+  org_id: string;
   code: string;
   expires_at: ColumnType<Date, Date, Date>;
   consumed_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
@@ -775,9 +783,16 @@ export interface RunnerPairCodesTable {
  */
 export interface RunnerSessionsTable {
   id: Generated<string>;
+  /** Which MEMBER started the run. The tenant is `org_id`. */
   user_id: string;
+  /** Copied from the device at start (064) — a session is never in a different org from its machine. */
+  org_id: string;
   device_id: string;
   device_name: Generated<string>;
+  /** The project this ran against (065), or NULL for a raw-workspace start. FK RESTRICT. */
+  project_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Snapshot of the project's name at start, so history survives a rename. */
+  project_name: Generated<string>;
   harness: RunnerHarnessId;
   workspace_id: string;
   workspace_name: Generated<string>;
@@ -793,6 +808,46 @@ export interface RunnerSessionsTable {
   created_at: CreatedAt;
   updated_at: ColumnType<Date, Date | undefined, Date>;
   ended_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+}
+
+/**
+ * A project (migration 065): the org-owned, human-named identity of a codebase. `aliases` is a jsonb
+ * string array written as JSON. Archived, never deleted — sessions reference it with RESTRICT.
+ */
+export interface ProjectsTable {
+  id: Generated<string>;
+  org_id: string;
+  name: string;
+  slug: string;
+  repo_name: string;
+  git_remote: ColumnType<string | null, string | null | undefined, string | null>;
+  github_owner: ColumnType<string | null, string | null | undefined, string | null>;
+  github_repo: ColumnType<string | null, string | null | undefined, string | null>;
+  default_branch: Generated<string>;
+  aliases: ColumnType<readonly string[], string | undefined, string>;
+  description: Generated<string>;
+  created_by: ColumnType<string | null, string, string | null>;
+  archived_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, Date | undefined, Date>;
+}
+
+/**
+ * Where a project is checked out on one machine (migration 065). `org_id` is denormalized so the two
+ * composite foreign keys can prove the project and the device share a tenant.
+ */
+export interface ProjectWorkspacesTable {
+  id: Generated<string>;
+  project_id: string;
+  org_id: string;
+  device_id: string;
+  workspace_id: string;
+  workspace_name: string;
+  workspace_path: string;
+  git_remote: ColumnType<string | null, string | null | undefined, string | null>;
+  bound_by: ColumnType<string | null, string, string | null>;
+  last_verified_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  created_at: CreatedAt;
 }
 
 /**
@@ -1581,6 +1636,8 @@ export interface Database {
   runner_devices: RunnerDevicesTable;
   runner_pair_codes: RunnerPairCodesTable;
   runner_sessions: RunnerSessionsTable;
+  projects: ProjectsTable;
+  project_workspaces: ProjectWorkspacesTable;
   github_app_installations: GithubAppInstallationsTable;
   // ── Commerce plane (migrations 038–040). Scoped by org_id, never by user_id. ──
   organizations: OrganizationsTable;

@@ -2,6 +2,7 @@ import type { ISODateString, UUID } from '../common/base';
 import type {
   RunnerContainerStatus,
   RunnerDeviceKind,
+  RunnerEnvironment,
   RunnerHarnessId,
   RunnerHarnessInfo,
   RunnerSessionStatus,
@@ -22,8 +23,15 @@ import type {
  */
 export interface RunnerDevice {
   readonly id: UUID;
+  /**
+   * The organization this machine runs code for. Every device belongs to exactly one; moving it is an
+   * explicit action by the person who paired it. Sessions copy this from the device, never from a client.
+   */
+  readonly orgId: UUID;
   /** User-supplied, e.g. "Robin's MacBook". Shown in the device list; never trusted for anything. */
   readonly name: string;
+  /** `development` or `production`, labelled by the user. A production machine gates session starts. */
+  readonly environment: RunnerEnvironment;
   /** `process.platform` the runner reported (e.g. `darwin`, `linux`) — helps tell machines apart. */
   readonly os: string;
   readonly appVersion: string;
@@ -59,9 +67,18 @@ export interface RunnerDevice {
  */
 export interface RunnerSession {
   readonly id: UUID;
+  /** The tenant — copied from the device at start, so a session can never be in a different org. */
+  readonly orgId: UUID;
   /** The machine this ran on. Not guaranteed to still exist as a device (it may have been revoked). */
   readonly deviceId: UUID;
   readonly deviceName: string;
+  /**
+   * The project this session worked on, when it was started against one. Null for a session started
+   * on a raw workspace that no project was bound to (the pre-projects path, still allowed).
+   */
+  readonly projectId: UUID | null;
+  /** Snapshot of the project's name at start — what the card shows even after a rename or archive. */
+  readonly projectName: string | null;
   readonly harness: RunnerHarnessId;
   readonly workspaceId: string;
   readonly workspaceName: string;

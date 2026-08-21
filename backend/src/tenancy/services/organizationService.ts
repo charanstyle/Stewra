@@ -10,7 +10,13 @@ import { organizationRepository, slugify } from '../repositories/organizationRep
 import { orgInviteEmailRegistry } from '../../ports/orgInviteEmail.js';
 import { config } from '../../config/unifiedConfig.js';
 import { logger } from '../../utils/logger.js';
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../utils/errors.js';
+import {
+  ChoiceRequiredError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '../../utils/errors.js';
 
 /**
  * How long an invite link stays redeemable. A behaviour knob, not a target — seven days is long
@@ -85,6 +91,42 @@ class OrganizationService {
       organizationRepository.findActiveOrgId(userId),
     ]);
     return { memberships, activeOrgId };
+  }
+
+  /**
+   * Which organization a request that carries NO `:orgId` is acting on — the legacy `/runner/*` routes,
+   * the mobile app, and the conversational surface (chat, voice, WhatsApp), none of which name a tenant.
+   *
+   * The rule, in order, and with no fourth step:
+   *   1. exactly one membership → that org (the common case: every account has its individual org);
+   *   2. otherwise the org the user explicitly chose ("use this one when I text Stewra"), if they are
+   *      still a member of it;
+   *   3. otherwise ASK — a 409 `CHOICE_REQUIRED` listing the orgs, so the client puts the question to
+   *      the person.
+   *
+   * There is deliberately no "first membership" default. Picking for the user would start a coding
+   * session under the wrong company, and which company is "first" changes with `created_at` ordering —
+   * a silent choice that drifts is exactly the fallback this codebase forbids.
+   */
+  async resolveActingOrg(userId: string): Promise<{ orgId: string; role: OrgRole }> {
+    const memberships = await organizationRepository.listForUser(userId);
+    if (memberships.length === 0) {
+      // Registration creates the org in the same transaction as the user, so this is a broken account.
+      throw new ConflictError('This account belongs to no organization.');
+    }
+    const only = memberships[0];
+    if (memberships.length === 1 && only !== undefined) {
+      return { orgId: only.org.id, role: only.role };
+    }
+    const activeOrgId = await organizationRepository.findActiveOrgId(userId);
+    const active = memberships.find((m) => m.org.id === activeOrgId);
+    if (active !== undefined) {
+      return { orgId: active.org.id, role: active.role };
+    }
+    throw new ChoiceRequiredError(
+      'Which organization do you mean? Choose one, or set an active organization.',
+      memberships.map((m) => ({ field: m.org.id, message: m.org.name })),
+    );
   }
 
   /**
