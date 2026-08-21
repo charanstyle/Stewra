@@ -82,17 +82,18 @@ describe('recognizing Stewra\'s own clarifying questions', () => {
   // The exact sentences `resolve` produces. Answering one ("on the Mac mini") must be read as the original
   // request with the blank filled in — there is no proposal to confirm, and "There's nothing waiting to
   // start right now." was the bug this guards against.
-  it('matches the three which-machine / which-project / which-checkout asks', () => {
+  it('matches the which-machine / which-project / which-folder asks', () => {
     expect(
-      isClarifyingAsk('LookedTwice is ready on more than one machine — MacBook Pro or Mac mini. Which one?'),
+      isClarifyingAsk('LookedTwice is set up on MacBook Pro and Mac mini — which would you like me to use?'),
     ).toBe(true);
-    expect(isClarifyingAsk('Which project — Stewra, Truetalk? Or name a machine: Mac mini.')).toBe(true);
-    expect(isClarifyingAsk('Which checkout on Mac mini — rank or rank-v2?')).toBe(true);
+    expect(isClarifyingAsk('Which project is this for — Stewra or Truetalk? Or just tell me the machine: Mac mini.')).toBe(true);
+    expect(isClarifyingAsk('Which machine would you like — Mac mini or MacBook Pro?')).toBe(true);
+    expect(isClarifyingAsk('Which folder on Mac mini — rank or rank-v2?')).toBe(true);
   });
 
   it('does not match proposals, refusals, or ordinary replies', () => {
-    expect(isClarifyingAsk("There's nothing waiting to start right now.")).toBe(false);
-    expect(isClarifyingAsk('I\'ll run the test suite on LookedTwice on the Mac mini — shall I start?')).toBe(false);
+    expect(isClarifyingAsk("There's nothing waiting on a go-ahead from you at the moment.")).toBe(false);
+    expect(isClarifyingAsk('Just to confirm: the test suite on LookedTwice, using Mac mini. Shall I go ahead?')).toBe(false);
     expect(isClarifyingAsk(null)).toBe(false);
   });
 
@@ -113,7 +114,7 @@ describe('recognizing Stewra\'s own clarifying questions', () => {
     // was named in the middle piece and must still count for the last one.
     const open = [
       { role: 'user' as const, content: 'run the linter on Sandbox' },
-      { role: 'assistant' as const, content: 'Sandbox is ready on more than one machine — qa-macos or qa-linux. Which one?' },
+      { role: 'assistant' as const, content: 'Sandbox is set up on qa-macos and qa-linux — which would you like me to use?' },
       { role: 'user' as const, content: 'on qa-macos' },
       { role: 'assistant' as const, content: 'What command should I run for the linter — npm run lint or something else?' },
     ];
@@ -125,9 +126,9 @@ describe('recognizing Stewra\'s own clarifying questions', () => {
     const closed = [
       ...open,
       { role: 'user' as const, content: 'npm run lint' },
-      { role: 'assistant' as const, content: 'I\'ll run "npm run lint" on Sandbox (qa-macos). Reply "yes" to start, or tell me what to change.' },
+      { role: 'assistant' as const, content: 'Just to confirm: "npm run lint" on Sandbox, using qa-macos. Shall I go ahead?' },
       { role: 'user' as const, content: 'no' },
-      { role: 'assistant' as const, content: 'Okay, nothing started.' },
+      { role: 'assistant' as const, content: "Understood — I'll leave it." },
     ];
     expect(userNamedDevice(openExchangeUserText(closed, 'run the tests on Sandbox'), 'qa-macos')).toBe(false);
     expect(openExchangeUserText([], 'on the mini')).toBe('on the mini');
@@ -138,12 +139,12 @@ describe('recognizing Stewra\'s own clarifying questions', () => {
     // the gate returned null and the ordinary agent replied that it had no tool to target a machine.
     const asked = [
       { role: 'user' as const, content: 'run npm run lint on Sandbox' },
-      { role: 'assistant' as const, content: 'Sandbox is ready on more than one machine — qa-macos or qa-linux. Which one?' },
+      { role: 'assistant' as const, content: 'Sandbox is set up on qa-macos and qa-linux — which would you like me to use?' },
     ];
     const base = { latestUserText: 'on qa-macos', projects: [project('Sandbox')], hasPendingProposal: false, hasPendingPermission: false };
     expect(turnReachesClassifier({ ...base, history: asked })).toBe(true);
     // The same words after an ordinary reply do not: nothing is being answered.
-    expect(turnReachesClassifier({ ...base, history: [{ role: 'assistant' as const, content: 'Nothing is running right now.' }] })).toBe(false);
+    expect(turnReachesClassifier({ ...base, history: [{ role: 'assistant' as const, content: "Nothing's running at the moment." }] })).toBe(false);
     expect(turnReachesClassifier({ ...base, history: [] })).toBe(false);
     // A pending proposal or permission keeps a bare "yes" meaningful, as before.
     expect(turnReachesClassifier({ ...base, latestUserText: 'yes', history: [], hasPendingProposal: true })).toBe(true);
@@ -153,10 +154,10 @@ describe('recognizing Stewra\'s own clarifying questions', () => {
   it('finds the latest Stewra line, skipping the user\'s own turns', () => {
     const history = [
       { role: 'assistant' as const, content: 'Hello' },
-      { role: 'assistant' as const, content: ' Which checkout on Mac mini — a or b? ' },
+      { role: 'assistant' as const, content: ' Which folder on Mac mini — a or b? ' },
       { role: 'user' as const, content: 'on the Mac mini' },
     ];
-    expect(lastAssistantTurn(history)).toBe('Which checkout on Mac mini — a or b?');
+    expect(lastAssistantTurn(history)).toBe('Which folder on Mac mini — a or b?');
     expect(lastAssistantTurn([{ role: 'user' as const, content: 'hi' }])).toBeNull();
   });
 });

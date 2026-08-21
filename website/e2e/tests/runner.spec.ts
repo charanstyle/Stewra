@@ -141,7 +141,7 @@ test.describe('runner', () => {
     //
     //    All of these waits go through the MESSAGES API, not DOM text counts. Counting rendered rows
     //    proved unsound twice over: the virtualized list's counts flicker as it re-renders (a
-    //    baseline of "Done on" rows both passed and failed the same comparison milliseconds apart,
+    //    baseline of "All done" rows both passed and failed the same comparison milliseconds apart,
     //    making this spec answer "yes" before any permission existed), and the DOM can show a
     //    socket-delivered permission BEFORE the server has registered it — a "yes" sent in that gap
     //    is misclassified as chit-chat. A permission that the API returns is by construction already
@@ -166,9 +166,9 @@ test.describe('runner', () => {
       .poll(
         async () => {
           const fresh = await newerAssistantMessages(askMsg.createdAt);
-          summary = fresh.find((m) => m.content?.includes('Done on') === true);
+          summary = fresh.find((m) => m.content?.includes('All done —') === true);
           permission = fresh.find(
-            (m) => m.content?.includes('Permission needed') === true && m.content?.includes(nonce) === true,
+            (m) => m.content?.includes('needs your OK') === true && m.content?.includes(nonce) === true,
           );
           return summary !== undefined || permission !== undefined;
         },
@@ -185,7 +185,7 @@ test.describe('runner', () => {
         .poll(
           async () => {
             const fresh = await newerAssistantMessages(grantedAfter);
-            summary = fresh.find((m) => m.content?.includes('Done on') === true);
+            summary = fresh.find((m) => m.content?.includes('All done —') === true);
             return summary !== undefined;
           },
           { timeout: 180_000, message: 'session never reported completion after the permission was granted' },
