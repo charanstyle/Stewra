@@ -5,9 +5,8 @@ process.env['RUNNER_DOWNLOAD_URL'] = 'https://downloads.example.test/stewra-runn
 process.env['RUNNER_MIN_VERSION'] = '0.2.0';
 process.env['RUNNER_LATEST_VERSION'] = '0.2.0';
 
-const { looksLikeRunnerIntent, normalizeName, isClarifyingAsk, lastAssistantTurn } = await import(
-  '../services/runnerIntentService.js'
-);
+const { looksLikeRunnerIntent, normalizeName, isClarifyingAsk, lastAssistantTurn, userNamedDevice } =
+  await import('../services/runnerIntentService.js');
 
 /**
  * The keyword gate in front of the runner classifier. It is the cheapest thing in the pipeline and the
@@ -88,6 +87,18 @@ describe('recognizing Stewra\'s own clarifying questions', () => {
     expect(isClarifyingAsk("There's nothing waiting to start right now.")).toBe(false);
     expect(isClarifyingAsk('I\'ll run the test suite on LookedTwice on the Mac mini — shall I start?')).toBe(false);
     expect(isClarifyingAsk(null)).toBe(false);
+  });
+
+  it('accepts a machine only when the user\'s words name it', () => {
+    expect(userNamedDevice('on the Mac mini', 'Mac mini')).toBe(true);
+    expect(userNamedDevice('run it on the mini please', 'Mac mini')).toBe(true);
+    expect(userNamedDevice('use the macbook', 'MacBook Pro')).toBe(true);
+    // A repeated request with no machine in it — the case the model was seen guessing on.
+    expect(userNamedDevice('start a session on Truetalk and fix the failing test', 'Mac mini')).toBe(false);
+    expect(userNamedDevice('start a session on Truetalk and fix the failing test', 'MacBook Pro')).toBe(false);
+    // "pro" and "mac" alone are too short to count.
+    expect(userNamedDevice('make it a proper fix', 'MacBook Pro')).toBe(false);
+    expect(userNamedDevice('', 'Mac mini')).toBe(false);
   });
 
   it('finds the latest Stewra line, skipping the user\'s own turns', () => {

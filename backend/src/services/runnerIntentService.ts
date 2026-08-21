@@ -109,6 +109,21 @@ export function isClarifyingAsk(text: string | null): boolean {
   );
 }
 
+/**
+ * Did the user's words name this machine? The whole name normalized ("on the mac mini" → "macmini"), or
+ * any word of it at least four characters long ("mini", "macbook") — "pro" and "mac" alone would match
+ * almost anything. Used to refuse a deviceId the model supplied without the user saying it.
+ */
+export function userNamedDevice(text: string, deviceName: string): boolean {
+  const haystack = normalizeName(text);
+  if (haystack.length === 0) return false;
+  if (haystack.includes(normalizeName(deviceName))) return true;
+  return deviceName
+    .split(/[^A-Za-z0-9]+/)
+    .map((w) => normalizeName(w))
+    .some((w) => w.length >= 4 && haystack.includes(w));
+}
+
 /** The most recent Stewra line in the history, or null when the user has spoken only. */
 export function lastAssistantTurn(history: ReadonlyArray<ConversationTurn>): string | null {
   for (let i = history.length - 1; i >= 0; i -= 1) {
@@ -337,6 +352,21 @@ class RunnerIntentService {
     if (!parsed.success) return null;
     const data = parsed.data;
     const intent: RunnerIntent = data.intent;
+
+    // The trust boundary for the machine: a device is chosen only when the user's own words name it.
+    // The model has been seen filling deviceId with a plausible machine when a request was merely
+    // repeated after "Which one?" — a silent pick, which is the one thing this surface must never do.
+    // With the id blanked, `resolve` asks again (or uses the single ready machine, which is not a guess).
+    if (data.deviceId.trim().length > 0) {
+      const device = state.devices.find((d) => d.id === data.deviceId);
+      if (device === undefined || !userNamedDevice(latestUserText, device.name)) {
+        logger.info('runner-intent: dropping a deviceId the user did not name', {
+          deviceId: data.deviceId,
+          device: device?.name ?? null,
+        });
+        data.deviceId = '';
+      }
+    }
 
     switch (intent) {
       case 'start_request':
