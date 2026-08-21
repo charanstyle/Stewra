@@ -206,6 +206,29 @@ describe('projects are invisible across organizations', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// What speech-to-text is told to listen for
+// ---------------------------------------------------------------------------------------------
+
+describe('the spoken vocabulary', () => {
+  it('carries project names, aliases and machine names across the orgs the person belongs to', async () => {
+    const { projectService } = await import('../services/projectService.js');
+    const a = await createOrg('Org A');
+    const b = await createOrg('Org B');
+    const member = await addMember(b.orgId, 'viewer');
+    await db.insertInto('org_members').values({ org_id: a.orgId, user_id: member.id, role: 'viewer' }).execute();
+    await createProject(a.orgId, a.owner, 'Truetalk');
+    await pairedDevice(a.orgId, a.owner, 'Mac mini');
+    await pairedDevice(b.orgId, b.owner, 'MacBook Pro');
+
+    const words = await projectService.vocabularyForUser(member.id);
+    expect(words).toEqual(expect.arrayContaining(['Truetalk', 'true talk', 'Mac mini', 'MacBook Pro']));
+
+    // Someone outside both orgs hears none of it.
+    expect(await projectService.vocabularyForUser((await createUser()).id)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Machines
 // ---------------------------------------------------------------------------------------------
 

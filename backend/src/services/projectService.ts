@@ -33,10 +33,12 @@ import { logger } from '../utils/logger.js';
  */
 class ProjectService {
   /**
-   * The names a person says for their projects — every live project's name and aliases across every
-   * org they belong to. Fed to speech-to-text as vocabulary, so "Truetalk" is transcribed as written.
-   * Per-org reads under the hood (invariant 1: every project access is scoped by an org), joined here
-   * because a voice note has no org yet.
+   * The names a person says for their projects and machines — every live project's name and aliases,
+   * and every runner device's name, across every org they belong to. Fed to speech-to-text as
+   * vocabulary, so "Truetalk" is transcribed as written and "Mac mini" does not come back as "back
+   * mini" (it did, on the first production voice pass). Per-org reads under the hood (invariant 1:
+   * every project and device access is scoped by an org), joined here because a voice note has no
+   * org yet.
    */
   async vocabularyForUser(userId: string): Promise<string[]> {
     const memberships = await organizationRepository.listForUser(userId);
@@ -46,6 +48,7 @@ class ProjectService {
         words.add(project.name);
         for (const alias of project.aliases) words.add(alias);
       }
+      for (const device of (await runnerService.listDevices(m.org.id)).devices) words.add(device.name);
     }
     return [...words];
   }
