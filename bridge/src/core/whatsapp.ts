@@ -9,6 +9,7 @@ import { decideCloseAction } from './closePolicy.js';
 import { useEncryptedAuthState } from './authState.js';
 import type { SecretStore } from './authState.js';
 import type { ChatMeta } from './chatDirectory.js';
+import { RecentMessages } from './recentMessages.js';
 import { extractLid, extractStatusCode, mapUpsert, metas, renderQr } from './waMapping.js';
 import type { WhatsappMessage } from './waMapping.js';
 
@@ -20,6 +21,13 @@ export type { VoiceNote, WhatsappMessage } from './waMapping.js';
  * can be logged instead. 3 MiB of OGG/Opus at WhatsApp's bitrate is well over twenty minutes of speech.
  */
 export const MAX_VOICE_NOTE_BYTES = 3 * 1024 * 1024;
+
+/**
+ * How many live messages are kept so Stewra's replies can quote them. Generous against the real
+ * rate of a self-chat plus a few ticked chats; what matters is that the message being answered —
+ * seconds to minutes old — is still here. See `recentMessages.ts` for why it is bounded at all.
+ */
+export const RECENT_MESSAGES_KEPT = 500;
 
 export interface WhatsappEvents {
   /**
@@ -93,6 +101,8 @@ export class WhatsappClient {
   private pairingActive = false;
   private pairingAttempt = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  /** Live messages by id, so a reply can quote the message it answers (see `quoteOptions`). */
+  private readonly recent = new RecentMessages<WAMessage>(RECENT_MESSAGES_KEPT);
 
   constructor(private readonly options: WhatsappOptions) {}
 
@@ -236,6 +246,13 @@ export class WhatsappClient {
         return;
       }
 
+      // Every live message is remembered — text, voice note, or something we drop — because any of
+      // them may be what Stewra's next line answers, and Baileys can only quote the original object.
+      for (const raw of event.messages) {
+        const id = raw.key.id;
+        if (id !== null && id !== undefined && id.length > 0) this.recent.remember(id, raw);
+      }
+
       for (const drop of outcome.dropped) {
         console.error(
           `Stewra Bridge: a non-text message on ${drop.remoteJid} (fromMe=${drop.fromMe}) — ` +
@@ -294,12 +311,18 @@ export class WhatsappClient {
    * Deliver a voice note — audio the recipient sees as a recorded message with a play button, not as a
    * file. OGG/Opus is what WhatsApp itself records, and the only container that renders as a voice note
    * on every client; the server transcodes to it before asking.
+   *
+   * `replyTo` (a message id this bridge has seen) makes it a WhatsApp reply quoting that message.
    */
-  async sendVoiceNote(jid: string, audio: Buffer): Promise<string> {
+  async sendVoiceNote(jid: string, audio: Buffer, replyTo: string | null): Promise<string> {
     const sock = this.sock;
     if (sock === null) throw new Error('WhatsApp is not connected');
 
-    const sent = await sock.sendMessage(jid, { audio, mimetype: 'audio/ogg; codecs=opus', ptt: true });
+    const sent = await sock.sendMessage(
+      jid,
+      { audio, mimetype: 'audio/ogg; codecs=opus', ptt: true },
+      this.quoteOptions(replyTo),
+    );
     const id = sent?.key.id;
     if (id === null || id === undefined) {
       throw new Error('WhatsApp accepted the voice note but returned no id');
@@ -307,17 +330,40 @@ export class WhatsappClient {
     return id;
   }
 
-  /** Deliver one message. The provider id it returns is what breaks the echo loop on the server. */
-  async sendText(jid: string, text: string): Promise<string> {
+  /**
+   * Deliver one message. The provider id it returns is what breaks the echo loop on the server.
+   * `replyTo` (a message id this bridge has seen) makes it a WhatsApp reply quoting that message.
+   */
+  async sendText(jid: string, text: string, replyTo: string | null): Promise<string> {
     const sock = this.sock;
     if (sock === null) throw new Error('WhatsApp is not connected');
 
-    const sent = await sock.sendMessage(jid, { text });
+    const sent = await sock.sendMessage(jid, { text }, this.quoteOptions(replyTo));
     const id = sent?.key.id;
     if (id === null || id === undefined) {
       throw new Error('WhatsApp accepted the message but returned no id');
     }
     return id;
+  }
+
+  /**
+   * The `quoted` option for a reply, or nothing for a plain send.
+   *
+   * A quote Stewra asked for that this bridge cannot honour — the message arrived before the bridge
+   * last started, so it was never held — is a FAILED send, reported as such. Posting the line unquoted
+   * would put Stewra's words in the self-chat looking exactly like the person's own; the server records
+   * the failure and the person sees a gap rather than a bubble that lies about who wrote it.
+   */
+  private quoteOptions(replyTo: string | null): { quoted: WAMessage } | undefined {
+    if (replyTo === null) return undefined;
+    const quoted = this.recent.get(replyTo);
+    if (quoted === null) {
+      throw new Error(
+        `quoted_message_unknown: Stewra asked to quote message ${replyTo}, which this bridge has not ` +
+          'seen since it started',
+      );
+    }
+    return { quoted };
   }
 
   /**

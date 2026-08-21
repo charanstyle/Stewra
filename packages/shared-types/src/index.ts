@@ -620,7 +620,12 @@ export type {
 } from './realtime/payloads';
 
 // Realtime — the /bridge namespace (Stewra Bridge on the user's own machine)
-export { BRIDGE_CLIENT_EVENTS, BRIDGE_SERVER_EVENTS, BRIDGE_VOICE_MIN_VERSION } from './realtime/bridge';
+export {
+  BRIDGE_CLIENT_EVENTS,
+  BRIDGE_SERVER_EVENTS,
+  BRIDGE_VOICE_MIN_VERSION,
+  BRIDGE_REPLY_MIN_VERSION,
+} from './realtime/bridge';
 export type {
   BridgeClientEvent,
   BridgeServerEvent,

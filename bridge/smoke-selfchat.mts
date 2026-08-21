@@ -128,7 +128,7 @@ async function main(): Promise<void> {
   // observable as chat activity on the self-chat, and the live path must stay silent.
   const marker = `stewra-smoke ${new Date().toISOString()}`;
   watchingActivity = true;
-  const sentId = await client.sendText(ownJid, marker);
+  const sentId = await client.sendText(ownJid, marker, null);
   check('sendText returned a provider message id', sentId.length > 0);
 
   // A null ownLid never matches: meta.id is a string.

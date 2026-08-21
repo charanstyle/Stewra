@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { BRIDGE_SERVER_EVENTS, BRIDGE_VOICE_MIN_VERSION, meetsMinimumVersion } from '@stewra/shared-types';
+import {
+  BRIDGE_REPLY_MIN_VERSION,
+  BRIDGE_SERVER_EVENTS,
+  BRIDGE_VOICE_MIN_VERSION,
+  meetsMinimumVersion,
+} from '@stewra/shared-types';
 import type { BridgeSendAck, BridgeSendPayload } from '@stewra/shared-types';
 import * as Sentry from '@sentry/node';
 import type { BridgeNamespaceLike } from './bridgeTypes.js';
@@ -26,6 +31,13 @@ const sendAckSchema = z.object({
  * sent as text — so the send is refused here rather than handed over.
  */
 export const BRIDGE_TOO_OLD_FOR_VOICE = 'bridge_too_old_for_voice';
+
+/**
+ * The ack error a quoted send gets when the only online bridge predates quoted replies. Such a bridge's
+ * send schema drops `replyTo` and would post the line as a plain message — in the self-chat, a bubble
+ * indistinguishable from the person's own — so the send is refused here rather than handed over.
+ */
+export const BRIDGE_TOO_OLD_FOR_REPLY = 'bridge_too_old_for_reply';
 
 let namespace: BridgeNamespaceLike | null = null;
 
@@ -70,6 +82,19 @@ export async function dispatchToBridge(
         required: BRIDGE_VOICE_MIN_VERSION,
       });
       return { deviceId, ack: { ok: false, error: BRIDGE_TOO_OLD_FOR_VOICE } };
+    }
+  }
+  if (payload.replyTo !== undefined) {
+    const version = target.data.bridgeAppVersion;
+    if (version === undefined || !meetsMinimumVersion(version, BRIDGE_REPLY_MIN_VERSION)) {
+      logger.warn('bridge: refusing a quoted reply to a bridge that predates quoted replies', {
+        userId,
+        deviceId,
+        outboxId: payload.outboxId,
+        bridgeAppVersion: version ?? null,
+        required: BRIDGE_REPLY_MIN_VERSION,
+      });
+      return { deviceId, ack: { ok: false, error: BRIDGE_TOO_OLD_FOR_REPLY } };
     }
   }
 
