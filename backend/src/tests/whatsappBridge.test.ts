@@ -220,6 +220,10 @@ const CURRENT_BRIDGE_VERSION = '1.3.0';
  * Says hello as a real bridge does on connect — the server only learns a bridge's version from that
  * frame, and refuses quoted replies and voice notes to a version it does not know. `waState` is
  * 'connecting' so the hello itself never drains the outbox; a case that wants a drain sends its own.
+ *
+ * It then WAITS for that hello to be recorded. The hello has no ack, so returning early let its write
+ * land after a `STATE` the test sent next, and the state the test had just reported was overwritten by
+ * 'connecting' — a race in the helper that would read as a broken status dot.
  */
 async function connectBridge(token: string, url = live.url, appVersion = CURRENT_BRIDGE_VERSION): Promise<BridgeClient> {
   const socket = connectClient(`${url}/bridge`, {
@@ -234,7 +238,22 @@ async function connectBridge(token: string, url = live.url, appVersion = CURRENT
   });
   const bridge = new BridgeClient(socket);
   bridge.say(BRIDGE_CLIENT_EVENTS.HELLO, { appVersion, waState: 'connecting' });
+  // `last_seen_at` is null until a hello or a state frame is recorded, so it is the honest signal that
+  // the handshake has finished being written.
+  await waitFor('the hello to be recorded', async () => (await deviceSeenAt(token)) !== null || undefined);
   return bridge;
+}
+
+/** When the server last recorded a frame from this device, or null if it never has. */
+async function deviceSeenAt(token: string): Promise<Date | null> {
+  const identity = await on.whatsappPersonalService.authenticateBridge(token);
+  if (identity === null) return null;
+  const row = await on.db
+    .selectFrom('bridge_devices')
+    .select('last_seen_at')
+    .where('id', '=', identity.deviceId)
+    .executeTakeFirst();
+  return row?.last_seen_at ?? null;
 }
 
 /** The same handshake, but for the cases where being REFUSED is the expected outcome. */

@@ -57,6 +57,21 @@ describe('the runner intent gate', () => {
     }
   });
 
+  it('passes the plurals and participles people actually say', () => {
+    // Both of these were asked on WhatsApp and both failed the gate: `\bmachine\b` does not match
+    // "machines" and `\brun\b` does not match "running". The turn never reached the fleet, the ordinary
+    // agent answered instead, and — with no fleet in front of it — described machines that do not exist.
+    for (const text of [
+      'Which machines do I have right now',
+      'What is running on the Mac mini right now?',
+      'are my laptops online',
+      'which projects are set up',
+      'how many sessions are there',
+    ]) {
+      expect(looksLikeRunnerIntent(text, []), text).toBe(true);
+    }
+  });
+
   it('passes a project named as written, spoken with a space, or by an alias', () => {
     expect(looksLikeRunnerIntent('start a session on Truetalk and fix the failing test', PROJECTS)).toBe(true);
     expect(looksLikeRunnerIntent('start a session on true talk', PROJECTS)).toBe(true);

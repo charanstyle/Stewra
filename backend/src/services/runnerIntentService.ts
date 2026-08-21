@@ -68,9 +68,16 @@ const HARNESS_LABELS: Record<RunnerHarnessId, string> = {
  * caught not by keyword but by there being something pending to answer — see `handle`. The project
  * names the person actually uses are added per turn by {@link looksLikeRunnerIntent}: "start a session
  * on Truetalk" has no generic runner word in it, and it is the most ordinary thing anyone will say.
+ *
+ * Every noun here is written with its plural and every verb with its participle, because the words that
+ * were missing were exactly the ones people use: "which MACHINES do I have" and "what is RUNNING on the
+ * Mac mini" both failed `\bmachine\b` / `\brun\b` and never reached the fleet at all. The ordinary agent
+ * answered instead, and — having no fleet to look at — described one it made up. A turn that gets in
+ * here still has to survive the classifier, which may answer "none"; letting one through costs a model
+ * call, keeping one out costs the truth.
  */
 const BASE_RUNNER_WORDS =
-  /\b(run|runner|laptop|machine|desktop|mac mini|macbook|repo|repository|workspace|project|session|worktree|commit|lint|tests?|test suite|claude|codex|gemini|push|pull request|pr|branch|agent|coding|what'?s running|is .* (up|online|offline))\b/i;
+  /\b(run|runs|running|runner|laptops?|machines?|computers?|desktops?|mac ?minis?|macbooks?|repos?|repositor(y|ies)|workspaces?|projects?|sessions?|worktrees?|commits?|lint|tests?|test suite|claude|codex|gemini|push|pull requests?|prs?|branch(es)?|agents?|coding|(is|are) .* (up|online|offline))\b/i;
 
 /** Lowercase, alphanumerics only — how a spoken name survives a transcriber's spacing and casing. */
 export function normalizeName(value: string): string {
@@ -298,6 +305,8 @@ interface ResolvedTarget {
 /** Everything the classifier and the resolver look at for one turn, fetched once. */
 interface TurnState {
   readonly actor: OrgActor;
+  /** The acting organization's name, so an answer about machines can say WHOSE machines it lists. */
+  readonly orgName: string;
   readonly projects: readonly Project[];
   readonly bindings: readonly ProjectWorkspaceBinding[];
   readonly online: readonly RunnerDevice[];
@@ -456,7 +465,7 @@ class RunnerIntentService {
       case 'list_sessions':
         return { reply: this.describeSessions(state.sessions), proposal: null };
       case 'list_devices':
-        return { reply: this.describeDevices(state), proposal: null };
+        return { reply: this.describeDevices(state, latestUserText), proposal: null };
       case 'none':
       default:
         return null;
@@ -490,16 +499,20 @@ class RunnerIntentService {
 
   private async loadState(actor: OrgActor, everyProject: readonly Project[]): Promise<TurnState> {
     const projects = everyProject.filter((p) => p.orgId === actor.orgId);
-    const [bindings, { devices }, { sessions }] = await Promise.all([
+    const [bindings, { devices }, { sessions }, org] = await Promise.all([
       projectRepository.listBindingsForOrg(actor.orgId),
       runnerService.listDevices(actor.orgId),
       runnerSessionService.listSessions(actor.orgId),
+      organizationRepository.findById(actor.orgId),
     ]);
+    // The acting org was just resolved from a live membership, so a missing row is a broken install,
+    // not a case to paper over with a placeholder name.
+    if (org === null) throw new Error(`the acting organization ${actor.orgId} no longer exists`);
     // A cloud runner counts as available even when its container is stopped: starting it is Stewra's
     // job, and `startSession` wakes it. Only a machine of the user's own is genuinely unreachable when
     // offline — nothing here can turn a laptop on.
     const online = devices.filter((d) => d.online || d.kind === 'hosted');
-    return { actor, projects, bindings, online, devices, sessions };
+    return { actor, orgName: org.name, projects, bindings, online, devices, sessions };
   }
 
   // ── proposal lifecycle ───────────────────────────────────────────────────────────────────────────────
@@ -825,11 +838,27 @@ class RunnerIntentService {
   }
 
   /** "Is the Mac mini up?" — every machine in the org, in one line each. */
-  private describeDevices(state: TurnState): string {
+  /**
+   * The machines answer. It names the organization, always.
+   *
+   * Without that, "is the Mac mini up?" asked from an account whose org has no Mac mini came back as a
+   * list of two other machines — every word true, the whole answer misleading, because the reader had
+   * no way to see they were asking a tenant that has never heard of that machine. A machine paired in
+   * ANOTHER of the person's organizations is invisible here by design; saying whose machines these are
+   * is what makes that visible instead of silent.
+   */
+  private describeDevices(state: TurnState, latestUserText: string): string {
     if (state.devices.length === 0) {
-      return "No machines are connected to this organization yet. Once the Stewra runner is running on one, it'll show up here.";
+      return `No machines are connected to ${state.orgName} yet. Once the Stewra runner is running on one, it'll show up here.`;
     }
-    const lines = state.devices.map((d) => {
+    // A machine the person named by name is the machine they asked about; the rest are noise.
+    const named = state.devices.filter((d) => userNamedDevice(latestUserText, d.name));
+    const shown = named.length > 0 ? named : state.devices;
+    const heading =
+      named.length > 0
+        ? `In ${state.orgName}:`
+        : `Machines in ${state.orgName} (anything paired in another of your organizations won't be here):`;
+    const lines = shown.map((d) => {
       const ready = state.projects
         .filter((p) => this.readyOn(state, p).some((c) => c.device.id === d.id))
         .map((p) => p.name);
@@ -845,7 +874,7 @@ class RunnerIntentService {
       const projects = ready.length > 0 ? `; ready for ${listInWords(ready)}` : '';
       return `• ${d.name}${label} — ${status}${projects}`;
     });
-    return lines.join('\n');
+    return [heading, ...lines].join('\n');
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────────────────────────────────
