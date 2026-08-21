@@ -131,6 +131,9 @@ describe('Bridge against a real /bridge loopback server', () => {
       secretStore,
       events,
       chatsChangedDebounceMs: 30,
+      // No host identity in the test: this suite is about the bridge's own wiring, and `null` is the
+      // same value a platform Stewra reads no stable id on produces.
+      host: null,
     });
     bridge.connectStewra(TOKEN);
     await until(() => serverSockets.length === 1);
@@ -170,6 +173,54 @@ describe('Bridge against a real /bridge loopback server', () => {
     });
     await until(() => framesOf(BRIDGE_CLIENT_EVENTS.INBOUND).length === 1);
     expect(framesOf(BRIDGE_CLIENT_EVENTS.INBOUND)[0]).toMatchObject({ jid: SELF_JID, isSelfChat: true, text: "what's running?" });
+  });
+
+  it('a self-chat the user ticked while it looked like an ordinary chat stops being blocked as their own outgoing message', async () => {
+    // The QR-linked session this came from (2026-08-21): opened with NO lid, and none ever arrived by
+    // itself. Unrecognised, the self-chat appears in the picker as an ordinary chat — so the user ticks
+    // it, trying to make their own messages get through, and the ordinary-chat rule blocks every one of
+    // them as `not_from_user`. Both halves are asserted here: the dead end, then the way out of it.
+    const b = await connectedBridge(recordingEvents().events);
+    b.handleWaOpen({ ownJid: SELF_JID, ownLid: null });
+    await until(() => framesOf(BRIDGE_CLIENT_EVENTS.ALLOWED_CHATS).length === 1);
+
+    b.setTickedChats([{ jid: SELF_LID, displayName: 'me', isSelfChat: false }]);
+    await until(() => framesOf(BRIDGE_CLIENT_EVENTS.ALLOWED_CHATS).length === 2);
+
+    b.handleWaMessage({
+      providerMessageId: 'WA-BEFORE-LID',
+      remoteJid: SELF_LID,
+      fromMe: true,
+      text: 'Hi',
+      voice: null,
+      sentAt: new Date(),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(framesOf(BRIDGE_CLIENT_EVENTS.INBOUND)).toEqual([]);
+
+    // Asking WhatsApp's directory for the account's own LID completes the identity.
+    b.handleWaOpen({ ownJid: SELF_JID, ownLid: SELF_LID });
+    await until(() => framesOf(BRIDGE_CLIENT_EVENTS.ALLOWED_CHATS).length === 3);
+    // The tick is gone: the self-chat is unconditional, and publishing it twice under two addresses
+    // would leave the server keying one conversation two ways.
+    expect(framesOf(BRIDGE_CLIENT_EVENTS.ALLOWED_CHATS)[2]).toEqual({
+      chats: [{ jid: SELF_JID, displayName: 'You', isSelfChat: true }],
+    });
+
+    b.handleWaMessage({
+      providerMessageId: 'WA-AFTER-LID',
+      remoteJid: SELF_LID,
+      fromMe: true,
+      text: 'Are you there',
+      voice: null,
+      sentAt: new Date(),
+    });
+    await until(() => framesOf(BRIDGE_CLIENT_EVENTS.INBOUND).length === 1);
+    expect(framesOf(BRIDGE_CLIENT_EVENTS.INBOUND)[0]).toMatchObject({
+      jid: SELF_JID,
+      isSelfChat: true,
+      text: 'Are you there',
+    });
   });
 
   it('forwards NOTHING for a chat the user has not ticked — zero frames, fetch never called', async () => {
@@ -326,6 +377,27 @@ describe('Bridge against a real /bridge loopback server', () => {
     // The teardown is fire-and-forget (`void destroySession()`), so the wipe is polled for.
     await until(() => seen.sessionDestroyed === 1);
     await expect(readdir(authDir)).rejects.toThrow();
+    await until(() => disconnects.length === 1);
+  });
+
+  it('wipes the real session on unlink, so the next account to pair this machine cannot resume it', async () => {
+    // The Unpair button's whole point. `stop()` deliberately LEAVES the session on disk so a restart
+    // resumes it — and for years this path called exactly that, which meant unpairing kept a live
+    // WhatsApp session in the userData dir. Whoever paired next got it: someone else's messages,
+    // delivered under their Stewra account.
+    const { events, seen } = recordingEvents();
+    const b = await connectedBridge(events);
+    const auth = await useEncryptedAuthState(authDir, secretStore);
+    await auth.saveCreds();
+    expect(await readdir(authDir)).toContain('creds.enc');
+
+    const disconnects: string[] = [];
+    serverSockets[0]?.on('disconnect', (reason) => disconnects.push(reason));
+
+    await b.unlink();
+
+    await expect(readdir(authDir)).rejects.toThrow();
+    expect(seen.sessionDestroyed).toBe(1);
     await until(() => disconnects.length === 1);
   });
 

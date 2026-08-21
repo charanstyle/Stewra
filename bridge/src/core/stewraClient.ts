@@ -6,10 +6,12 @@ import {
 } from '@stewra/shared-types';
 import type {
   BridgeAllowedChat,
+  BridgeHelloPayload,
   BridgeInboundPayload,
   BridgeSendAck,
   BridgeSendPayload,
   BridgeWaState,
+  HostIdentity,
 } from '@stewra/shared-types';
 import { z } from 'zod';
 import type { BridgeConfig } from './config.js';
@@ -94,6 +96,8 @@ export class StewraClient {
 
   constructor(
     private readonly config: BridgeConfig,
+    /** Which computer this is — see `hello()`. `null` on a platform Stewra does not read an id for. */
+    private readonly host: HostIdentity | null,
     private readonly events: StewraClientEvents,
   ) {}
 
@@ -158,11 +162,20 @@ export class StewraClient {
     });
   }
 
+  /**
+   * Announce this build, its WhatsApp state, and — since 1.4.0 — which computer it is running on.
+   *
+   * `host` is what lets Stewra answer "what's running on this machine?" from a phone. It is omitted, not
+   * faked, when this platform has no identifier we read: the server records that it cannot place this
+   * bridge, and says so, instead of matching on a hostname and pairing two unrelated computers.
+   */
   hello(waState: BridgeWaState): void {
-    this.socket?.emit(BRIDGE_CLIENT_EVENTS.HELLO, {
+    const payload: BridgeHelloPayload = {
       appVersion: this.config.appVersion,
       waState,
-    });
+      ...(this.host === null ? {} : { host: this.host }),
+    };
+    this.socket?.emit(BRIDGE_CLIENT_EVENTS.HELLO, payload);
   }
 
   state(waState: BridgeWaState): void {

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Server } from 'socket.io';
 import type { Namespace, Socket } from 'socket.io';
 import { BRIDGE_CLIENT_EVENTS, BRIDGE_SERVER_EVENTS } from '@stewra/shared-types';
-import type { BridgeSendAck, BridgeSendPayload } from '@stewra/shared-types';
+import type { BridgeSendAck, BridgeSendPayload, HostIdentity } from '@stewra/shared-types';
 import { StewraClient, claimBridgeToken } from '../core/stewraClient.js';
 import type { StewraClientEvents } from '../core/stewraClient.js';
 
@@ -93,8 +93,8 @@ describe('StewraClient against a real /bridge namespace', () => {
     await io.close();
   });
 
-  const makeClient = (events: StewraClientEvents): StewraClient => {
-    client = new StewraClient({ apiBaseUrl: baseUrl, appVersion: '1.1.0' }, events);
+  const makeClient = (events: StewraClientEvents, host: HostIdentity | null = null): StewraClient => {
+    client = new StewraClient({ apiBaseUrl: baseUrl, appVersion: '1.1.0' }, host, events);
     return client;
   };
 
@@ -241,6 +241,29 @@ describe('StewraClient against a real /bridge namespace', () => {
     expect(received[3]?.[1]).toEqual({
       chats: [{ jid: 'me@s.whatsapp.net', displayName: 'You', isSelfChat: true }],
     });
+  });
+
+  it('puts the host identity on the hello, so the server can tell which computer this is', async () => {
+    const { events } = recordingEvents();
+    const host: HostIdentity = {
+      kind: 'darwin-platform-uuid',
+      value: '8f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8',
+      hostname: 'mac-mini-m2',
+    };
+    const stewra = makeClient(events, host);
+    stewra.connect(TOKEN);
+    await until(() => serverSockets.length === 1);
+    const socket = serverSockets[0];
+    if (socket === undefined) throw new Error('no server socket');
+
+    const received: unknown[] = [];
+    socket.on(BRIDGE_CLIENT_EVENTS.HELLO, (payload: unknown) => received.push(payload));
+    stewra.hello('open');
+
+    await until(() => received.length === 1);
+    // The whole triple, verbatim: the server hashes `kind:value`, so a client that dropped or
+    // rewrote either half would place this bridge on a different computer with total confidence.
+    expect(received[0]).toEqual({ appVersion: '1.1.0', waState: 'open', host });
   });
 });
 

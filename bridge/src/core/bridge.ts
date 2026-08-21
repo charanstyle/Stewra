@@ -1,4 +1,10 @@
-import type { BridgeAllowedChat, BridgeSendAck, BridgeSendPayload, BridgeWaState } from '@stewra/shared-types';
+import type {
+  BridgeAllowedChat,
+  BridgeSendAck,
+  BridgeSendPayload,
+  BridgeWaState,
+  HostIdentity,
+} from '@stewra/shared-types';
 import { AllowlistGate } from './allowlist.js';
 import { ChatDirectory } from './chatDirectory.js';
 import type { ChatMeta, ChatSummary } from './chatDirectory.js';
@@ -40,6 +46,12 @@ export interface BridgeEvents {
 export interface BridgeOptions {
   readonly config: BridgeConfig;
   readonly authDir: string;
+  /**
+   * Which computer this is, or `null` on a platform whose identifier Stewra does not read (see
+   * `main/hostIdentity.ts`). Not optional: a caller that forgot it would silently produce a bridge the
+   * server cannot place on any machine, which is the exact failure this field exists to end.
+   */
+  readonly host: HostIdentity | null;
   readonly secretStore: SecretStore;
   readonly events: BridgeEvents;
   /**
@@ -82,7 +94,7 @@ export class Bridge {
       },
     });
 
-    this.stewra = new StewraClient(options.config, {
+    this.stewra = new StewraClient(options.config, options.host, {
       onSend: (payload) => this.handleSend(payload),
       onRevoked: () => {
         // The user revoked this machine from the web app. Stewra cannot reach into their WhatsApp account
@@ -121,6 +133,28 @@ export class Bridge {
       this.chatsChangedTimer = null;
     }
     this.whatsapp.stop();
+    this.stewra.disconnect();
+  }
+
+  /**
+   * Unlink this machine: stop, then DESTROY the local WhatsApp session.
+   *
+   * Distinct from `stop()`, and the difference is a privacy one. `stop()` is for quitting — the session
+   * stays on disk so the next launch resumes it. This is for the user pressing Unpair, after which the
+   * next person to pair here may be a DIFFERENT Stewra account: leaving the credentials behind would
+   * silently resume the previous person's WhatsApp under the new account, delivering their messages to
+   * someone else. Same wipe `onRevoked` performs when the revoke comes from the web app; the two paths
+   * must not differ in what they leave behind.
+   *
+   * WhatsApp itself still lists the link until the user removes "Stewra Bridge" from their phone's
+   * Linked Devices — this app deliberately cannot do that for them (`logout()` is banned in core).
+   */
+  async unlink(): Promise<void> {
+    if (this.chatsChangedTimer !== null) {
+      clearTimeout(this.chatsChangedTimer);
+      this.chatsChangedTimer = null;
+    }
+    await this.whatsapp.destroySession();
     this.stewra.disconnect();
   }
 
@@ -170,8 +204,14 @@ export class Bridge {
       `Stewra Bridge: WhatsApp open as ${identity.ownJid}` +
         `${identity.ownLid !== null ? ` (lid ${identity.ownLid})` : ''}.`,
     );
-    this.gate = new AllowlistGate(identity.ownJid, identity.ownLid ?? undefined);
-    this.gate.setAllowed(this.tickedChats);
+    const gate = new AllowlistGate(identity.ownJid, identity.ownLid ?? undefined);
+    // A LID the gate could not place earlier shows up in the picker as an ordinary chat, and the user may
+    // well have ticked it trying to make their own messages get through. Once the identity is complete
+    // that row IS the self-chat, so drop the tick: the self-chat is unconditional, and leaving it in the
+    // ticked set would also publish it to the server twice, under two different addresses.
+    this.tickedChats = this.tickedChats.filter((chat) => !gate.isSelfChat(chat.jid));
+    this.gate = gate;
+    gate.setAllowed(this.tickedChats);
     this.syncAllowedChats();
   }
 
