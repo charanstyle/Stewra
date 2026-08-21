@@ -12,8 +12,8 @@ import { ConflictError, NotFoundError } from '../utils/errors.js';
 import { userRepository } from '../repositories/userRepository.js';
 import { connectionRepository } from '../repositories/connectionRepository.js';
 import { purgeConnectionMoneyData } from '../repositories/moneyStore.js';
-import { organizationRepository } from '../commerce/repositories/organizationRepository.js';
-import { storeSubscriptionRepository } from '../commerce/repositories/storeSubscriptionRepository.js';
+import { organizationRepository } from '../tenancy/repositories/organizationRepository.js';
+import { orgBillingRegistry } from '../ports/orgBilling.js';
 import { removeItem } from './plaidService.js';
 import { revokeRefreshToken } from './googleOAuthService.js';
 import { emailRetentionService } from './emailRetentionService.js';
@@ -24,19 +24,6 @@ import { presenceService } from './presenceService.js';
 import { hostedRunnerService } from './hostedRunnerService.js';
 import { githubAppService } from './githubAppService.js';
 import { whatsappService } from './whatsappService.js';
-
-/**
- * Store-subscription statuses that mean the person is still being billed by Apple or Google.
- *
- * `pending` is in the list on purpose: a purchase the store has not finished processing can still
- * become a charge, so it is exactly the case a warning must not omit.
- */
-const BILLING_STORE_STATUSES: ReadonlySet<string> = new Set([
-  'active',
-  'grace_period',
-  'pending',
-  'on_hold',
-]);
 
 /**
  * Permanent account deletion.
@@ -116,10 +103,11 @@ export class AccountDeletionService {
         // customer list with no controller. It goes with the account.
         orgsToDelete.push(membership.org.name);
 
-        for (const sub of await storeSubscriptionRepository.listForOrg(orgId)) {
-          if (BILLING_STORE_STATUSES.has(sub.status)) {
-            storeSubscriptions.push(`${membership.org.name} (${sub.store})`);
-          }
+        // Asked of the commerce plane through `ports/orgBilling` — which store statuses still take
+        // money is its fact, not this service's, and `require()` throws if nobody wired it in rather
+        // than letting this screen say "nothing will charge you" on the strength of a missing binding.
+        for (const sub of await orgBillingRegistry.require().listOngoing(orgId)) {
+          storeSubscriptions.push(`${membership.org.name} (${sub.store})`);
         }
         continue;
       }

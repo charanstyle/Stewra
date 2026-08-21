@@ -80,7 +80,7 @@ const database = (await import('../database/index.js')) as {
 };
 const { db } = database;
 const { organizationRepository } = await import(
-  '../commerce/repositories/organizationRepository.js'
+  '../tenancy/repositories/organizationRepository.js'
 );
 const { channelAccountRepository } = await import(
   '../commerce/repositories/channelAccountRepository.js'

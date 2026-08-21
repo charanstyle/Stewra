@@ -9,10 +9,11 @@ import type { MessagePricingCategory } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
 import { db, closeDb } from '../database/index.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import orgRoutes from '../commerce/routes/organizations.js';
+import orgRoutes from '../tenancy/routes/organizations.js';
+import commerceOrgRoutes from '../commerce/routes/orgSurface.js';
 import { channelAccountRepository } from '../commerce/repositories/channelAccountRepository.js';
 import { commerceInboxRepository } from '../commerce/repositories/commerceInboxRepository.js';
-import { organizationRepository } from '../commerce/repositories/organizationRepository.js';
+import { organizationRepository } from '../tenancy/repositories/organizationRepository.js';
 import { rateCardRepository } from '../commerce/repositories/rateCardRepository.js';
 import { commerceInboundService } from '../commerce/services/commerceInboundService.js';
 
@@ -29,6 +30,7 @@ import { commerceInboundService } from '../commerce/services/commerceInboundServ
 const app = express();
 app.use(express.json());
 app.use('/orgs', orgRoutes);
+app.use('/orgs/:orgId', commerceOrgRoutes);
 app.use(errorHandler);
 const server = app.listen(0, '127.0.0.1');
 await new Promise<void>((resolve) => server.once('listening', resolve));

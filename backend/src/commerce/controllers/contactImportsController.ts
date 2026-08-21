@@ -8,7 +8,7 @@ import type {
 } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { contactImportService } from '../services/contactImportService.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 import { ValidationError } from '../../utils/errors.js';
 

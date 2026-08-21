@@ -33,7 +33,7 @@ const { errorHandler } = await import('../middleware/errorHandler.js');
 const billingRoutes = (await import('../commerce/routes/billing.js')).default;
 const paymentsWebhookRoutes = (await import('../commerce/routes/paymentsWebhook.js')).default;
 const { organizationRepository } = await import(
-  '../commerce/repositories/organizationRepository.js'
+  '../tenancy/repositories/organizationRepository.js'
 );
 const { invoiceRepository } = await import('../commerce/repositories/invoiceRepository.js');
 const { paymentService } = await import('../commerce/services/paymentService.js');

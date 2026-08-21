@@ -19,7 +19,7 @@ import { billingService } from '../services/billingService.js';
 import { paymentService } from '../services/paymentService.js';
 import { dunningService } from '../services/dunningService.js';
 import { storeSubscriptionService } from '../services/storeSubscriptionService.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 import { AuthenticationError } from '../../utils/errors.js';
 

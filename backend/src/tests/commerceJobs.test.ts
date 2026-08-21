@@ -3,7 +3,7 @@ import { sql } from 'kysely';
 import bcrypt from 'bcryptjs';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db, closeDb } from '../database/index.js';
-import { organizationRepository } from '../commerce/repositories/organizationRepository.js';
+import { organizationRepository } from '../tenancy/repositories/organizationRepository.js';
 import { jobRepository } from '../commerce/repositories/jobRepository.js';
 import { channelAccountRepository } from '../commerce/repositories/channelAccountRepository.js';
 import { commerceWorker } from '../commerce/jobs/worker.js';

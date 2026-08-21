@@ -93,11 +93,12 @@ const database = (await import('../database/index.js')) as {
 const { db } = database;
 const { config } = await import('../config/unifiedConfig.js');
 const { errorHandler } = await import('../middleware/errorHandler.js');
-const orgRoutes = (await import('../commerce/routes/organizations.js')).default;
+const orgRoutes = (await import('../tenancy/routes/organizations.js')).default;
+const commerceOrgRoutes = (await import('../commerce/routes/orgSurface.js')).default;
 const billingRoutes = (await import('../commerce/routes/billing.js')).default;
 const paymentsWebhookRoutes = (await import('../commerce/routes/paymentsWebhook.js')).default;
 const { organizationRepository } = await import(
-  '../commerce/repositories/organizationRepository.js'
+  '../tenancy/repositories/organizationRepository.js'
 );
 const { invoiceRepository } = await import('../commerce/repositories/invoiceRepository.js');
 const { billingCustomerRepository } = await import(
@@ -112,6 +113,7 @@ const app = express();
 app.use('/webhooks/payments', paymentsWebhookRoutes);
 app.use(express.json());
 app.use('/orgs', orgRoutes);
+app.use('/orgs/:orgId', commerceOrgRoutes);
 app.use('/platform/billing', billingRoutes);
 app.use(errorHandler);
 const server = app.listen(0, '127.0.0.1');

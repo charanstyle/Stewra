@@ -8,7 +8,7 @@ import type {
 } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { commerceInboxService } from '../services/commerceInboxService.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 
 const pageSchema = z.object({

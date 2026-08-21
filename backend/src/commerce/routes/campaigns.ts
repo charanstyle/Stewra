@@ -5,7 +5,7 @@ import { broadcastsController } from '../controllers/broadcastsController.js';
 import { operationsController } from '../controllers/operationsController.js';
 import { spendCapsController } from '../controllers/spendCapsController.js';
 import { templatesController } from '../controllers/templatesController.js';
-import { requireOrgMember } from '../middleware/requireOrgMember.js';
+import { requireOrgMember } from '../../tenancy/middleware/requireOrgMember.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { requireEmailVerification } from '../../middleware/requireEmailVerification.js';
 

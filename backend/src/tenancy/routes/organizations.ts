@@ -1,11 +1,6 @@
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { organizationsController } from '../controllers/organizationsController.js';
-import channelsRoutes from './channels.js';
-import conversationsRoutes from './conversations.js';
-import consentRoutes from './consent.js';
-import audienceRoutes from './audience.js';
-import campaignRoutes from './campaigns.js';
 import { requireOrgMember } from '../middleware/requireOrgMember.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { requireEmailVerification } from '../../middleware/requireEmailVerification.js';
@@ -88,19 +83,9 @@ router.delete(
   },
 );
 
-// The rest of the commerce surface hangs off the tenant path, so `:orgId` and the membership check it
-// drives are the same ones above. Each sub-router declares its own minimum role per route.
-router.use('/:orgId/channels', channelsRoutes);
-router.use('/:orgId/conversations', conversationsRoutes);
-// Consent, the suppression list and messaging policy. Mounted at the org root rather than under a
-// prefix of its own because its routes span two resources — `/contacts/:id/consents` and
-// `/suppressions` — and inventing a shared prefix would put a made-up noun in every client URL.
-router.use('/:orgId', consentRoutes);
-// Contacts, tags and segments. Mounted at the org root for the same reason as consent: its routes
-// span three resources, and a shared prefix would be a noun nobody uses.
-router.use('/:orgId', audienceRoutes);
-// Templates and broadcasts. Org root again — `/templates` and `/broadcasts` are separate resources,
-// and a `/campaigns` prefix would put a word in the URL that no part of the API actually models.
-router.use('/:orgId', campaignRoutes);
+// The rest of the commerce surface also hangs off `/orgs/:orgId`, but it is NOT mounted here: this
+// file is tenancy, an install-wide primitive, and `.dependency-cruiser.cjs` forbids it from importing
+// `commerce/`. Those sub-routers are mounted next to this router in `backend/src/app.ts` — the
+// composition root — via `commerce/routes/orgSurface.ts`. The resulting URLs are unchanged.
 
 export default router;

@@ -12,7 +12,7 @@ import type {
 import { BROADCAST_RECIPIENT_STATUSES } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { broadcastService } from '../services/broadcastService.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 
 const broadcastParamsSchema = z.object({ broadcastId: z.string().uuid() });

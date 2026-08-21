@@ -4,6 +4,14 @@ import { db, closeDb } from '../database/index.js';
 import { accountDeletionService } from '../services/accountDeletionService.js';
 import { vault } from '../control-plane/vault/vault.js';
 import { ConflictError } from '../utils/errors.js';
+import { orgBillingRegistry } from '../ports/orgBilling.js';
+import { orgBillingReader } from '../commerce/services/orgBillingReader.js';
+
+// This file drives the service directly rather than through `createApp()`, so the composition root
+// never runs and the billing port would be empty — and `preview()` throws on an empty port rather than
+// report "nothing will charge you". The real commerce reader is registered here, against the real
+// database, exactly as `app.ts` does it.
+orgBillingRegistry.register(orgBillingReader);
 
 /**
  * Account deletion — the claim that deletion is real, tested against the things that make it not.

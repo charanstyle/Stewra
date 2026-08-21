@@ -11,7 +11,7 @@ import type {
 } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { audienceService } from '../services/audienceService.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { segmentDefinitionSchema } from '../services/segmentQuery.js';
 import { parse } from '../../utils/validate.js';
 

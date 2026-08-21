@@ -9,6 +9,11 @@
  *     infrastructure — config, database handle, errors, auth middleware, the vault — and nothing
  *     else. A commerce query that reaches a `user_id`-scoped repository is a tenancy bug, and the
  *     cheapest place to catch it is at the import.
+ *  3. `backend/src/tenancy` — organizations, membership and `requireOrgMember` — is neither plane.
+ *     Every account is a tenant, so both planes scope by the same org id and both must be able to
+ *     import it. That only stays true while tenancy itself depends on nothing but infrastructure:
+ *     the moment it reaches into either plane's repositories it stops being a primitive and becomes
+ *     a cycle, and whichever plane it reached into can no longer be dropped from the build.
  */
 module.exports = {
   forbidden: [
@@ -55,6 +60,17 @@ module.exports = {
         pathNot: '^backend/src/(commerce/|app\\.ts$|index\\.ts$|tests/)',
       },
       to: { path: '^backend/src/commerce/' },
+    },
+    {
+      name: 'tenancy-is-a-primitive',
+      comment:
+        'tenancy is what both planes agree on, so it must depend on neither. It may reach the ' +
+        'database handle, config, errors, validation, the base controller, auth middleware and ' +
+        'ports/ — infrastructure both planes already share. A repository or service from either ' +
+        'plane makes it that plane\'s dependent, and the import graph stops having a bottom',
+      severity: 'error',
+      from: { path: '^backend/src/tenancy/' },
+      to: { path: '^backend/src/(repositories|services|commerce)/' },
     },
   ],
   options: {

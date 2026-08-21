@@ -6,7 +6,7 @@ import { contactsController } from '../controllers/contactsController.js';
 import { contactImportsController } from '../controllers/contactImportsController.js';
 import { optinLinksController } from '../controllers/optinLinksController.js';
 import { segmentsController } from '../controllers/segmentsController.js';
-import { requireOrgMember } from '../middleware/requireOrgMember.js';
+import { requireOrgMember } from '../../tenancy/middleware/requireOrgMember.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { requireEmailVerification } from '../../middleware/requireEmailVerification.js';
 

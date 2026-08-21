@@ -20,7 +20,7 @@ import type {
 import { BaseController } from '../../controllers/baseController.js';
 import { audienceService } from '../services/audienceService.js';
 import type { ContactWithTags } from '../repositories/contactRepository.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 
 const contactParamsSchema = z.object({ contactId: z.string().uuid() });

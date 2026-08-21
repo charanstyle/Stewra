@@ -143,7 +143,7 @@ const { db } = database;
 const { errorHandler } = await import('../middleware/errorHandler.js');
 const metaWebhookRoutes = (await import('../commerce/routes/metaWebhook.js')).default;
 const { organizationRepository } = await import(
-  '../commerce/repositories/organizationRepository.js'
+  '../tenancy/repositories/organizationRepository.js'
 );
 const { conversationRepository } = await import('../repositories/conversationRepository.js');
 const { messageRepository } = await import('../repositories/messageRepository.js');

@@ -9,7 +9,7 @@ import type {
 import { BaseController } from '../../controllers/baseController.js';
 import { channelAccountService } from '../services/channelAccountService.js';
 import { metaEmbeddedSignupService } from '../services/metaEmbeddedSignupService.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { config } from '../../config/unifiedConfig.js';
 import { parse } from '../../utils/validate.js';
 

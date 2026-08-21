@@ -19,7 +19,7 @@ import {
 } from '@stewra/shared-types';
 import { BaseController } from '../../controllers/baseController.js';
 import { consentService } from '../services/consentService.js';
-import { orgContext } from '../middleware/requireOrgMember.js';
+import { orgContext } from '../../tenancy/middleware/requireOrgMember.js';
 import { parse } from '../../utils/validate.js';
 
 const contactParamsSchema = z.object({ contactId: z.string().uuid() });
