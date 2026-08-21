@@ -10,6 +10,7 @@ import { stewraConversationService } from './stewraConversationService.js';
 import { runnerIntentService } from './runnerIntentService.js';
 import type { RunnerChatChannel } from './runnerChatRelayService.js';
 import { presenceService } from './presenceService.js';
+import { projectService } from './projectService.js';
 import { emitToUser } from '../websocket/emitter.js';
 import { auditWriter } from '../control-plane/audit/auditWriter.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../utils/errors.js';
@@ -90,7 +91,9 @@ class MessageService {
     const ext = mediaService.extensionForMime(audio.mime);
     const { filename, absPath } = await mediaService.reserve(ext);
     await mediaService.writeBuffer(absPath, audio.buffer);
-    const transcript = await sttService.transcribe(absPath);
+    // The person's project names go in as whisper's vocabulary, so "Truetalk" does not come back as
+    // "true talk" and then match nothing.
+    const transcript = await sttService.transcribe(absPath, await projectService.vocabularyForUser(userId));
     const asset = await mediaService.record({
       ownerId: userId,
       conversationId,

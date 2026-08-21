@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type {
   ConversationTurn,
   ModelMessage,
+  Project,
+  ProjectWorkspaceBinding,
   ProposedRunnerSession,
   RunnerDevice,
   RunnerHarnessId,
@@ -12,13 +14,16 @@ import * as Sentry from '@sentry/node';
 import { config } from '../config/unifiedConfig.js';
 import { modelClient } from '../agent-host/modelClient.js';
 import { messageRepository } from '../repositories/messageRepository.js';
+import { projectRepository } from '../repositories/projectRepository.js';
 import { runnerService } from './runnerService.js';
 import type { OrgActor } from './runnerService.js';
 import { runnerSessionService } from './runnerSessionService.js';
+import { organizationRepository } from '../tenancy/repositories/organizationRepository.js';
 import { organizationService } from '../tenancy/services/organizationService.js';
 import { ChoiceRequiredError } from '../utils/errors.js';
 import {
   runnerChatRelayService,
+  type PendingRunnerPermission,
   type RunnerChatChannel,
 } from './runnerChatRelayService.js';
 import { logger } from '../utils/logger.js';
@@ -46,6 +51,8 @@ type RunnerIntent =
   | 'push_session'
   | 'open_pr'
   | 'cancel_session'
+  | 'list_sessions'
+  | 'list_devices'
   | 'none';
 
 /** Human labels for the harness ids, for the confirm line the user actually reads. */
@@ -57,10 +64,35 @@ const HARNESS_LABELS: Record<RunnerHarnessId, string> = {
 
 /**
  * Cheap pre-filter: only spend a model call when the turn plausibly concerns a runner. A bare "yes" is
- * caught not by keyword but by there being something pending to answer — see `handle`.
+ * caught not by keyword but by there being something pending to answer — see `handle`. The project
+ * names the person actually uses are added per turn by {@link looksLikeRunnerIntent}: "start a session
+ * on Truetalk" has no generic runner word in it, and it is the most ordinary thing anyone will say.
  */
-const LOOKS_LIKE_RUNNER_INTENT =
-  /\b(run|runner|laptop|machine|desktop|repo|repository|workspace|claude|codex|gemini|push|pull request|\bpr\b|branch|agent|coding)\b/i;
+const BASE_RUNNER_WORDS =
+  /\b(run|runner|laptop|machine|desktop|mac mini|macbook|repo|repository|workspace|project|session|worktree|commit|lint|tests?|test suite|claude|codex|gemini|push|pull request|pr|branch|agent|coding|what'?s running|is .* (up|online|offline))\b/i;
+
+/** Lowercase, alphanumerics only — how a spoken name survives a transcriber's spacing and casing. */
+export function normalizeName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Does this turn plausibly concern the runner? Generic words, or any of the person's project names or
+ * aliases (normalized, so "true talk" still finds Truetalk). Names shorter than three characters are
+ * ignored — they would match inside ordinary words.
+ */
+export function looksLikeRunnerIntent(text: string, projects: readonly Project[]): boolean {
+  if (BASE_RUNNER_WORDS.test(text)) return true;
+  const haystack = normalizeName(text);
+  if (haystack.length === 0) return false;
+  for (const project of projects) {
+    for (const name of [project.name, ...project.aliases]) {
+      const needle = normalizeName(name);
+      if (needle.length >= 3 && haystack.includes(needle)) return true;
+    }
+  }
+  return false;
+}
 
 /** How many recent turns of context to give the classifier (bounds the prompt). */
 const CONTEXT_TURNS = 8;
@@ -76,9 +108,12 @@ const responseSchema = z.object({
     'push_session',
     'open_pr',
     'cancel_session',
+    'list_sessions',
+    'list_devices',
     'none',
   ]),
-  /** For start_request / revise_proposal: the chosen device/workspace/harness ids, copied from context. */
+  /** For start_request / revise_proposal: the chosen ids, copied from context. */
+  projectId: z.string().default(''),
   deviceId: z.string().default(''),
   workspaceId: z.string().default(''),
   harness: z.string().default(''),
@@ -90,22 +125,23 @@ const responseSchema = z.object({
 
 const SYSTEM_PROMPT = [
   'You are the runner-control router for Stewra. Stewra can host coding agents (Claude Code, Codex,',
-  'Gemini CLI) on the USER\'S OWN machines and run them against their repos. Decide what the latest user',
-  'message is doing with respect to that, given the live context you are handed (which machines are',
-  'online and what they can run, any proposal awaiting the user\'s yes/no, any permission a running',
-  'session is blocked on, and any finished work).',
+  'Gemini CLI) on the USER\'S OWN machines and run them against their PROJECTS. Decide what the latest user',
+  'message is doing with respect to that, given the live context you are handed (the projects and which',
+  'machines have each one ready, the machines themselves, any proposal awaiting the user\'s yes/no, any',
+  'permission a running session is blocked on, and any finished work).',
   '',
   'Respond with ONLY a JSON object — no prose, no code fences — of shape:',
-  '{"intent": string, "deviceId": string, "workspaceId": string, "harness": string, "prompt": string, "reply": string}',
+  '{"intent": string, "projectId": string, "deviceId": string, "workspaceId": string, "harness": string, "prompt": string, "reply": string}',
   '',
   'intent is exactly one of:',
-  '- "start_request": the user is asking to run something on a machine. Fill deviceId, workspaceId and',
-  '  harness by COPYING the ids from the context (never invent one); choose the machine/workspace the',
-  '  user named, or the only online one if unambiguous. Put the coding instruction in "prompt".',
+  '- "start_request": the user is asking to run something. Fill projectId with the project they named (by',
+  '  name OR alias — "RankRise" may be an alias of another project) by COPYING its id from the context.',
+  '  Fill deviceId only if they named a machine. Fill workspaceId only if they named a raw checkout that',
+  '  is not a project. Fill harness if they named an agent. Put the coding instruction in "prompt".',
   '- "confirm_proposal": there is a proposal awaiting confirmation and the user is AGREEING to it as-is',
   '  (e.g. "yes", "go ahead", "do it").',
   '- "revise_proposal": there is a proposal awaiting confirmation and the user wants it CHANGED (different',
-  '  machine, workspace, harness, or wording). Fill the fields with the corrected values (copy ids from',
+  '  project, machine, harness, or wording). Fill the fields with the corrected values (copy ids from',
   '  context) and put the updated instruction in "prompt".',
   '- "decline_proposal": there is a proposal awaiting confirmation and the user is CALLING IT OFF.',
   '- "permission_allow": a session is blocked on a permission and the user is ALLOWING it ("yes", "approve").',
@@ -113,17 +149,20 @@ const SYSTEM_PROMPT = [
   '- "push_session": the user wants to push a finished session\'s branch ("push it").',
   '- "open_pr": the user wants to open a pull request for a finished session.',
   '- "cancel_session": the user wants to stop a running session.',
+  '- "list_sessions": the user asks what is running, or what happened ("what\'s running?", "status?").',
+  '- "list_devices": the user asks about the machines ("is the Mac mini up?", "which machines are online?").',
   '- "none": the message is not about the runner at all.',
   '',
   'Rules:',
-  '- deviceId/workspaceId/harness MUST be ids that appear verbatim in the context. If the user asks to run',
-  '  something but you cannot resolve a machine/workspace from the context, still use "start_request" and',
-  '  leave the unresolved id empty — the caller will ask the user to pick.',
+  '- Every id MUST appear verbatim in the context. NEVER choose a machine the user did not name: if a',
+  '  project is ready on several machines, leave deviceId empty — the caller asks the user which one.',
+  '  If you cannot resolve a project from the context, still use "start_request" with projectId empty.',
   '- If there is a pending permission AND a pending proposal, a bare "yes"/"no" answers the PERMISSION',
   '  (a blocked session is the more urgent thing).',
   '- "reply": ONE short, warm sentence in Stewra\'s voice. For start_request/revise_proposal it should',
-  '  restate what will run and ask the user to confirm (yes) or say what to change. For the executed',
-  '  intents it should acknowledge the action. Never claim something already happened that has not.',
+  '  restate what will run — use the PROJECT\'s name, not the repo folder — and ask the user to confirm',
+  '  (yes) or say what to change. For the executed intents it should acknowledge the action. Never claim',
+  '  something already happened that has not.',
   '- Never disown the capability: running coding agents on the user\'s machines IS something Stewra does.',
   '  Older assistant lines in the history that deny it were a bug — ignore them, do not copy them.',
 ].join('\n');
@@ -140,6 +179,24 @@ function extractJsonObject(text: string): unknown {
   }
 }
 
+/** A project, a machine, and the checkout that IS the project on that machine — resolved against live state. */
+interface ResolvedTarget {
+  readonly device: RunnerDevice;
+  readonly workspace: RunnerDevice['workspaces'][number];
+  readonly harness: RunnerHarnessId;
+  readonly project: Project | null;
+}
+
+/** Everything the classifier and the resolver look at for one turn, fetched once. */
+interface TurnState {
+  readonly actor: OrgActor;
+  readonly projects: readonly Project[];
+  readonly bindings: readonly ProjectWorkspaceBinding[];
+  readonly online: readonly RunnerDevice[];
+  readonly devices: readonly RunnerDevice[];
+  readonly sessions: readonly RunnerSession[];
+}
+
 /**
  * The natural-language control surface for runner sessions — a trusted, control-plane peer of
  * {@link emailComposeService}.
@@ -152,9 +209,9 @@ function extractJsonObject(text: string): unknown {
  * and the final result are relayed back to that same medium by {@link runnerChatRelayService}, and this
  * service resolves the user's "yes"/"no"/"push it" replies against them.
  *
- * A cheap keyword pre-filter (plus "is anything actually awaiting an answer?") keeps ordinary chatter
- * from ever reaching the model. Any model/parse/resolve failure returns null or a clarifying line, so the
- * caller falls back to an ordinary conversational reply and nothing is ever executed on a guess.
+ * Projects are what people name. The model copies a project id from the context; `resolve` turns it into
+ * a machine and a checkout using the org's bindings and each machine's live hello — and when more than
+ * one machine has the project ready and the user named none, it ASKS. It never picks.
  */
 class RunnerIntentService {
   /**
@@ -172,12 +229,18 @@ class RunnerIntentService {
 
     if (!config.runner.enabled) return null;
 
-    // Cheap gate first: only bother the model when the turn either mentions the runner OR there is
-    // something concrete awaiting the user's answer (so a bare "yes" is meaningful).
+    // Cheap gate first: only bother the model when the turn either mentions the runner — by a generic
+    // word or by one of the person's own project names — OR there is something concrete awaiting the
+    // user's answer (so a bare "yes" is meaningful). The names come from every org the person is in,
+    // because the gate runs before any org is chosen.
     const pendingProposalMessage = await messageRepository.findPendingRunnerProposal(conversationId);
-    const pendingPermission = runnerChatRelayService.latestPendingPermission(userId);
-    const keywordHit = LOOKS_LIKE_RUNNER_INTENT.test(latestUserText);
-    if (!keywordHit && pendingProposalMessage === undefined && pendingPermission === null) {
+    const pendingPermission = await runnerChatRelayService.latestPendingPermission(userId);
+    const everyProject = await this.projectsAcrossOrgs(userId);
+    if (
+      !looksLikeRunnerIntent(latestUserText, everyProject) &&
+      pendingProposalMessage === undefined &&
+      pendingPermission === null
+    ) {
       return null;
     }
 
@@ -186,18 +249,11 @@ class RunnerIntentService {
     const actor = await this.resolveActor(userId);
     if (typeof actor === 'string') return { reply: actor, proposal: null };
 
-    const { devices } = await runnerService.listDevices(actor.orgId);
-    // A cloud runner counts as available even when its container is stopped: starting it is Stewra's
-    // job, and `startSession` wakes it. Only a machine of the user's own is genuinely unreachable when
-    // offline — nothing here can turn a laptop on.
-    const online = devices.filter((d) => d.online || d.kind === 'hosted');
-    const sessions = (await runnerSessionService.listSessions(actor.orgId)).sessions;
-
+    const state = await this.loadState(actor, everyProject);
     const context = this.buildContext(
-      online,
+      state,
       pendingProposalMessage?.proposedRunnerSession ?? null,
       pendingPermission,
-      sessions,
     );
     const messages: ModelMessage[] = [
       { role: 'system', content: SYSTEM_PROMPT },
@@ -240,17 +296,9 @@ class RunnerIntentService {
 
     switch (intent) {
       case 'start_request':
-        return this.propose(online, data.deviceId, data.workspaceId, data.harness, data.prompt, data.reply);
+        return this.propose(state, data, data.prompt, data.reply);
       case 'revise_proposal':
-        return this.revise(
-          online,
-          pendingProposalMessage,
-          data.deviceId,
-          data.workspaceId,
-          data.harness,
-          data.prompt,
-          data.reply,
-        );
+        return this.revise(state, pendingProposalMessage, data, data.prompt, data.reply);
       case 'confirm_proposal':
         return this.confirm(userId, conversationId, channel, pendingProposalMessage, data.reply);
       case 'decline_proposal':
@@ -260,11 +308,15 @@ class RunnerIntentService {
       case 'permission_deny':
         return this.decidePermission(actor, pendingPermission, false, data.reply);
       case 'push_session':
-        return this.push(actor, sessions, data.reply);
+        return this.push(actor, state.sessions, data.reply);
       case 'open_pr':
-        return this.openPr(actor, sessions, data.reply);
+        return this.openPr(actor, state.sessions, data.reply);
       case 'cancel_session':
-        return this.cancelSession(actor, sessions, data.reply);
+        return this.cancelSession(actor, state.sessions, data.reply);
+      case 'list_sessions':
+        return { reply: this.describeSessions(state.sessions), proposal: null };
+      case 'list_devices':
+        return { reply: this.describeDevices(state), proposal: null };
       case 'none':
       default:
         return null;
@@ -288,18 +340,38 @@ class RunnerIntentService {
     }
   }
 
+  /** Live projects from every org the person belongs to — for the gate, which runs before an org is chosen. */
+  private async projectsAcrossOrgs(userId: string): Promise<Project[]> {
+    const memberships = await organizationRepository.listForUser(userId);
+    const all: Project[] = [];
+    for (const m of memberships) all.push(...(await projectRepository.list(m.org.id, false)));
+    return all;
+  }
+
+  private async loadState(actor: OrgActor, everyProject: readonly Project[]): Promise<TurnState> {
+    const projects = everyProject.filter((p) => p.orgId === actor.orgId);
+    const [bindings, { devices }, { sessions }] = await Promise.all([
+      projectRepository.listBindingsForOrg(actor.orgId),
+      runnerService.listDevices(actor.orgId),
+      runnerSessionService.listSessions(actor.orgId),
+    ]);
+    // A cloud runner counts as available even when its container is stopped: starting it is Stewra's
+    // job, and `startSession` wakes it. Only a machine of the user's own is genuinely unreachable when
+    // offline — nothing here can turn a laptop on.
+    const online = devices.filter((d) => d.online || d.kind === 'hosted');
+    return { actor, projects, bindings, online, devices, sessions };
+  }
+
   // ── proposal lifecycle ───────────────────────────────────────────────────────────────────────────────
 
-  /** A fresh "run X on machine Y" ask → a pending proposal + a confirm question. Nothing starts yet. */
+  /** A fresh "run X on Y" ask → a pending proposal + a confirm question. Nothing starts yet. */
   private propose(
-    online: readonly RunnerDevice[],
-    deviceId: string,
-    workspaceId: string,
-    harness: string,
+    state: TurnState,
+    ids: { projectId: string; deviceId: string; workspaceId: string; harness: string },
     prompt: string,
     modelReply: string,
   ): RunnerIntentOutcome | null {
-    if (online.length === 0) {
+    if (state.online.length === 0) {
       return {
         reply:
           'You have no runner available right now — set up a cloud runner in Stewra, or start the runner on one of your own machines.',
@@ -310,7 +382,7 @@ class RunnerIntentService {
       return { reply: 'What would you like the coding agent to do?', proposal: null };
     }
 
-    const resolved = this.resolve(online, deviceId, workspaceId, harness);
+    const resolved = this.resolve(state, ids);
     if (typeof resolved === 'string') return { reply: resolved, proposal: null };
 
     const proposal: ProposedRunnerSession = {
@@ -319,40 +391,46 @@ class RunnerIntentService {
       deviceName: resolved.device.name,
       workspaceId: resolved.workspace.id,
       workspaceName: resolved.workspace.name,
+      projectId: resolved.project?.id ?? null,
+      projectName: resolved.project?.name ?? null,
       harness: resolved.harness,
       prompt: prompt.trim(),
       sessionId: null,
       failureReason: null,
     };
+    const what = proposal.projectName ?? proposal.workspaceName;
     const reply =
       modelReply.trim().length > 0
         ? modelReply.trim()
-        : `I'll run "${proposal.prompt}" with ${HARNESS_LABELS[proposal.harness]} on ${proposal.deviceName} (${proposal.workspaceName}). Reply "yes" to start, or tell me what to change.`;
+        : `I'll run "${proposal.prompt}" with ${HARNESS_LABELS[proposal.harness]} on ${what} (${proposal.deviceName}). Reply "yes" to start, or tell me what to change.`;
     return { reply, proposal };
   }
 
   /** The user amended a pending proposal → re-propose with the corrected fields (still pending). */
   private async revise(
-    online: readonly RunnerDevice[],
+    state: TurnState,
     pendingMessage: Awaited<ReturnType<typeof messageRepository.findPendingRunnerProposal>>,
-    deviceId: string,
-    workspaceId: string,
-    harness: string,
+    ids: { projectId: string; deviceId: string; workspaceId: string; harness: string },
     prompt: string,
     modelReply: string,
   ): Promise<RunnerIntentOutcome | null> {
     const current = pendingMessage?.proposedRunnerSession;
     if (pendingMessage === undefined || current === null || current === undefined) {
       // Nothing to revise — treat it as a fresh request instead.
-      return this.propose(online, deviceId, workspaceId, harness, prompt, modelReply);
+      return this.propose(state, ids, prompt, modelReply);
     }
-    // Carry forward whatever the user did NOT change (an empty field from the model = unchanged).
-    const nextDeviceId = deviceId.trim().length > 0 ? deviceId : current.deviceId;
-    const nextWorkspaceId = workspaceId.trim().length > 0 ? workspaceId : current.workspaceId;
-    const nextHarness = harness.trim().length > 0 ? harness : current.harness;
+    // Carry forward whatever the user did NOT change (an empty field from the model = unchanged). A new
+    // project supersedes the old checkout; otherwise the old checkout (and its project) stand.
+    const projectChanged = ids.projectId.trim().length > 0 && ids.projectId !== current.projectId;
+    const next = {
+      projectId: ids.projectId.trim().length > 0 ? ids.projectId : (current.projectId ?? ''),
+      deviceId: ids.deviceId.trim().length > 0 ? ids.deviceId : projectChanged ? '' : current.deviceId,
+      workspaceId: ids.workspaceId.trim().length > 0 ? ids.workspaceId : projectChanged ? '' : current.workspaceId,
+      harness: ids.harness.trim().length > 0 ? ids.harness : current.harness,
+    };
     const nextPrompt = prompt.trim().length > 0 ? prompt : current.prompt;
 
-    const outcome = this.propose(online, nextDeviceId, nextWorkspaceId, nextHarness, nextPrompt, modelReply);
+    const outcome = this.propose(state, next, nextPrompt, modelReply);
     if (outcome === null || outcome.proposal === null) return outcome;
 
     // Supersede the previous pending card so only the newest one is confirmable.
@@ -393,6 +471,8 @@ class RunnerIntentService {
     const actor = await this.resolveActor(userId);
     if (typeof actor === 'string') return { started: false, reply: actor };
     try {
+      // By device + checkout: the service looks the binding up itself, so the session row carries the
+      // project even when the proposal predates projects.
       const session = await runnerSessionService.startSession(actor, {
         deviceId: proposal.deviceId,
         harness: proposal.harness,
@@ -414,12 +494,13 @@ class RunnerIntentService {
       }
 
       // Remember which chat to relay this session's permission gates and result back to.
-      runnerChatRelayService.registerOrigin(session.id, {
+      await runnerChatRelayService.registerOrigin(session.id, {
         userId,
         conversationId,
         channel,
         deviceName: proposal.deviceName,
         workspaceName: proposal.workspaceName,
+        projectName: session.projectName,
       });
       await messageRepository.updateProposedRunnerSession(messageId, {
         ...proposal,
@@ -464,7 +545,7 @@ class RunnerIntentService {
   /** Relay the user's yes/no on a blocked session's permission gate back down to the runner. */
   private async decidePermission(
     { orgId, userId }: OrgActor,
-    pending: ReturnType<typeof runnerChatRelayService.latestPendingPermission>,
+    pending: PendingRunnerPermission | null,
     allow: boolean,
     modelReply: string,
   ): Promise<RunnerIntentOutcome | null> {
@@ -477,7 +558,7 @@ class RunnerIntentService {
     }
     try {
       await runnerSessionService.decidePermission(orgId, pending.sessionId, pending.promptId, optionId);
-      runnerChatRelayService.clearPermission(pending.sessionId);
+      await runnerChatRelayService.clearPermission(pending.sessionId);
       const fallback = allow ? 'Approved — carrying on.' : 'Denied — I told it not to.';
       return { reply: modelReply.trim().length > 0 ? modelReply.trim() : fallback, proposal: null };
     } catch (error) {
@@ -567,26 +648,132 @@ class RunnerIntentService {
     }
   }
 
+  // ── read-only answers: on WhatsApp these ARE the fleet page ─────────────────────────────────────────
+
+  /** "What's running?" — the live sessions, then the most recent finished ones. */
+  private describeSessions(sessions: readonly RunnerSession[]): string {
+    const running = sessions.filter((s) => s.endedAt === null);
+    const finished = sessions.filter((s) => s.endedAt !== null).slice(0, 3);
+    const lines: string[] = [];
+    if (running.length === 0) {
+      lines.push('Nothing is running right now.');
+    } else {
+      lines.push(running.length === 1 ? 'One session running:' : `${running.length} sessions running:`);
+      for (const s of running) lines.push(`• ${this.sessionLine(s)}`);
+    }
+    if (finished.length > 0) {
+      lines.push('Recently finished:');
+      for (const s of finished) lines.push(`• ${this.sessionLine(s)}`);
+    }
+    return lines.join('\n');
+  }
+
+  private sessionLine(s: RunnerSession): string {
+    const what = s.projectName ?? s.workspaceName;
+    const firstLine = s.prompt.split('\n')[0] ?? s.prompt;
+    const instruction = firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
+    const tail =
+      s.endedAt === null
+        ? s.status
+        : s.prUrl !== null
+          ? `${s.status}, PR ${s.prUrl}`
+          : s.branch !== null
+            ? `${s.status}, on ${s.branch}${s.pushed ? ' (pushed)' : ''}`
+            : s.status;
+    return `${what} on ${s.deviceName} — "${instruction}" — ${tail}`;
+  }
+
+  /** "Is the Mac mini up?" — every machine in the org, in one line each. */
+  private describeDevices(state: TurnState): string {
+    if (state.devices.length === 0) return 'There are no machines paired to this organization yet.';
+    const lines = state.devices.map((d) => {
+      const ready = state.projects
+        .filter((p) => this.readyOn(state, p).some((c) => c.device.id === d.id))
+        .map((p) => p.name);
+      const status = d.online
+        ? 'online'
+        : d.kind === 'hosted'
+          ? 'asleep (wakes when needed)'
+          : d.lastSeenAt !== null
+            ? `offline since ${new Date(d.lastSeenAt).toLocaleString('en-GB')}`
+            : 'never connected';
+      const projects = ready.length > 0 ? `; ready: ${ready.join(', ')}` : '';
+      return `• ${d.name} (${d.environment}) — ${status}${projects}`;
+    });
+    return lines.join('\n');
+  }
+
   // ── helpers ──────────────────────────────────────────────────────────────────────────────────────────
 
+  /** The machines a project is READY on: bound, reachable, and the checkout is in the machine's live hello. */
+  private readyOn(
+    state: TurnState,
+    project: Project,
+  ): ReadonlyArray<{ device: RunnerDevice; workspace: RunnerDevice['workspaces'][number] }> {
+    const out: Array<{ device: RunnerDevice; workspace: RunnerDevice['workspaces'][number] }> = [];
+    for (const b of state.bindings.filter((x) => x.projectId === project.id)) {
+      const device = state.online.find((d) => d.id === b.deviceId);
+      const workspace = device?.workspaces.find((w) => w.id === b.workspaceId);
+      if (device !== undefined && workspace !== undefined) out.push({ device, workspace });
+    }
+    return out;
+  }
+
   /**
-   * Resolve the model's chosen ids against the LIVE online devices — the model's output is untrusted, so
-   * a device/workspace/harness it names must actually exist and be runnable before we build a proposal.
-   * Returns the resolved trio, or a user-facing clarifying line when it can't be pinned down.
+   * Resolve the model's chosen ids against LIVE state — the model's output is untrusted, so a project,
+   * device, workspace or harness it names must actually exist and be runnable before a proposal is
+   * built. Returns the resolved target, or the clarifying sentence to send when it cannot be pinned
+   * down. Order: named machine → machines the project is ready on → exactly one, use it → two or more,
+   * ASK. Zero gets a sentence for its cause, never a generic one.
    */
   private resolve(
-    online: readonly RunnerDevice[],
-    deviceId: string,
-    workspaceId: string,
-    harness: string,
-  ): { device: RunnerDevice; workspace: RunnerDevice['workspaces'][number]; harness: RunnerHarnessId } | string {
-    const device = online.find((d) => d.id === deviceId) ?? (online.length === 1 ? online[0] : undefined);
-    if (device === undefined) {
-      const names = online.map((d) => d.name).join(', ');
-      return `Which machine should I use — ${names}?`;
+    state: TurnState,
+    ids: { projectId: string; deviceId: string; workspaceId: string; harness: string },
+  ): ResolvedTarget | string {
+    const project = state.projects.find((p) => p.id === ids.projectId) ?? null;
+
+    let device: RunnerDevice | undefined;
+    let workspace: RunnerDevice['workspaces'][number] | undefined;
+
+    if (project !== null) {
+      const ready = this.readyOn(state, project);
+      if (ids.deviceId.trim().length > 0) {
+        const named = ready.find((c) => c.device.id === ids.deviceId);
+        if (named === undefined) {
+          const deviceName = state.devices.find((d) => d.id === ids.deviceId)?.name ?? 'that machine';
+          return this.notReadyReason(state, project, deviceName, ids.deviceId);
+        }
+        device = named.device;
+        workspace = named.workspace;
+      } else if (ready.length === 1 && ready[0] !== undefined) {
+        device = ready[0].device;
+        workspace = ready[0].workspace;
+      } else if (ready.length > 1) {
+        const names = ready.map((c) => c.device.name).join(' or ');
+        return `${project.name} is ready on more than one machine — ${names}. Which one?`;
+      } else {
+        return this.notReadyReason(state, project, null, null);
+      }
+    } else {
+      // No project named: a raw checkout on a named machine. Nothing is defaulted — a machine must be
+      // named (or be the only one online), and the checkout must be named.
+      device = state.online.find((d) => d.id === ids.deviceId) ?? (state.online.length === 1 ? state.online[0] : undefined);
+      if (device === undefined) {
+        const names = state.online.map((d) => d.name).join(', ');
+        return state.projects.length > 0
+          ? `Which project — ${state.projects.map((p) => p.name).join(', ')}? Or name a machine: ${names}.`
+          : `Which machine should I use — ${names}?`;
+      }
+      workspace = device.workspaces.find((w) => w.id === ids.workspaceId);
+      if (workspace === undefined) {
+        const names = device.workspaces.map((w) => w.name).join(', ');
+        return names.length > 0
+          ? `Which checkout on ${device.name} — ${names}?`
+          : `${device.name} has no checkouts exposed to run against.`;
+      }
     }
 
-    const harnessId = this.asHarnessId(harness);
+    const harnessId = this.asHarnessId(ids.harness);
     const usable = device.harnesses.filter((h) => h.available);
     const preferred = harnessId !== null && usable.some((h) => h.id === harnessId) ? harnessId : undefined;
     const chosenHarness = preferred ?? usable[0]?.id;
@@ -594,17 +781,42 @@ class RunnerIntentService {
       return `${device.name} doesn't have a coding agent available right now.`;
     }
 
-    const workspace =
-      device.workspaces.find((w) => w.id === workspaceId) ??
-      (device.workspaces.length === 1 ? device.workspaces[0] : undefined);
-    if (workspace === undefined) {
-      const names = device.workspaces.map((w) => w.name).join(', ');
-      return names.length > 0
-        ? `Which repo on ${device.name} — ${names}?`
-        : `${device.name} has no workspaces exposed to run against.`;
-    }
+    // The checkout's own binding decides the project when none was named.
+    const boundProject =
+      project ??
+      state.projects.find((p) =>
+        state.bindings.some((b) => b.projectId === p.id && b.deviceId === device.id && b.workspaceId === workspace.id),
+      ) ??
+      null;
 
-    return { device, workspace, harness: chosenHarness };
+    return { device, workspace, harness: chosenHarness, project: boundProject };
+  }
+
+  /** Why a project cannot run (on a given machine, or anywhere): one specific sentence per cause. */
+  private notReadyReason(state: TurnState, project: Project, deviceName: string | null, deviceId: string | null): string {
+    const bindings = state.bindings.filter((b) => b.projectId === project.id && (deviceId === null || b.deviceId === deviceId));
+    if (bindings.length === 0) {
+      return deviceName === null
+        ? `${project.name} isn't bound to a checkout on any machine yet — bind it on the Fleet page first.`
+        : `${project.name} isn't bound to a checkout on ${deviceName} — bind it on the Fleet page first.`;
+    }
+    const offline = bindings.filter((b) => !state.online.some((d) => d.id === b.deviceId));
+    const notReporting = bindings.filter((b) => {
+      const d = state.online.find((x) => x.id === b.deviceId);
+      return d !== undefined && !d.workspaces.some((w) => w.id === b.workspaceId);
+    });
+    const nameOf = (id: string): string => state.devices.find((d) => d.id === id)?.name ?? 'a machine';
+    if (notReporting.length > 0) {
+      const b = notReporting[0];
+      if (b !== undefined) {
+        return `${nameOf(b.deviceId)} is online but isn't reporting ${b.workspacePath} — check the volume is mounted, then press Rescan on the Fleet page.`;
+      }
+    }
+    if (offline.length > 0) {
+      const names = offline.map((b) => nameOf(b.deviceId)).join(' and ');
+      return `${project.name} is on ${names}, which ${offline.length === 1 ? 'is' : 'are'} offline right now.`;
+    }
+    return `${project.name} isn't ready to run right now.`;
   }
 
   /**
@@ -627,29 +839,43 @@ class RunnerIntentService {
     return RUNNER_HARNESS_IDS.find((id) => id === value) ?? null;
   }
 
-  /** A compact, id-bearing snapshot of the live runner state for the classifier to choose from. */
+  /** A compact, id-bearing snapshot of the live runner state for the classifier to choose from. Projects first. */
   private buildContext(
-    online: readonly RunnerDevice[],
+    state: TurnState,
     pendingProposal: ProposedRunnerSession | null,
-    pendingPermission: ReturnType<typeof runnerChatRelayService.latestPendingPermission>,
-    sessions: readonly RunnerSession[],
+    pendingPermission: PendingRunnerPermission | null,
   ): string {
     const lines: string[] = [];
 
-    if (online.length === 0) {
+    if (state.projects.length === 0) {
+      lines.push('Projects: none defined yet.');
+    } else {
+      lines.push('Projects:');
+      for (const p of state.projects) {
+        const aliases = p.aliases.length > 0 ? `; aliases: ${p.aliases.join(', ')}` : '';
+        const ready = this.readyOn(state, p);
+        const where =
+          ready.length === 0
+            ? 'not ready on any machine right now'
+            : `ready on ${ready.map((c) => `${c.device.name} [deviceId=${c.device.id} workspaceId=${c.workspace.id}]`).join(', ')}`;
+        lines.push(`- ${p.name} [projectId=${p.id}] (repo ${p.repoName}${aliases}): ${where}`);
+      }
+    }
+
+    if (state.online.length === 0) {
       lines.push('Available machines: none.');
     } else {
       lines.push('Available machines:');
-      for (const d of online) {
+      for (const d of state.online) {
         // fallback-ok (both): this is prose being rendered for the model. An empty list genuinely
         // IS "none" here — nothing failed, and no caller branches on the string.
         const harnesses = d.harnesses.filter((h) => h.available).map((h) => h.id).join(', ') || 'none'; // fallback-ok
         const workspaces = d.workspaces.map((w) => `${w.name} [id=${w.id}]`).join(', ') || 'none'; // fallback-ok
         // A sleeping cloud runner is still a valid target — the classifier must not rule it out, and the
         // user should hear that starting one takes a moment rather than that their runner is broken.
-        const state = d.online ? '' : ' — asleep, wakes automatically (takes about a minute)';
+        const state2 = d.online ? '' : ' — asleep, wakes automatically (takes about a minute)';
         lines.push(
-          `- ${d.name} [deviceId=${d.id}] (${d.os})${state}; harnesses: ${harnesses}; workspaces: ${workspaces}`,
+          `- ${d.name} [deviceId=${d.id}] (${d.os}, ${d.environment})${state2}; harnesses: ${harnesses}; checkouts: ${workspaces}`,
         );
       }
     }
@@ -657,7 +883,7 @@ class RunnerIntentService {
     if (pendingProposal !== null) {
       lines.push(
         `Proposal awaiting confirmation: run "${pendingProposal.prompt}" with ${pendingProposal.harness} ` +
-          `on ${pendingProposal.deviceName} (${pendingProposal.workspaceName}).`,
+          `on ${pendingProposal.projectName ?? pendingProposal.workspaceName} (${pendingProposal.deviceName}).`,
       );
     } else {
       lines.push('Proposal awaiting confirmation: none.');
@@ -669,8 +895,8 @@ class RunnerIntentService {
       lines.push('Permission awaiting an answer: none.');
     }
 
-    const running = sessions.filter((s) => s.endedAt === null);
-    const finishedWithBranch = sessions.filter((s) => s.endedAt !== null && s.branch !== null);
+    const running = state.sessions.filter((s) => s.endedAt === null);
+    const finishedWithBranch = state.sessions.filter((s) => s.endedAt !== null && s.branch !== null);
     lines.push(
       `Running sessions: ${running.length}. Finished sessions with a pushable branch: ${finishedWithBranch.length}.`,
     );

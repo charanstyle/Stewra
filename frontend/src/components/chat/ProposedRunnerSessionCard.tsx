@@ -58,6 +58,15 @@ export const ProposedRunnerSessionCard: React.FC<Props> = React.memo(
       <View style={styles.card} testID="runner-session-card">
         <Text style={styles.header}>Run coding agent</Text>
 
+        {/* The project is what the person said ("Truetalk"); the repo is what the checkout is called. */}
+        {proposal.projectName !== null && (
+          <View style={styles.field}>
+            <Text style={styles.label}>Project</Text>
+            <Text style={styles.value} testID="runner-session-project">
+              {proposal.projectName}
+            </Text>
+          </View>
+        )}
         <View style={styles.field}>
           <Text style={styles.label}>Machine</Text>
           <Text style={styles.value}>{proposal.deviceName}</Text>

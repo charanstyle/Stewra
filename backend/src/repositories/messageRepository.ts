@@ -168,7 +168,19 @@ function parseProposedRunnerSession(
   if (!isJsonObject(raw)) {
     return null;
   }
-  const { status, deviceId, deviceName, workspaceId, workspaceName, harness, prompt, sessionId, failureReason } = raw;
+  const {
+    status,
+    deviceId,
+    deviceName,
+    workspaceId,
+    workspaceName,
+    harness,
+    prompt,
+    sessionId,
+    failureReason,
+    projectId,
+    projectName,
+  } = raw;
   if (
     typeof status !== 'string' ||
     typeof deviceId !== 'string' ||
@@ -190,6 +202,9 @@ function parseProposedRunnerSession(
     workspaceName,
     harness,
     prompt,
+    // Proposals stored before projects existed have neither key; they were for a bare checkout.
+    projectId: typeof projectId === 'string' ? projectId : null,
+    projectName: typeof projectName === 'string' ? projectName : null,
     sessionId: typeof sessionId === 'string' ? sessionId : null,
     failureReason: typeof failureReason === 'string' ? failureReason : null,
   };

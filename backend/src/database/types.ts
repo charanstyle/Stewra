@@ -851,6 +851,33 @@ export interface ProjectWorkspacesTable {
 }
 
 /**
+ * Where a chat-started runner session relays its gates and result (migration 066). One row per
+ * session, written at start, deleted at end. Persisted so a restart mid-session does not lose the
+ * WhatsApp target.
+ */
+export interface RunnerChatOriginsTable {
+  session_id: string;
+  user_id: string;
+  conversation_id: string;
+  channel: 'stewra_chat' | 'whatsapp';
+  device_name: string;
+  workspace_name: string;
+  project_name: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: CreatedAt;
+}
+
+/** The permission gate a chat-watched session is blocked on right now (migration 066). At most one per session. */
+export interface RunnerChatPendingPermissionsTable {
+  session_id: string;
+  user_id: string;
+  prompt_id: string;
+  allow_option_id: ColumnType<string | null, string | null | undefined, string | null>;
+  deny_option_id: ColumnType<string | null, string | null | undefined, string | null>;
+  title: string;
+  created_at: CreatedAt;
+}
+
+/**
  * The user's GitHub App installation (migration 036) — the one piece of GitHub state at rest, and it
  * holds NO credential: installation tokens are minted on demand from the App's private key and cached
  * in memory only. One row per user, and an installation can belong to only one user (both unique).
@@ -1638,6 +1665,8 @@ export interface Database {
   runner_sessions: RunnerSessionsTable;
   projects: ProjectsTable;
   project_workspaces: ProjectWorkspacesTable;
+  runner_chat_origins: RunnerChatOriginsTable;
+  runner_chat_pending_permissions: RunnerChatPendingPermissionsTable;
   github_app_installations: GithubAppInstallationsTable;
   // ── Commerce plane (migrations 038–040). Scoped by org_id, never by user_id. ──
   organizations: OrganizationsTable;

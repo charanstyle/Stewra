@@ -18,6 +18,7 @@ import { projectRepository, projectSlug } from '../repositories/projectRepositor
 import type { ProjectPatch } from '../repositories/projectRepository.js';
 import { runnerService } from './runnerService.js';
 import type { OrgActor } from './runnerService.js';
+import { organizationRepository } from '../tenancy/repositories/organizationRepository.js';
 import { ConflictError, NotFoundError, ValidationError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
@@ -31,6 +32,24 @@ import { logger } from '../utils/logger.js';
  * violation into a sentence (409), and the audit row every mutation owes (invariant 7).
  */
 class ProjectService {
+  /**
+   * The names a person says for their projects — every live project's name and aliases across every
+   * org they belong to. Fed to speech-to-text as vocabulary, so "Truetalk" is transcribed as written.
+   * Per-org reads under the hood (invariant 1: every project access is scoped by an org), joined here
+   * because a voice note has no org yet.
+   */
+  async vocabularyForUser(userId: string): Promise<string[]> {
+    const memberships = await organizationRepository.listForUser(userId);
+    const words = new Set<string>();
+    for (const m of memberships) {
+      for (const project of await projectRepository.list(m.org.id, false)) {
+        words.add(project.name);
+        for (const alias of project.aliases) words.add(alias);
+      }
+    }
+    return [...words];
+  }
+
   private cleanAliases(aliases: readonly string[] | undefined): string[] {
     if (aliases === undefined) return [];
     const seen = new Set<string>();
