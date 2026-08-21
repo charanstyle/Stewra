@@ -240,6 +240,13 @@ const responseSchema = z.object({
   prompt: z.string().default(''),
   /** One short, natural sentence to reply with, in Stewra's voice. */
   reply: z.string().default(''),
+  /**
+   * For list_sessions / list_devices: the machine the user named, in THEIR OWN words. Unlike `deviceId`
+   * this is not a choice and resolves to nothing — it exists so an answer can say "I don't have a
+   * machine called Mac mini" instead of quietly reporting on every other machine. Checked against the
+   * user's text before it is used, so the model cannot invent a machine that was never mentioned.
+   */
+  machineMention: z.string().default(''),
 });
 
 const SYSTEM_PROMPT = [
@@ -250,7 +257,7 @@ const SYSTEM_PROMPT = [
   'permission a running session is blocked on, and any finished work).',
   '',
   'Respond with ONLY a JSON object — no prose, no code fences — of shape:',
-  '{"intent": string, "projectId": string, "deviceId": string, "workspaceId": string, "harness": string, "prompt": string, "reply": string}',
+  '{"intent": string, "projectId": string, "deviceId": string, "workspaceId": string, "harness": string, "prompt": string, "reply": string, "machineMention": string}',
   '',
   'intent is exactly one of:',
   '- "start_request": the user is asking to run something. Fill projectId with the project they named (by',
@@ -270,6 +277,9 @@ const SYSTEM_PROMPT = [
   '- "cancel_session": the user wants to stop a running session.',
   '- "list_sessions": the user asks what is running, or what happened ("what\'s running?", "status?").',
   '- "list_devices": the user asks about the machines ("is the Mac mini up?", "which machines are online?").',
+  '  For BOTH list intents, if the user named a machine, copy that name into "machineMention" exactly as',
+  '  they wrote it — even, and especially, when no such machine appears in the context. That is how the',
+  '  answer can say the machine is not here instead of reporting on the others as if it were.',
   '- "none": the message is not about the runner at all.',
   '',
   'Rules:',
@@ -486,9 +496,15 @@ class RunnerIntentService {
       case 'cancel_session':
         return this.cancelSession(actor, state.sessions, data.reply);
       case 'list_sessions':
-        return { reply: await this.describeSessions(state, latestUserText), proposal: null };
+        return {
+          reply: await this.describeSessions(state, latestUserText, this.mentioned(data, latestUserText)),
+          proposal: null,
+        };
       case 'list_devices':
-        return { reply: await this.describeDevices(state, latestUserText), proposal: null };
+        return {
+          reply: await this.describeDevices(state, latestUserText, this.mentioned(data, latestUserText)),
+          proposal: null,
+        };
       case 'none':
       default:
         return null;
@@ -835,16 +851,48 @@ class RunnerIntentService {
    * the answer falls back to the org — and says so by name, which is what lets the reader see they are
    * being told about a tenant that has never heard of the machine they asked about.
    */
-  private async describeSessions(state: TurnState, latestUserText: string): Promise<string> {
+  private async describeSessions(
+    state: TurnState,
+    latestUserText: string,
+    mention: string,
+  ): Promise<string> {
     const named = state.devices.filter((d) => userNamedDevice(latestUserText, d.name));
     const only = named[0];
     if (named.length === 1 && only !== undefined) {
       const mine = state.sessions.filter((s) => s.deviceId === only.id);
       return this.sessionReport(mine, `on ${only.name}`);
     }
-    const elsewhere = named.length === 0 ? await this.namedElsewhere(state, latestUserText) : null;
+    const caveat = named.length === 0 ? await this.machineCaveat(state, mention, latestUserText) : null;
     const report = this.sessionReport(state.sessions, `in ${state.orgName}`);
-    return elsewhere === null ? report : `${elsewhere}\n${report}`;
+    return caveat === null ? report : `${caveat}\n${report}`;
+  }
+
+  /**
+   * The machine the person asked about is not one this conversation can see. Say which, and why.
+   *
+   * Empty when they named no machine — a plain "what's running?" is about the whole org and needs no
+   * caveat, and this is also what keeps the other-organizations lookup off every such turn.
+   */
+  private async machineCaveat(
+    state: TurnState,
+    mention: string,
+    latestUserText: string,
+  ): Promise<string | null> {
+    if (mention.length === 0) return null;
+    const elsewhere = await this.namedElsewhere(state, latestUserText);
+    if (elsewhere !== null) return elsewhere;
+    return `I don't have a machine called "${mention}" in ${state.orgName}.`;
+  }
+
+  /**
+   * The machine name the model says the user named, kept only when the user's own words contain it.
+   * The model has been seen echoing a machine from the context that the person never mentioned, and an
+   * answer built on that would be about a machine nobody asked about.
+   */
+  private mentioned(data: { machineMention: string }, latestUserText: string): string {
+    const mention = data.machineMention.trim();
+    if (mention.length === 0) return '';
+    return normalizeName(latestUserText).includes(normalizeName(mention)) ? mention : '';
   }
 
   /**
@@ -922,19 +970,23 @@ class RunnerIntentService {
    * ANOTHER of the person's organizations is invisible here by design; saying whose machines these are
    * is what makes that visible instead of silent.
    */
-  private async describeDevices(state: TurnState, latestUserText: string): Promise<string> {
+  private async describeDevices(
+    state: TurnState,
+    latestUserText: string,
+    mention: string,
+  ): Promise<string> {
     if (state.devices.length === 0) {
       return `No machines are connected to ${state.orgName} yet. Once the Stewra runner is running on one, it'll show up here.`;
     }
     // A machine the person named by name is the machine they asked about; the rest are noise.
     const named = state.devices.filter((d) => userNamedDevice(latestUserText, d.name));
     const shown = named.length > 0 ? named : state.devices;
-    const elsewhere = named.length === 0 ? await this.namedElsewhere(state, latestUserText) : null;
+    const caveat = named.length === 0 ? await this.machineCaveat(state, mention, latestUserText) : null;
     const heading =
       named.length > 0
         ? `In ${state.orgName}:`
-        : elsewhere !== null
-          ? `${elsewhere} Here's ${state.orgName}:`
+        : caveat !== null
+          ? `${caveat} Here's ${state.orgName}:`
           : `Machines in ${state.orgName} (anything paired in another of your organizations won't be here):`;
     const lines = shown.map((d) => {
       const ready = state.projects
