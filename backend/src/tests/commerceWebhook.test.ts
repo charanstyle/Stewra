@@ -121,6 +121,7 @@ async function orgWithChannel(): Promise<{ orgId: string; wabaId: string; accoun
   createdUsers.push(user.id);
 
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Webhook Test Co',
     slug: `webhook-${randomUUID().slice(0, 8)}`,
     createdBy: user.id,

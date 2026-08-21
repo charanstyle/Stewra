@@ -77,6 +77,7 @@ async function createUser(displayName = 'Invite Test User'): Promise<TestUser> {
 async function createOrg(name = 'Bluebird Bakery'): Promise<{ owner: TestUser; orgId: string }> {
   const owner = await createUser('Odette Owner');
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name,
     slug: `bluebird-${randomUUID().slice(0, 8)}`,
     createdBy: owner.id,

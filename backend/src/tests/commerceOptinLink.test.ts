@@ -115,6 +115,7 @@ interface Tenant {
 async function createTenant(phone = '+1 555 010 0200'): Promise<Tenant> {
   const owner = await createUser();
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Opt-in Co',
     slug: `optin-${randomUUID().slice(0, 8)}`,
     createdBy: owner.id,

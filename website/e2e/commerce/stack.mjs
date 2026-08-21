@@ -125,7 +125,15 @@ async function createVerifiedUser(apiUrl, databaseUrl, { email, password }) {
   const res = await fetch(`${apiUrl}/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email, password, displayName: 'Commerce QA' }),
+    // A business signup — this user's orgs are created by name in the specs, and an individual org
+    // would refuse the invites the tenancy specs send.
+    body: JSON.stringify({
+      email,
+      password,
+      displayName: 'Commerce QA',
+      accountKind: 'business',
+      companyName: 'Commerce QA Ltd',
+    }),
   });
   const payload = await res.json();
   if (!payload.success) {

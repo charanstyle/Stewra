@@ -52,7 +52,7 @@ async function makeUser(label: string): Promise<string> {
 async function makeOrg(createdBy: string): Promise<string> {
   const org = await db
     .insertInto('organizations')
-    .values({ name: `Del Org ${randomUUID()}`, slug: `del-${randomUUID()}`, created_by: createdBy })
+    .values({ kind: 'business', name: `Del Org ${randomUUID()}`, slug: `del-${randomUUID()}`, created_by: createdBy })
     .returning('id')
     .executeTakeFirstOrThrow();
   await db

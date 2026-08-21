@@ -143,6 +143,7 @@ interface Tenant {
 async function tenant(): Promise<Tenant> {
   const userId = await createUser(`billing-${randomUUID()}@stewra.invalid`);
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Billing Test Org',
     slug: `billing-${randomUUID().slice(0, 12)}`,
     createdBy: userId,

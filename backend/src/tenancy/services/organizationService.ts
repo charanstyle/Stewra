@@ -33,6 +33,10 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  * verified `actorRole` and never re-derives it.
  */
 class OrganizationService {
+  /**
+   * POST /orgs: a further organization, created by name. Always `business` — the one `individual`
+   * org a person has is created at signup, and there is never a second.
+   */
   async createOrg(userId: string, name: string, slug?: string): Promise<{ org: Organization; role: OrgRole }> {
     const trimmed = name.trim();
     if (trimmed.length === 0) {
@@ -43,8 +47,36 @@ class OrganizationService {
     return organizationRepository.create({
       name: trimmed,
       slug: slugify(slug ?? trimmed),
+      kind: 'business',
       createdBy: userId,
     });
+  }
+
+  /**
+   * Turn an `individual` org into a `business` one under a company name — the one way a personal
+   * account grows a team. Owner only, checked here rather than left to the route so a future caller
+   * cannot forget it. One-way: a business is never converted back, because by then it may have
+   * members who are not the person.
+   */
+  async convertToBusiness(params: {
+    orgId: string;
+    actorRole: OrgRole;
+    companyName: string;
+  }): Promise<Organization> {
+    if (params.actorRole !== 'owner') {
+      throw new ForbiddenError('Only an owner can convert an organization.', 'OWNER_ROLE_REQUIRED');
+    }
+    const companyName = params.companyName.trim();
+    if (companyName.length === 0) {
+      throw new ValidationError('Validation failed', [
+        { field: 'companyName', message: 'A company name is required' },
+      ]);
+    }
+    const org = await organizationRepository.convertToBusiness(params.orgId, companyName);
+    if (org === null) {
+      throw new ConflictError('This organization is already a business organization.');
+    }
+    return org;
   }
 
   async listOrgs(userId: string): Promise<{ memberships: OrgMembership[]; activeOrgId: string | null }> {
@@ -100,6 +132,16 @@ class OrganizationService {
       ]);
     }
     this.assertMayAssignRole(params.actorRole, params.role);
+
+    // An individual org IS the person; an invite into it would make a team out of an account whose
+    // owner never asked for one. The database trigger from migration 063 refuses the insert too —
+    // this check exists so the refusal arrives as a sentence rather than a constraint error.
+    if ((await organizationRepository.findKind(params.orgId)) === 'individual') {
+      throw new ConflictError(
+        'This is an individual account and cannot have members. Convert it to a business ' +
+          'organization first.',
+      );
+    }
 
     // Fetched before minting, so a missing identity (a real anomaly — the actor was just verified
     // as a member) fails the request while there is still nothing to clean up.

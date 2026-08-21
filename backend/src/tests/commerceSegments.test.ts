@@ -77,6 +77,7 @@ interface Tenant {
 async function createTenant(): Promise<Tenant> {
   const owner = await createUser();
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Audience Test Co',
     slug: `audience-${randomUUID().slice(0, 8)}`,
     createdBy: owner.id,

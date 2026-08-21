@@ -61,6 +61,8 @@ export default function CommerceScreen({
 
   const [newOrgName, setNewOrgName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+  const [converting, setConverting] = useState(false);
 
   const [accounts, setAccounts] = useState<ReadonlyArray<ChannelAccount>>([]);
   const [conversations, setConversations] = useState<ReadonlyArray<CommerceConversationSummary>>(
@@ -77,7 +79,8 @@ export default function CommerceScreen({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const role = memberships.find((m) => m.org.id === orgId)?.role ?? null;
+  const selectedMembership = memberships.find((m) => m.org.id === orgId) ?? null;
+  const role = selectedMembership?.role ?? null;
   const openThread = conversations.find((c) => c.id === openThreadId) ?? null;
   const replyWindow = openThread === null ? null : windowRemaining(openThread.serviceWindowExpiresAt);
 
@@ -145,6 +148,25 @@ export default function CommerceScreen({
       setCreating(false);
     }
   }, [newOrgName, creating, loadOrgs]);
+
+  /** Same action, same endpoint as the website: a personal org becomes a business one, by name. */
+  const convertOrg = useCallback(async (): Promise<void> => {
+    const name = companyName.trim();
+    if (orgId === null || name === '' || converting) return;
+    setError(null);
+    setNotice(null);
+    setConverting(true);
+    try {
+      const res = await api.convertOrg(orgId, { companyName: name });
+      setCompanyName('');
+      setNotice(`${res.org.name} is now a business organization. You can invite your team.`);
+      await loadOrgs();
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setConverting(false);
+    }
+  }, [orgId, companyName, converting, loadOrgs]);
 
   const makeActive = useCallback(async (): Promise<void> => {
     if (orgId === null) return;
@@ -313,6 +335,47 @@ export default function CommerceScreen({
             <Text style={styles.smallButtonLabel}>Use this business when I text Stewra</Text>
           </Pressable>
         )}
+
+        {selectedMembership !== null &&
+          selectedMembership.org.kind === 'individual' &&
+          selectedMembership.role === 'owner' && (
+            <View style={styles.section} testID="org-convert">
+              <Text style={styles.sectionTitle}>Personal account</Text>
+              <Text style={styles.muted}>
+                This organization is you. To invite a team, convert it to a business organization
+                under the company&apos;s name.
+              </Text>
+              <TextInput
+                style={styles.orgNameInput}
+                placeholder="Company name"
+                placeholderTextColor={theme.colors.textSecondary}
+                value={companyName}
+                onChangeText={setCompanyName}
+                autoCapitalize="words"
+                autoCorrect={false}
+                returnKeyType="go"
+                editable={!converting}
+                onSubmitEditing={() => void convertOrg()}
+                testID="org-convert-name"
+              />
+              <Pressable
+                accessibilityRole="button"
+                disabled={converting || companyName.trim() === ''}
+                onPress={() => void convertOrg()}
+                style={({ pressed }) => [
+                  styles.smallButton,
+                  styles.standalone,
+                  pressed && styles.pressed,
+                  (converting || companyName.trim() === '') && styles.disabled,
+                ]}
+                testID="org-convert-submit"
+              >
+                <Text style={styles.smallButtonLabel}>
+                  {converting ? 'Converting…' : 'Convert to a business organization'}
+                </Text>
+              </Pressable>
+            </View>
+          )}
 
         {/*
           The only billing control on this screen, and deliberately a link rather than a section:

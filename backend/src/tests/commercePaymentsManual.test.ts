@@ -91,6 +91,7 @@ async function createUser(email: string): Promise<string> {
 async function org(): Promise<string> {
   const userId = await createUser(`manual-${randomUUID()}@stewra.invalid`);
   const { org: created } = await organizationRepository.create({
+    kind: 'business',
     name: 'Manual Payments Org',
     slug: `manual-${randomUUID().slice(0, 12)}`,
     createdBy: userId,

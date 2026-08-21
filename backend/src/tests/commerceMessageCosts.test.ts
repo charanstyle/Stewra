@@ -59,6 +59,7 @@ async function createOwner(): Promise<{ id: string; auth: string; orgId: string 
     .executeTakeFirstOrThrow();
   createdUsers.push(row.id);
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Costs Bakery',
     slug: `costs-${randomUUID().slice(0, 8)}`,
     createdBy: row.id,

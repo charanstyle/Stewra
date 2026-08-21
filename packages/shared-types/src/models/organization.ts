@@ -1,23 +1,38 @@
 import type { ISODateString, UUID } from '../common/base';
 
 /**
- * An ORGANIZATION is the tenant of the commerce plane — a client business that runs its commercial
- * funnel through Stewra. It is the scope key for every commerce table, in the way `user_id` is the
- * scope key for the personal-assistant tables.
+ * An ORGANIZATION is the tenant. Every account is one: signing up creates an org in the same
+ * transaction as the user, so `org_id` is the scope key for everything that is owned rather than
+ * personal — commerce data, projects, runner machines — in the way `user_id` is the scope key for the
+ * personal-assistant tables.
  *
  * The two planes deliberately do not share a scope. A `users` row is an authentication identity and
- * is shared between them; membership (`org_members`) is the only join. A commerce query that filters
- * by `user_id` instead of `org_id` is a bug, because a user may belong to several organizations and
- * an organization outlives any one member.
+ * is shared between them; membership (`org_members`) is the only join. A query that filters by
+ * `user_id` where it should filter by `org_id` is a bug, because a user may belong to several
+ * organizations and an organization outlives any one member.
  */
 export interface Organization {
   readonly id: UUID;
   readonly name: string;
   /** URL-safe handle, unique across the install. Lowercase, used in paths and in chat disambiguation. */
   readonly slug: string;
+  readonly kind: OrgKind;
   readonly status: OrgStatus;
   readonly createdAt: ISODateString;
 }
+
+/**
+ * The two shapes an account takes at signup — the Amazon-seller model, where the person says which
+ * one they are rather than the server guessing.
+ *
+ * - `individual` — created automatically for a person signing up for themselves, named after them.
+ *   The org IS the person: it refuses invites, so it can never quietly become a team.
+ * - `business` — created under a company name, with a team surface. An individual org becomes one
+ *   through an explicit "Convert to a business organization" action, never implicitly.
+ */
+export const ORG_KINDS = ['individual', 'business'] as const;
+
+export type OrgKind = (typeof ORG_KINDS)[number];
 
 export const ORG_STATUSES = ['active', 'suspended'] as const;
 

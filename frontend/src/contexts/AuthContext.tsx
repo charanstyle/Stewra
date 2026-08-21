@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import type { User } from '@stewra/shared-types';
+import type { RegisterRequest, User } from '@stewra/shared-types';
 import { api } from '../services/api';
 import { clearTokens, readTokens, writeTokens } from '../services/tokenStore';
 import { disconnectSocket } from '../services/socket';
@@ -9,7 +9,7 @@ interface AuthContextValue {
   readonly loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   /** Resolves to true when the new account still needs email verification. */
-  register: (email: string, password: string, displayName: string) => Promise<boolean>;
+  register: (body: RegisterRequest) => Promise<boolean>;
   logout: () => Promise<void>;
   /** Replace the cached user (e.g. after the email is verified). */
   applyUser: (user: User) => void;
@@ -58,15 +58,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     setUser(res.user);
   }, []);
 
-  const register = useCallback(
-    async (email: string, password: string, displayName: string): Promise<boolean> => {
-      const res = await api.register({ email, password, displayName });
-      await writeTokens(res.tokens);
-      setUser(res.user);
-      return res.requiresVerification;
-    },
-    [],
-  );
+  const register = useCallback(async (body: RegisterRequest): Promise<boolean> => {
+    const res = await api.register(body);
+    await writeTokens(res.tokens);
+    setUser(res.user);
+    return res.requiresVerification;
+  }, []);
 
   const logout = useCallback(async (): Promise<void> => {
     // Best-effort teardown: neither the socket disconnect nor the token wipe may

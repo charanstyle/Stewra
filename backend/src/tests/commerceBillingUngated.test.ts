@@ -69,6 +69,7 @@ beforeAll(async () => {
   const org = await db
     .insertInto('organizations')
     .values({
+      kind: 'business',
       name: `Ungated Billing ${randomUUID().slice(0, 8)}`,
       slug: `ungated-billing-${randomUUID().slice(0, 8)}`,
       created_by: userId,

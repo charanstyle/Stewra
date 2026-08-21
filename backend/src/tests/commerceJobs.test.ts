@@ -53,6 +53,7 @@ async function createOrg(): Promise<string> {
   createdUsers.push(user.id);
 
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Jobs Test Org',
     slug: `jobs-${randomUUID().slice(0, 12)}`,
     createdBy: user.id,

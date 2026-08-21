@@ -45,6 +45,12 @@ router.get('/:orgId', requireAuth, verified, requireOrgMember('viewer'), (req, r
   void organizationsController.get(req, res);
 });
 
+// `owner` here and re-checked in the service: converting is the act that unlocks invites, so it
+// carries the same authority as granting the owner role itself.
+router.post('/:orgId/convert', requireAuth, verified, requireOrgMember('owner'), (req, res) => {
+  void organizationsController.convert(req, res);
+});
+
 router.get('/:orgId/members', requireAuth, verified, requireOrgMember('viewer'), (req, res) => {
   void organizationsController.listMembers(req, res);
 });

@@ -173,6 +173,7 @@ async function createUser(): Promise<string> {
 async function tenant(): Promise<{ orgId: string; userId: string; auth: string }> {
   const userId = await createUser();
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Stores Test Org',
     slug: `stores-${randomUUID().slice(0, 12)}`,
     createdBy: userId,

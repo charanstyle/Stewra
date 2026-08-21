@@ -1,13 +1,16 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { Selectable } from 'kysely';
+import type { Kysely, Selectable } from 'kysely';
 import type {
   OrgInvite,
+  OrgKind,
   OrgMember,
   OrgMembership,
   OrgRole,
+  OrgStatus,
   Organization,
 } from '@stewra/shared-types';
 import { db } from '../../database/index.js';
+import type { Database } from '../../database/types.js';
 import type {
   OrgInvitesTable,
   OrgMembersTable,
@@ -51,8 +54,42 @@ function toOrg(row: Selectable<OrganizationsTable>): Organization {
     id: row.id,
     name: row.name,
     slug: row.slug,
+    kind: row.kind,
     status: row.status,
     createdAt: row.created_at.toISOString(),
+  };
+}
+
+/** The organization columns a membership query projects, named so both list and find agree. */
+const MEMBERSHIP_ORG_COLUMNS = [
+  'org_members.role as role',
+  'organizations.id as id',
+  'organizations.name as name',
+  'organizations.slug as slug',
+  'organizations.kind as kind',
+  'organizations.status as status',
+  'organizations.created_at as created_at',
+] as const;
+
+function toMembership(row: {
+  role: OrgRole;
+  id: string;
+  name: string;
+  slug: string;
+  kind: OrgKind;
+  status: OrgStatus;
+  created_at: Date;
+}): OrgMembership {
+  return {
+    org: {
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      kind: row.kind,
+      status: row.status,
+      createdAt: row.created_at.toISOString(),
+    },
+    role: row.role,
   };
 }
 
@@ -84,15 +121,31 @@ class OrganizationRepository {
    * without an owner has nobody who can pay for it, invite into it, or delete it — and no path back
    * to having one. The two writes must not be separable.
    *
+   * `executor` lets a caller that is already inside a transaction — registration, which creates the
+   * user and their org together — enlist these writes in it instead of opening a nested one. With no
+   * executor the method opens its own.
+   *
    * Slug collisions are resolved here rather than reported: the caller's preferred handle is tried
    * first, then suffixed. Retrying on a taken slug is the caller's problem we are removing.
    */
-  async create(params: {
-    name: string;
-    slug: string;
-    createdBy: string;
-  }): Promise<{ org: Organization; role: OrgRole }> {
-    return db.transaction().execute(async (trx) => {
+  async create(
+    params: {
+      name: string;
+      slug: string;
+      kind: OrgKind;
+      createdBy: string;
+    },
+    executor?: Kysely<Database>,
+  ): Promise<{ org: Organization; role: OrgRole }> {
+    if (executor !== undefined) return this.createWithin(params, executor);
+    return db.transaction().execute((trx) => this.createWithin(params, trx));
+  }
+
+  private async createWithin(
+    params: { name: string; slug: string; kind: OrgKind; createdBy: string },
+    trx: Kysely<Database>,
+  ): Promise<{ org: Organization; role: OrgRole }> {
+    {
       let slug = params.slug;
       for (let attempt = 0; ; attempt += 1) {
         const taken = await trx
@@ -110,7 +163,7 @@ class OrganizationRepository {
 
       const orgRow = await trx
         .insertInto('organizations')
-        .values({ name: params.name, slug, created_by: params.createdBy })
+        .values({ name: params.name, slug, kind: params.kind, created_by: params.createdBy })
         .returningAll()
         .executeTakeFirstOrThrow();
 
@@ -119,8 +172,34 @@ class OrganizationRepository {
         .values({ org_id: orgRow.id, user_id: params.createdBy, role: 'owner' })
         .execute();
 
-      return { org: toOrg(orgRow), role: 'owner' as const };
-    });
+      return { org: toOrg(orgRow), role: 'owner' };
+    }
+  }
+
+  /**
+   * Flip an `individual` org to `business` under a company name. Returns null when the org is not
+   * currently `individual` — the WHERE clause is the guard, so two concurrent conversions cannot
+   * both succeed and a business is never renamed through this path.
+   */
+  async convertToBusiness(orgId: string, companyName: string): Promise<Organization | null> {
+    const row = await db
+      .updateTable('organizations')
+      .set({ kind: 'business', name: companyName })
+      .where('id', '=', orgId)
+      .where('kind', '=', 'individual')
+      .returningAll()
+      .executeTakeFirst();
+    return row === undefined ? null : toOrg(row);
+  }
+
+  /** The org's kind, or null when there is no such org. */
+  async findKind(orgId: string): Promise<OrgKind | null> {
+    const row = await db
+      .selectFrom('organizations')
+      .select('kind')
+      .where('id', '=', orgId)
+      .executeTakeFirst();
+    return row?.kind ?? null;
   }
 
   /**
@@ -134,29 +213,12 @@ class OrganizationRepository {
     const row = await db
       .selectFrom('org_members')
       .innerJoin('organizations', 'organizations.id', 'org_members.org_id')
-      .select([
-        'org_members.role as role',
-        'organizations.id as id',
-        'organizations.name as name',
-        'organizations.slug as slug',
-        'organizations.status as status',
-        'organizations.created_at as created_at',
-      ])
+      .select(MEMBERSHIP_ORG_COLUMNS)
       .where('org_members.user_id', '=', userId)
       .where('org_members.org_id', '=', orgId)
       .executeTakeFirst();
 
-    if (row === undefined) return null;
-    return {
-      org: {
-        id: row.id,
-        name: row.name,
-        slug: row.slug,
-        status: row.status,
-        createdAt: row.created_at.toISOString(),
-      },
-      role: row.role,
-    };
+    return row === undefined ? null : toMembership(row);
   }
 
   /** Every organization the user belongs to, newest first. */
@@ -164,28 +226,12 @@ class OrganizationRepository {
     const rows = await db
       .selectFrom('org_members')
       .innerJoin('organizations', 'organizations.id', 'org_members.org_id')
-      .select([
-        'org_members.role as role',
-        'organizations.id as id',
-        'organizations.name as name',
-        'organizations.slug as slug',
-        'organizations.status as status',
-        'organizations.created_at as created_at',
-      ])
+      .select(MEMBERSHIP_ORG_COLUMNS)
       .where('org_members.user_id', '=', userId)
       .orderBy('organizations.created_at', 'desc')
       .execute();
 
-    return rows.map((row) => ({
-      org: {
-        id: row.id,
-        name: row.name,
-        slug: row.slug,
-        status: row.status,
-        createdAt: row.created_at.toISOString(),
-      },
-      role: row.role,
-    }));
+    return rows.map(toMembership);
   }
 
   /** The org's members, with the display fields a member list needs, so listing is one query. */

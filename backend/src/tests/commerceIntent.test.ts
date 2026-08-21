@@ -297,6 +297,7 @@ async function tenant(
 
   const orgName = 'Acme Coffee';
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: orgName,
     slug: `acme-${randomUUID().slice(0, 8)}`,
     createdBy: user.id,

@@ -218,6 +218,7 @@ async function connected(): Promise<Connected> {
   createdUsers.push(user.id);
 
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Acme Coffee',
     slug: `acme-${randomUUID().slice(0, 8)}`,
     createdBy: user.id,

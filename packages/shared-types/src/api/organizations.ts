@@ -16,7 +16,12 @@ import type {
  * enforces a minimum {@link OrgRole}.
  */
 
-/** POST /orgs — create an organization. The creator becomes its `owner`. */
+/**
+ * POST /orgs — create a further organization. The creator becomes its `owner`.
+ *
+ * Always a `business` org: the one `individual` org a person gets is created at signup and there is
+ * never a second, so there is no kind to choose here.
+ */
 export interface CreateOrgRequest {
   readonly name: string;
   /**
@@ -29,6 +34,20 @@ export interface CreateOrgRequest {
 export interface CreateOrgResponse {
   readonly org: Organization;
   readonly role: OrgRole;
+}
+
+/**
+ * POST /orgs/:orgId/convert — turn an `individual` org into a `business` one. Owner only.
+ *
+ * The one way an individual account grows a team: the kind flips, the org takes the company's name,
+ * and invites start being accepted. One-way — a business with members cannot become a person.
+ */
+export interface ConvertOrgRequest {
+  readonly companyName: string;
+}
+
+export interface ConvertOrgResponse {
+  readonly org: Organization;
 }
 
 /** GET /orgs — every organization the caller belongs to, with their own role in each. */

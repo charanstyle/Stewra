@@ -33,6 +33,7 @@ export type {
 } from './models/suggestion';
 export type {
   Organization,
+  OrgKind,
   OrgStatus,
   OrgRole,
   OrgMember,
@@ -40,7 +41,13 @@ export type {
   OrgInvite,
   OrgInviteStatus,
 } from './models/organization';
-export { ORG_STATUSES, ORG_ROLES, ORG_INVITE_STATUSES, roleMeetsMinimum } from './models/organization';
+export {
+  ORG_KINDS,
+  ORG_STATUSES,
+  ORG_ROLES,
+  ORG_INVITE_STATUSES,
+  roleMeetsMinimum,
+} from './models/organization';
 export type {
   CommercePlatform,
   ChannelAccount,
@@ -432,6 +439,8 @@ export {
 export type {
   CreateOrgRequest,
   CreateOrgResponse,
+  ConvertOrgRequest,
+  ConvertOrgResponse,
   ListOrgsResponse,
   GetOrgResponse,
   SetActiveOrgRequest,

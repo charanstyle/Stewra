@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Navigate } from 'react-router';
-import type { User } from '@stewra/shared-types';
+import type { RegisterRequest, User } from '@stewra/shared-types';
 import { api, clearTokens, readTokens, writeTokens } from '../services/api';
 
 interface AuthContextValue {
@@ -9,7 +9,7 @@ interface AuthContextValue {
   readonly loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   /** Resolves to true when the new account still needs email verification. */
-  register: (email: string, password: string, displayName: string) => Promise<boolean>;
+  register: (body: RegisterRequest) => Promise<boolean>;
   logout: () => void;
   /** Replace the cached user (e.g. after the email is verified). */
   applyUser: (user: User) => void;
@@ -43,15 +43,12 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     setUser(res.user);
   }, []);
 
-  const register = useCallback(
-    async (email: string, password: string, displayName: string): Promise<boolean> => {
-      const res = await api.register({ email, password, displayName });
-      writeTokens(res.tokens);
-      setUser(res.user);
-      return res.requiresVerification;
-    },
-    [],
-  );
+  const register = useCallback(async (body: RegisterRequest): Promise<boolean> => {
+    const res = await api.register(body);
+    writeTokens(res.tokens);
+    setUser(res.user);
+    return res.requiresVerification;
+  }, []);
 
   const logout = useCallback((): void => {
     clearTokens();

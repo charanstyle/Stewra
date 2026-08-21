@@ -80,6 +80,7 @@ export default function CommercePage(): React.JSX.Element {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
   const [orgName, setOrgName] = useState('');
+  const [companyName, setCompanyName] = useState('');
 
   const [accounts, setAccounts] = useState<ReadonlyArray<ChannelAccount>>([]);
   const [signup, setSignup] = useState<EmbeddedSignupConfig | null>(null);
@@ -101,7 +102,8 @@ export default function CommercePage(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const role = memberships.find((m) => m.org.id === orgId)?.role ?? null;
+  const selectedMembership = memberships.find((m) => m.org.id === orgId) ?? null;
+  const role = selectedMembership?.role ?? null;
   const openThread = conversations.find((c) => c.id === openThreadId) ?? null;
   const replyWindow = openThread === null ? null : windowRemaining(openThread.serviceWindowExpiresAt);
 
@@ -170,6 +172,24 @@ export default function CommercePage(): React.JSX.Element {
       setError(describeError(err));
     }
   }, [orgName, loadOrgs]);
+
+  /**
+   * An individual account becomes a business one. This is the only way a personal org grows a team:
+   * invites are refused until the owner takes this step, by name, on purpose.
+   */
+  const convertOrg = useCallback(async (): Promise<void> => {
+    if (orgId === null) return;
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await api.convertOrg(orgId, { companyName: companyName.trim() });
+      setCompanyName('');
+      setNotice(`${res.org.name} is now a business organization. You can invite your team.`);
+      await loadOrgs();
+    } catch (err) {
+      setError(describeError(err));
+    }
+  }, [orgId, companyName, loadOrgs]);
 
   const makeActive = useCallback(async (): Promise<void> => {
     if (orgId === null) return;
@@ -315,7 +335,7 @@ export default function CommercePage(): React.JSX.Element {
               >
                 {memberships.map((m) => (
                   <option key={m.org.id} value={m.org.id}>
-                    {m.org.name} · {m.role}
+                    {m.org.name} · {m.org.kind === 'individual' ? 'personal' : 'business'} · {m.role}
                   </option>
                 ))}
               </select>
@@ -329,6 +349,33 @@ export default function CommercePage(): React.JSX.Element {
               )}
             </div>
           )}
+
+          {selectedMembership !== null &&
+            selectedMembership.org.kind === 'individual' &&
+            selectedMembership.role === 'owner' && (
+              <div className={clsx(styles.row, styles.list)} data-testid="org-convert">
+                <span className={styles.muted}>
+                  This is your personal account. To invite a team, convert it to a business
+                  organization under the company&apos;s name.
+                </span>
+                <input
+                  className={styles.input}
+                  placeholder="Company name"
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  data-testid="org-convert-name"
+                />
+                <button
+                  type="button"
+                  className={styles.ghost}
+                  disabled={companyName.trim() === ''}
+                  onClick={() => void convertOrg()}
+                  data-testid="org-convert-submit"
+                >
+                  Convert to a business organization
+                </button>
+              </div>
+            )}
 
           <div className={clsx(styles.row, styles.list)}>
             <input

@@ -21,6 +21,7 @@ import type {
   InviteStatus,
   OrgInviteStatus,
   OrgRole,
+  OrgKind,
   OrgStatus,
   MessageType,
   MessagingChannel,
@@ -816,6 +817,8 @@ export interface OrganizationsTable {
   id: Generated<string>;
   name: string;
   slug: string;
+  // No database default (063): every INSERT says whether this is a person or a company.
+  kind: OrgKind;
   status: Generated<OrgStatus>;
   // Nullable on read since 062: provenance that releases when the founder deletes their account,
   // matching every other attribution column in the commerce plane. Required on INSERT.

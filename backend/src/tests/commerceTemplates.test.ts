@@ -133,6 +133,7 @@ async function tenant(): Promise<Tenant> {
   createdUsers.push(user.id);
 
   const { org } = await organizationRepository.create({
+    kind: 'business',
     name: 'Templates Test Org',
     slug: `tpl-${randomUUID().slice(0, 12)}`,
     createdBy: user.id,
