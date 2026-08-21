@@ -227,13 +227,21 @@ export class Bridge {
       `Stewra Bridge: forwarding a message on ${message.remoteJid} as ${decision.jid} ` +
         `(selfChat=${decision.isSelfChat}) to Stewra.`,
     );
-    this.stewra.inbound({
+    const identity = {
       providerMessageId: message.providerMessageId,
       jid: decision.jid,
       isSelfChat: decision.isSelfChat,
       fromMe: message.fromMe,
-      text: message.text,
       sentAt: message.sentAt.toISOString(),
+    };
+    if (message.voice === null) {
+      this.stewra.inbound({ ...identity, text: message.text });
+      return;
+    }
+    const { data, mime, seconds } = message.voice;
+    this.stewra.inbound({
+      ...identity,
+      audio: { data: data.toString('base64'), mime, ...(seconds !== null ? { seconds } : {}) },
     });
   }
 
@@ -245,8 +253,14 @@ export class Bridge {
       return { ok: false, error: 'whatsapp_not_connected' };
     }
     try {
-      const providerMessageId = await this.whatsapp.sendText(payload.jid, payload.text);
-      console.error(`Stewra Bridge: delivered Stewra's reply to ${payload.jid} (id ${providerMessageId}).`);
+      const providerMessageId =
+        payload.audio === undefined
+          ? await this.whatsapp.sendText(payload.jid, payload.text)
+          : await this.whatsapp.sendVoiceNote(payload.jid, Buffer.from(payload.audio.data, 'base64'));
+      console.error(
+        `Stewra Bridge: delivered Stewra's ${payload.audio === undefined ? 'reply' : 'voice note'} to ` +
+          `${payload.jid} (id ${providerMessageId}).`,
+      );
       return { ok: true, providerMessageId };
     } catch (error) {
       console.error('Stewra Bridge: failed to deliver Stewra\'s reply:', error);

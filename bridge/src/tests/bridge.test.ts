@@ -165,6 +165,7 @@ describe('Bridge against a real /bridge loopback server', () => {
       remoteJid: SELF_LID,
       fromMe: true,
       text: "what's running?",
+      voice: null,
       sentAt: new Date(),
     });
     await until(() => framesOf(BRIDGE_CLIENT_EVENTS.INBOUND).length === 1);
@@ -182,6 +183,7 @@ describe('Bridge against a real /bridge loopback server', () => {
       remoteJid: FRIEND_JID,
       fromMe: false,
       text: 'this must never leave the machine',
+      voice: null,
       sentAt: new Date(),
     });
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -199,6 +201,7 @@ describe('Bridge against a real /bridge loopback server', () => {
       remoteJid: FRIEND_JID,
       fromMe: false,
       text: 'too early',
+      voice: null,
       sentAt: new Date(),
     });
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -213,7 +216,7 @@ describe('Bridge against a real /bridge loopback server', () => {
     await until(() => framesOf(BRIDGE_CLIENT_EVENTS.ALLOWED_CHATS).length === 2);
 
     const sentAt = new Date('2026-08-01T12:00:00.000Z');
-    b.handleWaMessage({ providerMessageId: 'WA-1', remoteJid: FRIEND_JID, fromMe: false, text: 'hi', sentAt });
+    b.handleWaMessage({ providerMessageId: 'WA-1', remoteJid: FRIEND_JID, fromMe: false, text: 'hi', voice: null, sentAt });
 
     await until(() => framesOf(BRIDGE_CLIENT_EVENTS.INBOUND).length === 1);
     expect(framesOf(BRIDGE_CLIENT_EVENTS.INBOUND)[0]).toEqual({
@@ -226,6 +229,43 @@ describe('Bridge against a real /bridge loopback server', () => {
     });
   });
 
+  it('forwards a self-chat voice note as base64 audio with no text, and keeps a friend\'s voice note on the machine', async () => {
+    const b = await connectedBridge(recordingEvents().events);
+    b.handleWaOpen({ ownJid: SELF_JID, ownLid: SELF_LID });
+    await until(() => framesOf(BRIDGE_CLIENT_EVENTS.ALLOWED_CHATS).length === 1);
+
+    const data = Buffer.from('OggS-opus-bytes-as-whatsapp-delivered-them');
+    b.handleWaMessage({
+      providerMessageId: 'WA-VOICE',
+      remoteJid: SELF_JID,
+      fromMe: true,
+      text: null,
+      voice: { data, mime: 'audio/ogg', seconds: 4 },
+      sentAt: new Date('2026-08-21T10:00:00.000Z'),
+    });
+    b.handleWaMessage({
+      providerMessageId: 'WA-FRIEND-VOICE',
+      remoteJid: FRIEND_JID,
+      fromMe: false,
+      text: null,
+      voice: { data, mime: 'audio/ogg', seconds: 4 },
+      sentAt: new Date(),
+    });
+
+    await until(() => framesOf(BRIDGE_CLIENT_EVENTS.INBOUND).length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(framesOf(BRIDGE_CLIENT_EVENTS.INBOUND)).toEqual([
+      {
+        providerMessageId: 'WA-VOICE',
+        jid: SELF_JID,
+        isSelfChat: true,
+        fromMe: true,
+        audio: { data: data.toString('base64'), mime: 'audio/ogg', seconds: 4 },
+        sentAt: '2026-08-21T10:00:00.000Z',
+      },
+    ]);
+  });
+
   it('canonicalises a LID-addressed self-chat message to the phone JID on the wire', async () => {
     const b = await connectedBridge(recordingEvents().events);
     b.handleWaOpen({ ownJid: SELF_JID, ownLid: SELF_LID });
@@ -236,6 +276,7 @@ describe('Bridge against a real /bridge loopback server', () => {
       remoteJid: SELF_LID,
       fromMe: true,
       text: 'note to self',
+      voice: null,
       sentAt: new Date(),
     });
 
@@ -257,6 +298,15 @@ describe('Bridge against a real /bridge loopback server', () => {
       .emitWithAck(BRIDGE_SERVER_EVENTS.SEND, { outboxId: 'o1', jid: FRIEND_JID, text: 'reply' });
     expect(ack).toEqual({ ok: false, error: 'whatsapp_not_connected' });
     expect(framesOf(BRIDGE_CLIENT_EVENTS.STATE)[0]).toEqual({ waState: 'connecting' });
+
+    // A voice-note send is gated by the same state check — it must not reach WhatsApp either.
+    const voiceAck = await serverSockets[0]?.timeout(2_000).emitWithAck(BRIDGE_SERVER_EVENTS.SEND, {
+      outboxId: 'o2',
+      jid: FRIEND_JID,
+      text: 'spoken words',
+      audio: { data: Buffer.from('OggS').toString('base64'), mime: 'audio/ogg' },
+    });
+    expect(voiceAck).toEqual({ ok: false, error: 'whatsapp_not_connected' });
   });
 
   it('destroys the real session and disconnects when the server revokes the device', async () => {

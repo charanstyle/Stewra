@@ -133,6 +133,29 @@ describe('StewraClient against a real /bridge namespace', () => {
     const bad = await socket.timeout(2_000).emitWithAck(BRIDGE_SERVER_EVENTS.SEND, { nonsense: true });
     expect(bad).toEqual({ ok: false, error: 'malformed_send' });
     expect(seen.sends).toHaveLength(1);
+
+    // A voice note rides along as base64 OGG/Opus; any other container is refused before the handler.
+    const voiced = await socket.timeout(2_000).emitWithAck(BRIDGE_SERVER_EVENTS.SEND, {
+      outboxId: 'o2',
+      jid: 'x@s.whatsapp.net',
+      text: 'spoken',
+      audio: { data: 'T2dnUw==', mime: 'audio/ogg', seconds: 2 },
+    });
+    expect(voiced).toEqual({ ok: true, providerMessageId: 'WA-1' });
+    expect(seen.sends[1]).toEqual({
+      outboxId: 'o2',
+      jid: 'x@s.whatsapp.net',
+      text: 'spoken',
+      audio: { data: 'T2dnUw==', mime: 'audio/ogg', seconds: 2 },
+    });
+    const wrongContainer = await socket.timeout(2_000).emitWithAck(BRIDGE_SERVER_EVENTS.SEND, {
+      outboxId: 'o3',
+      jid: 'x@s.whatsapp.net',
+      text: 'spoken',
+      audio: { data: 'AAAA', mime: 'audio/wav' },
+    });
+    expect(wrongContainer).toEqual({ ok: false, error: 'malformed_send' });
+    expect(seen.sends).toHaveLength(2);
   });
 
   it('turns a send handler crash into an honest error ack instead of a dropped ack', async () => {

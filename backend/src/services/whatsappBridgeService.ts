@@ -1,14 +1,21 @@
 import * as Sentry from '@sentry/node';
-import type { BridgeAllowedChat, BridgeInboundPayload, BridgeWaState } from '@stewra/shared-types';
+import type {
+  BridgeAllowedChat,
+  BridgeInboundPayload,
+  BridgeSendPayload,
+  BridgeWaState,
+  Message,
+} from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
 import { hmacField } from '../control-plane/vault/fieldCrypto.js';
 import { bridgeDeviceRepository } from '../repositories/bridgeDeviceRepository.js';
 import { channelIdentityRepository } from '../repositories/channelIdentityRepository.js';
 import { whatsappStore } from '../repositories/whatsappStore.js';
-import { dispatchToBridge } from '../websocket/bridgeEmitter.js';
+import { BRIDGE_TOO_OLD_FOR_VOICE, dispatchToBridge } from '../websocket/bridgeEmitter.js';
 import { whatsappEmailApprovalService } from './whatsappEmailApprovalService.js';
 import { emailApprovalPushService } from './emailApprovalPushService.js';
 import { renderWhatsappEmailReply } from './whatsappEmailNotice.js';
+import { whatsappVoiceService } from './whatsappVoiceService.js';
 import { redis } from './redisClient.js';
 import { STEWRA_FAILURE_TEXT, stewraTurnService } from './stewraTurnService.js';
 import { logger } from '../utils/logger.js';
@@ -17,6 +24,18 @@ const CHANNEL = 'whatsapp_personal' as const;
 
 /** How many times a queued send may be attempted before we stop and mark it visibly failed. */
 const MAX_SEND_ATTEMPTS = 3;
+
+/**
+ * What the person is told, in text, when they spoke but Stewra cannot speak back. Said out loud rather
+ * than silently downgraded: a voice note that never arrives must never look like a voice note that was
+ * never owed.
+ */
+export const VOICE_REPLY_UNAVAILABLE_TEXT = '(Voice replies are unavailable right now, so this one is text only.)';
+
+/** A turn as it arrived from the self-chat: either typed or spoken. */
+type SelfChatTurn =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'voice'; readonly buffer: Buffer; readonly mime: string };
 
 /**
  * The experimental companion-device channel's runtime: what happens when the Stewra Bridge on a user's
@@ -78,13 +97,17 @@ class WhatsappBridgeService {
       return;
     }
 
+    // A voice note is stored as the fact that one arrived (`is_voice`) with an empty body: a third
+    // party's clip is deliberately NOT transcribed (Stewra listens to the user, not to everyone who
+    // messages them), and the user's own transcript lives in the Stewra conversation the turn writes to.
     await whatsappStore.recordMessage({
       userId,
       chatId: chat.id,
       providerMessageId: payload.providerMessageId,
       direction: 'inbound',
       fromMe: payload.fromMe,
-      text: payload.text,
+      text: payload.text ?? '',
+      isVoice: payload.audio !== undefined,
       sentAt: new Date(payload.sentAt),
     });
 
@@ -93,7 +116,19 @@ class WhatsappBridgeService {
       return;
     }
 
-    await this.answerInSelfChat(userId, chat.id, payload.text);
+    if (payload.audio !== undefined) {
+      await this.answerInSelfChat(userId, chat.id, {
+        kind: 'voice',
+        buffer: Buffer.from(payload.audio.data, 'base64'),
+        mime: payload.audio.mime,
+      });
+      return;
+    }
+    if (payload.text === undefined) {
+      // The handler's schema guarantees exactly one body; reaching here is a wiring fault, not a state.
+      throw new Error(`bridge inbound ${payload.providerMessageId} carried neither text nor audio`);
+    }
+    await this.answerInSelfChat(userId, chat.id, { kind: 'text', text: payload.text });
   }
 
   /**
@@ -101,11 +136,25 @@ class WhatsappBridgeService {
    * reply back into the user's own WhatsApp. The turn also fans out over the socket, so the same
    * exchange appears live in the web app — the user messaging themself on WhatsApp and watching Stewra
    * answer in the browser is the whole proof that this is one assistant, not two.
+   *
+   * A SPOKEN turn is answered twice, in this order: a voice note (so the person can listen) and then
+   * the same words as text (so they can see it in the chat). A typed turn is answered in text only.
    */
-  private async answerInSelfChat(userId: string, chatId: string, text: string): Promise<void> {
+  private async answerInSelfChat(userId: string, chatId: string, turn: SelfChatTurn): Promise<void> {
     let reply: string;
+    let conversationId: string | null = null;
     try {
-      const message = await stewraTurnService.handleUserTurn(userId, text);
+      let message: Message;
+      if (turn.kind === 'voice') {
+        const { assistantMessage } = await stewraTurnService.handleVoiceTurn(userId, {
+          buffer: turn.buffer,
+          mime: turn.mime,
+        });
+        message = assistantMessage;
+      } else {
+        message = await stewraTurnService.handleUserTurn(userId, turn.text);
+      }
+      conversationId = message.conversationId;
       const body = message.content ?? STEWRA_FAILURE_TEXT;
       if (message.proposedEmail !== null) {
         // Same draft, different wording depending on the opt-in — and only the wording. With approve-to-
@@ -136,16 +185,16 @@ class WhatsappBridgeService {
       reply = STEWRA_FAILURE_TEXT;
     }
 
-    // Queued BEFORE any attempt to deliver it: if no bridge is online, the reply waits rather than
-    // evaporating, and the user gets it when they open their laptop.
-    const outboxId = await whatsappStore.enqueueSend(userId, chatId, reply);
-
     const chat = await whatsappStore.findChatById(userId, chatId);
     if (chat === null) {
       logger.warn('bridge: chat vanished between turn and dispatch', { userId, chatId });
       return;
     }
-    await this.dispatch(userId, outboxId, chat.jid, reply);
+    if (turn.kind === 'voice') {
+      await this.sendSpokenAndText(userId, chat.id, chat.jid, conversationId, reply);
+      return;
+    }
+    await this.sendText(userId, chat.id, chat.jid, reply);
   }
 
   /**
@@ -155,12 +204,66 @@ class WhatsappBridgeService {
    * it inherits the loop protection and the send circuit-breaker. No self-chat / no linked WhatsApp is a
    * normal no-op: the caller has no WhatsApp surface for this user. If no bridge is online the line is
    * enqueued and drains on the next connect, exactly like a reply.
+   *
+   * If the person's LAST word to Stewra in this chat was spoken, the relay is spoken too (and then
+   * texted) — they are plausibly listening rather than reading, and a session's permission gate is the
+   * one line that must not be missed.
    */
   async sendUnsolicitedSelfChat(userId: string, text: string): Promise<void> {
     const chat = await whatsappStore.findSelfChat(userId);
     if (chat === null) return;
-    const outboxId = await whatsappStore.enqueueSend(userId, chat.id, text);
-    await this.dispatch(userId, outboxId, chat.jid, text);
+    if (await whatsappStore.lastInboundWasVoice(userId, chat.id)) {
+      await this.sendSpokenAndText(userId, chat.id, chat.jid, null, text);
+      return;
+    }
+    await this.sendText(userId, chat.id, chat.jid, text);
+  }
+
+  /**
+   * Queue and deliver one text line. Queued BEFORE any attempt to deliver it: if no bridge is online,
+   * the line waits rather than evaporating, and the user gets it when they open their laptop.
+   */
+  private async sendText(userId: string, chatId: string, jid: string, text: string): Promise<void> {
+    const outboxId = await whatsappStore.enqueueSend(userId, chatId, text);
+    await this.dispatch(userId, outboxId, jid, text, null);
+  }
+
+  /**
+   * The spoken reply: a voice note carrying `text`, then `text` itself. Two outbox rows, voice first,
+   * so the order survives a drain after the laptop reopens.
+   *
+   * When Stewra cannot speak on this deploy, or the synthesis fails, the person is TOLD so in the text —
+   * the failure is captured, never swallowed into a reply that quietly looks like a typed one.
+   */
+  private async sendSpokenAndText(
+    userId: string,
+    chatId: string,
+    jid: string,
+    conversationId: string | null,
+    text: string,
+  ): Promise<void> {
+    if (!whatsappVoiceService.available) {
+      logger.warn('bridge: spoken turn on a deploy without voice; replying in text only', { userId });
+      await this.sendText(userId, chatId, jid, `${text}\n\n${VOICE_REPLY_UNAVAILABLE_TEXT}`);
+      return;
+    }
+    let assetId: string;
+    try {
+      const asset = await whatsappVoiceService.voiceNoteFor(userId, conversationId, text);
+      assetId = asset.id;
+    } catch (error) {
+      Sentry.captureException(error);
+      logger.error('bridge: voice note synthesis failed; replying in text only', {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await this.sendText(userId, chatId, jid, `${text}\n\n${VOICE_REPLY_UNAVAILABLE_TEXT}`);
+      return;
+    }
+    const voiceOutboxId = await whatsappStore.enqueueSend(userId, chatId, text, assetId);
+    const textOutboxId = await whatsappStore.enqueueSend(userId, chatId, text);
+    await this.dispatch(userId, voiceOutboxId, jid, text, assetId);
+    await this.dispatch(userId, textOutboxId, jid, text, null);
   }
 
   /** Hand every still-pending send to whichever bridge is online. Called on `bridge:hello`. */
@@ -170,7 +273,7 @@ class WhatsappBridgeService {
 
     logger.info('bridge: draining outbox', { userId, pending: pending.length });
     for (const send of pending) {
-      await this.dispatch(userId, send.outboxId, send.jid, send.text);
+      await this.dispatch(userId, send.outboxId, send.jid, send.text, send.audioAssetId);
     }
   }
 
@@ -193,6 +296,7 @@ class WhatsappBridgeService {
     outboxId: string,
     jid: string,
     text: string,
+    audioAssetId: string | null,
   ): Promise<void> {
     if (!(await this.withinSendBudget(userId))) {
       // The circuit breaker tripped. Something is wrong — a loop, or a bridge gone haywire — and the
@@ -204,7 +308,14 @@ class WhatsappBridgeService {
       return;
     }
 
-    const result = await dispatchToBridge(userId, { outboxId, jid, text });
+    // The clip is read from disk per attempt, never held in the outbox row: Postgres keeps the pointer,
+    // the media store keeps the bytes, and an asset that has gone missing fails loudly right here.
+    const payload: BridgeSendPayload =
+      audioAssetId === null
+        ? { outboxId, jid, text }
+        : { outboxId, jid, text, audio: await whatsappVoiceService.wirePayload(userId, audioAssetId) };
+
+    const result = await dispatchToBridge(userId, payload);
     if (result === null) {
       // No bridge online. Perfectly normal — the laptop is shut. It stays pending and drains on hello.
       logger.info('bridge: no device online; send stays queued', { userId, outboxId });
@@ -212,6 +323,13 @@ class WhatsappBridgeService {
     }
 
     const { deviceId, ack } = result;
+    if (ack.error === BRIDGE_TOO_OLD_FOR_VOICE) {
+      // Not retried: the same bridge will be just as old on the next attempt, and the text twin of this
+      // voice note is delivered on its own row, so the person is not left without the words.
+      await whatsappStore.markFailed(outboxId, ack.error);
+      logger.warn('bridge: voice note dropped; bridge predates voice', { userId, outboxId, deviceId });
+      return;
+    }
     if (!ack.ok || ack.providerMessageId === undefined) {
       // A bridge that fails without saying why still has two DISTINGUISHABLE shapes, so the stored
       // reason names which one it was. Recording 'unknown' collapsed them into a word that tells
@@ -243,6 +361,7 @@ class WhatsappBridgeService {
         direction: 'outbound',
         fromMe: true,
         text,
+        isVoice: audioAssetId !== null,
         sentAt: new Date(),
       });
     }

@@ -8,11 +8,12 @@ export interface StoredChat {
   readonly isSelfChat: boolean;
 }
 
-/** One queued send, decrypted for delivery to the bridge. */
+/** One queued send, decrypted for delivery to the bridge. `audioAssetId` set ⇒ deliver as a voice note. */
 export interface PendingSend {
   readonly outboxId: string;
   readonly jid: string;
   readonly text: string;
+  readonly audioAssetId: string | null;
 }
 
 /**
@@ -123,7 +124,7 @@ class WhatsappStore {
     return { id: row.id, jid: decryptField(row.jid_ciphertext), isSelfChat: row.is_self_chat };
   }
 
-  /** Persist a message in an allowed chat. Body encrypted at rest. */
+  /** Persist a message in an allowed chat. Body encrypted at rest; for a voice note it is the transcript. */
   async recordMessage(params: {
     userId: string;
     chatId: string;
@@ -131,6 +132,7 @@ class WhatsappStore {
     direction: 'inbound' | 'outbound';
     fromMe: boolean;
     text: string;
+    isVoice: boolean;
     sentAt: Date;
   }): Promise<void> {
     await db
@@ -142,6 +144,7 @@ class WhatsappStore {
         direction: params.direction,
         from_me: params.fromMe,
         body_ciphertext: encryptField(params.text),
+        is_voice: params.isVoice,
         sent_at: params.sentAt,
       })
       // The unique (chat_id, provider_message_id) index makes a redelivery a no-op rather than a crash.
@@ -150,13 +153,40 @@ class WhatsappStore {
   }
 
   /**
+   * Whether the person's most recent inbound message in this chat was spoken. This is what decides the
+   * medium of an unsolicited line sent later (a runner's permission gate, its result): someone who last
+   * talked to Stewra by voice hears the follow-up too. False when nothing inbound is stored.
+   */
+  async lastInboundWasVoice(userId: string, chatId: string): Promise<boolean> {
+    const row = await db
+      .selectFrom('whatsapp_messages')
+      .select('is_voice')
+      .where('user_id', '=', userId)
+      .where('chat_id', '=', chatId)
+      .where('direction', '=', 'inbound')
+      .orderBy('sent_at', 'desc')
+      .orderBy('created_at', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+    return row?.is_voice === true;
+  }
+
+  /**
    * Queue an approved send. Enqueued BEFORE any attempt to deliver it, because the bridge may simply be
    * off — the user's laptop is shut. A closed lid then costs latency, never a lost message.
+   *
+   * With `audioAssetId` the send is a voice note: the bridge delivers the clip, and `text` records the
+   * words it speaks.
    */
-  async enqueueSend(userId: string, chatId: string, text: string): Promise<string> {
+  async enqueueSend(userId: string, chatId: string, text: string, audioAssetId: string | null = null): Promise<string> {
     const row = await db
       .insertInto('whatsapp_outbound')
-      .values({ user_id: userId, chat_id: chatId, body_ciphertext: encryptField(text) })
+      .values({
+        user_id: userId,
+        chat_id: chatId,
+        body_ciphertext: encryptField(text),
+        audio_asset_id: audioAssetId,
+      })
       .returning('id')
       .executeTakeFirstOrThrow();
     return row.id;
@@ -170,6 +200,7 @@ class WhatsappStore {
       .select([
         'whatsapp_outbound.id as id',
         'whatsapp_outbound.body_ciphertext as body_ciphertext',
+        'whatsapp_outbound.audio_asset_id as audio_asset_id',
         'whatsapp_chats.jid_ciphertext as jid_ciphertext',
       ])
       .where('whatsapp_outbound.user_id', '=', userId)
@@ -181,6 +212,7 @@ class WhatsappStore {
       outboxId: r.id,
       jid: decryptField(r.jid_ciphertext),
       text: decryptField(r.body_ciphertext),
+      audioAssetId: r.audio_asset_id,
     }));
   }
 

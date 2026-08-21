@@ -74,6 +74,53 @@ class StewraTurnService {
   }
 
   /**
+   * A complete SPOKEN turn from a non-socket channel (a WhatsApp voice note): transcribe it, persist the
+   * person's `voice` message, and return both it and Stewra's reply. Same fan-out as `handleUserTurn`,
+   * so the transcript and the answer appear live in the web/mobile thread — the person can see what
+   * Stewra heard, which is the safety net under acting on speech.
+   *
+   * Rejects if transcription or the reply fails, after emitting `stewra:error` and capturing to Sentry.
+   */
+  async handleVoiceTurn(
+    userId: string,
+    audio: { buffer: Buffer; mime: string },
+  ): Promise<{ userMessage: Message; assistantMessage: Message }> {
+    const conversation = await conversationRepository.getOrCreateStewra(userId);
+    const thinking: StewraThinkingEvent = { conversationId: conversation.id };
+    emitToConversation(conversation.id, SERVER_EVENTS.STEWRA_THINKING, thinking);
+
+    try {
+      const { userMessage, assistantMessage } = await messageService.sendVoice(
+        userId,
+        conversation.id,
+        audio,
+        'whatsapp',
+      );
+      if (assistantMessage === null) {
+        // The singleton Stewra conversation is always `stewra_ai`, so this is a wiring fault, not a state.
+        throw new Error(`voice turn in conversation ${conversation.id} produced no assistant reply`);
+      }
+      const userEvent: ChatMessageEvent = { message: userMessage };
+      emitToConversation(conversation.id, SERVER_EVENTS.CHAT_MESSAGE, userEvent);
+      const reply: StewraReplyEvent = { message: assistantMessage };
+      emitToConversation(conversation.id, SERVER_EVENTS.STEWRA_REPLY, reply);
+      return { userMessage, assistantMessage };
+    } catch (error) {
+      Sentry.captureException(error);
+      logger.error('Stewra voice turn failed', {
+        conversationId: conversation.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const failure: StewraErrorEvent = {
+        conversationId: conversation.id,
+        message: STEWRA_FAILURE_TEXT,
+      };
+      emitToConversation(conversation.id, SERVER_EVENTS.STEWRA_ERROR, failure);
+      throw error;
+    }
+  }
+
+  /**
    * The shared body of a turn: think → converse → fan out. Emits `stewra:error` and captures to Sentry
    * on failure, then RETHROWS so an awaiting channel adapter can react; `dispatchReply` swallows it.
    */

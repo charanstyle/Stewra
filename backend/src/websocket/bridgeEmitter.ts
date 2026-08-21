@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BRIDGE_SERVER_EVENTS } from '@stewra/shared-types';
+import { BRIDGE_SERVER_EVENTS, BRIDGE_VOICE_MIN_VERSION, meetsMinimumVersion } from '@stewra/shared-types';
 import type { BridgeSendAck, BridgeSendPayload } from '@stewra/shared-types';
 import * as Sentry from '@sentry/node';
 import type { BridgeNamespaceLike } from './bridgeTypes.js';
@@ -19,6 +19,13 @@ const sendAckSchema = z.object({
   providerMessageId: z.string().min(1).max(255).optional(),
   error: z.string().max(500).optional(),
 });
+
+/**
+ * The ack error a voice-note send gets when the only online bridge predates voice. Such a bridge's send
+ * schema drops `audio` and would deliver the text alone — a second copy of a message the user was also
+ * sent as text — so the send is refused here rather than handed over.
+ */
+export const BRIDGE_TOO_OLD_FOR_VOICE = 'bridge_too_old_for_voice';
 
 let namespace: BridgeNamespaceLike | null = null;
 
@@ -51,6 +58,20 @@ export async function dispatchToBridge(
   const target = sockets.find((s) => s.data.deviceId !== undefined);
   const deviceId = target?.data.deviceId;
   if (target === undefined || deviceId === undefined) return null;
+
+  if (payload.audio !== undefined) {
+    const version = target.data.bridgeAppVersion;
+    if (version === undefined || !meetsMinimumVersion(version, BRIDGE_VOICE_MIN_VERSION)) {
+      logger.warn('bridge: refusing a voice note to a bridge that predates voice', {
+        userId,
+        deviceId,
+        outboxId: payload.outboxId,
+        bridgeAppVersion: version ?? null,
+        required: BRIDGE_VOICE_MIN_VERSION,
+      });
+      return { deviceId, ack: { ok: false, error: BRIDGE_TOO_OLD_FOR_VOICE } };
+    }
+  }
 
   let raw: unknown;
   try {

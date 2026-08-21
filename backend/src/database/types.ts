@@ -697,6 +697,8 @@ export interface WhatsappMessagesTable {
   direction: 'inbound' | 'outbound';
   from_me: Generated<boolean>;
   body_ciphertext: Generated<string>;
+  /** True when the message was a voice note (migration 067); the body is then its transcript. */
+  is_voice: Generated<boolean>;
   sent_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   created_at: CreatedAt;
 }
@@ -712,6 +714,8 @@ export interface WhatsappOutboundTable {
   chat_id: string;
   device_id: ColumnType<string | null, string | null | undefined, string | null>;
   body_ciphertext: string;
+  /** The OGG/Opus clip to deliver as a voice note (migration 067); null for a text send. */
+  audio_asset_id: ColumnType<string | null, string | null | undefined, string | null>;
   status: Generated<'pending' | 'sent' | 'failed'>;
   attempts: Generated<number>;
   provider_message_id: ColumnType<string | null, string | null | undefined, string | null>;

@@ -39,6 +39,10 @@ async function main(): Promise<void> {
   const io: AppServer = new SocketIOServer(server, {
     // The website is the browser client; RN sends the same token via handshake auth.
     cors: { origin: config.web.appUrl, credentials: true },
+    // A WhatsApp voice note crosses the /bridge namespace as base64 (the bridge caps the file at 3 MiB,
+    // so ≤ 4 MiB of text plus envelope). Socket.IO's 1 MiB default would silently DROP the connection on
+    // such a frame; this sits above the largest honest frame and below anything worth calling abuse.
+    maxHttpBufferSize: 6 * 1024 * 1024,
   });
   initSockets(io);
 

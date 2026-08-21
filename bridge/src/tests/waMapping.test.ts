@@ -4,6 +4,7 @@ import {
   extractLid,
   extractStatusCode,
   extractText,
+  extractVoiceNote,
   mapUpsert,
   metas,
   renderQr,
@@ -68,9 +69,47 @@ describe('mapUpsert on real Baileys WebMessageInfo batches', () => {
         remoteJid: '1@s.whatsapp.net',
         fromMe: false,
         text: 'hello',
+        voice: null,
         sentAt: new Date(1_700_000_000_000),
       },
     ]);
+  });
+
+  it('carries a voice note as a live message with its header and the raw message to download from', () => {
+    const raw = proto.WebMessageInfo.fromObject({
+      key: { remoteJid: '1@s.whatsapp.net', id: 'PTT-1', fromMe: true },
+      messageTimestamp: 1_700_000_000,
+      message: { audioMessage: { mimetype: 'audio/ogg; codecs=opus', ptt: true, seconds: 7 } },
+    });
+    const outcome = mapUpsert({ messages: [raw], type: 'notify' }, now);
+
+    expect(outcome.dropped).toEqual([]);
+    expect(outcome.live).toHaveLength(1);
+    expect(outcome.live[0]).toMatchObject({
+      providerMessageId: 'PTT-1',
+      remoteJid: '1@s.whatsapp.net',
+      fromMe: true,
+      text: null,
+      voice: { mime: 'audio/ogg', seconds: 7 },
+    });
+    expect(outcome.live[0]?.voice?.raw).toBe(raw);
+  });
+
+  it('still drops an audio FILE — only the push-to-talk gesture is a message to Stewra', () => {
+    const outcome = mapUpsert(
+      {
+        messages: [
+          proto.WebMessageInfo.fromObject({
+            key: { remoteJid: '1@s.whatsapp.net', id: 'SONG-1', fromMe: true },
+            message: { audioMessage: { mimetype: 'audio/mp4', ptt: false, seconds: 180 } },
+          }),
+        ],
+        type: 'notify',
+      },
+      now,
+    );
+    expect(outcome.live).toEqual([]);
+    expect(outcome.dropped).toEqual([{ remoteJid: '1@s.whatsapp.net', fromMe: true }]);
   });
 
   it('never acts on an append batch — history must not be answered — but still surfaces chat activity', () => {
@@ -175,6 +214,23 @@ describe('extractText', () => {
     ).toBe('quoted reply');
     expect(extractText(realMessage({ text: '   ' }))).toBeNull();
     expect(extractText(realMessage({}))).toBeNull();
+  });
+});
+
+describe('extractVoiceNote', () => {
+  it('reads the container and length off a real PTT audioMessage, and rejects everything else', () => {
+    const ptt = (fields: { mimetype?: string; ptt?: boolean; seconds?: number }): proto.WebMessageInfo =>
+      proto.WebMessageInfo.fromObject({ message: { audioMessage: fields } });
+    expect(extractVoiceNote(ptt({ mimetype: 'audio/ogg; codecs=opus', ptt: true, seconds: 3 }))).toEqual({
+      mime: 'audio/ogg',
+      seconds: 3,
+    });
+    // No duration reported: the header still stands, with seconds unknown.
+    expect(extractVoiceNote(ptt({ mimetype: 'AUDIO/OGG', ptt: true }))).toEqual({ mime: 'audio/ogg', seconds: null });
+    expect(extractVoiceNote(ptt({ mimetype: 'audio/ogg', ptt: false }))).toBeNull();
+    expect(extractVoiceNote(ptt({ ptt: true }))).toBeNull();
+    expect(extractVoiceNote(realMessage({ text: 'words' }))).toBeNull();
+    expect(extractVoiceNote(realMessage({}))).toBeNull();
   });
 });
 
