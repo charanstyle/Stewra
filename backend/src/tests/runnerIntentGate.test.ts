@@ -5,8 +5,14 @@ process.env['RUNNER_DOWNLOAD_URL'] = 'https://downloads.example.test/stewra-runn
 process.env['RUNNER_MIN_VERSION'] = '0.2.0';
 process.env['RUNNER_LATEST_VERSION'] = '0.2.0';
 
-const { looksLikeRunnerIntent, normalizeName, isClarifyingAsk, lastAssistantTurn, userNamedDevice } =
-  await import('../services/runnerIntentService.js');
+const {
+  looksLikeRunnerIntent,
+  normalizeName,
+  isClarifyingAsk,
+  lastAssistantTurn,
+  userNamedDevice,
+  openExchangeUserText,
+} = await import('../services/runnerIntentService.js');
 
 /**
  * The keyword gate in front of the runner classifier. It is the cheapest thing in the pipeline and the
@@ -99,6 +105,31 @@ describe('recognizing Stewra\'s own clarifying questions', () => {
     // "pro" and "mac" alone are too short to count.
     expect(userNamedDevice('make it a proper fix', 'MacBook Pro')).toBe(false);
     expect(userNamedDevice('', 'Mac mini')).toBe(false);
+  });
+
+  it('keeps a machine named earlier in the same open exchange, but not one from a finished request', () => {
+    // Pass 6 on WhatsApp: "Which one?" → "on qa-macos" → "What command?" → "npm run lint". The machine
+    // was named in the middle piece and must still count for the last one.
+    const open = [
+      { role: 'user' as const, content: 'run the linter on Sandbox' },
+      { role: 'assistant' as const, content: 'Sandbox is ready on more than one machine — qa-macos or qa-linux. Which one?' },
+      { role: 'user' as const, content: 'on qa-macos' },
+      { role: 'assistant' as const, content: 'What command should I run for the linter — npm run lint or something else?' },
+    ];
+    expect(userNamedDevice(openExchangeUserText(open, 'npm run lint'), 'qa-macos')).toBe(true);
+    expect(userNamedDevice(openExchangeUserText(open, 'npm run lint'), 'qa-linux')).toBe(false);
+
+    // A statement from Stewra (a proposal) closes the exchange: the earlier "on qa-macos" is not carried
+    // into a fresh request, so `resolve` will ask again rather than silently reuse it.
+    const closed = [
+      ...open,
+      { role: 'user' as const, content: 'npm run lint' },
+      { role: 'assistant' as const, content: 'I\'ll run "npm run lint" on Sandbox (qa-macos). Reply "yes" to start, or tell me what to change.' },
+      { role: 'user' as const, content: 'no' },
+      { role: 'assistant' as const, content: 'Okay, nothing started.' },
+    ];
+    expect(userNamedDevice(openExchangeUserText(closed, 'run the tests on Sandbox'), 'qa-macos')).toBe(false);
+    expect(openExchangeUserText([], 'on the mini')).toBe('on the mini');
   });
 
   it('finds the latest Stewra line, skipping the user\'s own turns', () => {

@@ -156,8 +156,24 @@ export class WhatsappClient {
     });
     this.sock = sock;
 
+    // Who we are, as last announced. WhatsApp does not always hand over the LID in the open handshake:
+    // a session linked by pairing code opens with `me.id` only and the LID lands moments later through
+    // `creds.update`. Meanwhile the phone addresses the self-chat BY that LID — so a gate built from the
+    // open-time identity drops the user's own first message as "not_allowed". Re-announce when the
+    // identity grows, and the Bridge rebuilds the gate (handleWaOpen is idempotent).
+    let announced: { ownJid: string; ownLid: string | null } | null = null;
+    const announceIdentity = (): void => {
+      const user = sock.user;
+      if (user === null || user === undefined || user.id.length === 0) return;
+      const identity = { ownJid: jidNormalizedUser(user.id), ownLid: extractLid(user) };
+      if (announced !== null && announced.ownJid === identity.ownJid && announced.ownLid === identity.ownLid) return;
+      announced = identity;
+      this.options.events.onOpen(identity);
+    };
+
     sock.ev.on('creds.update', () => {
       void auth.saveCreds();
+      if (announced !== null) announceIdentity();
     });
 
     sock.ev.on('connection.update', (update) => {
@@ -174,10 +190,7 @@ export class WhatsappClient {
         this.replacedAttempt = 0;
         this.pairingActive = false;
         this.pairingAttempt = 0;
-        const user = sock.user;
-        if (user !== null && user !== undefined && user.id.length > 0) {
-          this.options.events.onOpen({ ownJid: jidNormalizedUser(user.id), ownLid: extractLid(user) });
-        }
+        announceIdentity();
         this.options.events.onState('open');
         return;
       }

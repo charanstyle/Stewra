@@ -151,6 +151,26 @@ describe('Bridge against a real /bridge loopback server', () => {
     });
   });
 
+  it('a LID that arrives after open (pairing-code sessions) rebuilds the gate, so the LID-addressed self-chat is forwarded', async () => {
+    const b = await connectedBridge(recordingEvents().events);
+    // Open handshake without a LID, as WhatsApp does for a session linked by pairing code…
+    b.handleWaOpen({ ownJid: SELF_JID, ownLid: null });
+    await until(() => framesOf(BRIDGE_CLIENT_EVENTS.ALLOWED_CHATS).length === 1);
+    // …then the LID lands through creds.update and the client re-announces the identity.
+    b.handleWaOpen({ ownJid: SELF_JID, ownLid: SELF_LID });
+    await until(() => framesOf(BRIDGE_CLIENT_EVENTS.ALLOWED_CHATS).length === 2);
+
+    b.handleWaMessage({
+      providerMessageId: 'WA-LID-SELF',
+      remoteJid: SELF_LID,
+      fromMe: true,
+      text: "what's running?",
+      sentAt: new Date(),
+    });
+    await until(() => framesOf(BRIDGE_CLIENT_EVENTS.INBOUND).length === 1);
+    expect(framesOf(BRIDGE_CLIENT_EVENTS.INBOUND)[0]).toMatchObject({ jid: SELF_JID, isSelfChat: true, text: "what's running?" });
+  });
+
   it('forwards NOTHING for a chat the user has not ticked — zero frames, fetch never called', async () => {
     const b = await connectedBridge(recordingEvents().events);
     b.handleWaOpen({ ownJid: SELF_JID, ownLid: SELF_LID });
