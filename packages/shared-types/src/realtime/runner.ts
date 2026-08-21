@@ -21,6 +21,8 @@
  * not `...RequestPayload`, even though its wire event is `runner:permission-request`.
  */
 
+import type { HostIdentity } from './hostIdentity';
+
 /** The coding harnesses a runner can host. The runner reports which are actually installed via `hello`. */
 export const RUNNER_HARNESS_IDS = ['claude-code', 'codex', 'gemini-cli'] as const;
 export type RunnerHarnessId = (typeof RUNNER_HARNESS_IDS)[number];
@@ -257,7 +259,15 @@ export interface RunnerHelloPayload {
   readonly os: string;
   readonly harnesses: readonly RunnerHarnessInfo[];
   readonly workspaces: readonly RunnerWorkspace[];
+  /**
+   * Which computer this is — see `hostIdentity.ts`. This is the half of the pair that lets the server
+   * recognise the bridge running on the same box; `os` and `name` never could.
+   */
+  readonly host?: HostIdentity;
 }
+
+/** Runners older than this send no `host` on `runner:hello` and cannot be matched to a bridge. */
+export const RUNNER_HOST_MIN_VERSION = '0.3.0';
 
 /**
  * `runner:update-available` — sent right after a `hello` whose `appVersion` is older than the newest

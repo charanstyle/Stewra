@@ -24,6 +24,7 @@ import homeRoutes from './routes/home.js';
 import channelsRoutes from './routes/channels.js';
 import runnerRoutes from './routes/runner.js';
 import orgRunnerRoutes from './routes/orgRunner.js';
+import machineAccessRoutes from './routes/machineAccess.js';
 import projectRoutes from './routes/projects.js';
 import githubAppRoutes from './routes/githubApp.js';
 import whatsappWebhookRoutes from './routes/whatsappWebhook.js';
@@ -127,6 +128,9 @@ export function createApp(): Express {
   // caller's acting org and calls the same services.
   app.use('/orgs/:orgId/runner', orgRunnerRoutes);
   app.use('/orgs/:orgId/projects', projectRoutes);
+  // Requests from a Stewra Bridge to see the machine it runs on (migration 069). Mounted beside the
+  // runner plane because that is what it grants sight of, and before the commerce catch-all below.
+  app.use('/orgs/:orgId/machine-access', machineAccessRoutes);
   // Commerce plane — a separate bounded context (backend/src/commerce/), scoped by org_id rather
   // than user_id. Nothing under here shares tables with the personal-assistant routes above.
   //

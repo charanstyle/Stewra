@@ -14,6 +14,8 @@ const {
   openExchangeUserText,
   turnReachesClassifier,
   machineNamedElsewhere,
+  isMachineAccessOffer,
+  MACHINE_ACCESS_OFFER,
 } = await import('../services/runnerIntentService.js');
 
 /**
@@ -185,6 +187,34 @@ describe('recognizing Stewra\'s own clarifying questions', () => {
     expect(machineNamedElsewhere("what's running?", elsewhere)).toBeNull();
     expect(machineNamedElsewhere('what is running on qa-macos', elsewhere)).toBeNull();
     expect(machineNamedElsewhere('what is running on the Mac mini', [])).toBeNull();
+  });
+
+  it('hears the answer to its own offer to ask another organization for permission', () => {
+    // The offer is the whole point of the feature: the machine is right here and belongs to somebody
+    // else's org. A bare "yes" to it carries no runner word, names no project and answers no proposal,
+    // so without this the gate would drop it and Stewra would make an offer it cannot hear the reply to.
+    const offered = [
+      { role: 'user' as const, content: 'what is running on the front desk mac' },
+      {
+        role: 'assistant' as const,
+        content: `Front Desk Mac is the computer I'm running on, but it's paired to Acme and I'm not in it, so I can't see what's on it. ${MACHINE_ACCESS_OFFER}`,
+      },
+    ];
+    expect(isMachineAccessOffer(offered[1]?.content ?? null)).toBe(true);
+    expect(
+      turnReachesClassifier({
+        latestUserText: 'yes please',
+        projects: [],
+        hasPendingProposal: false,
+        hasPendingPermission: false,
+        history: offered,
+      }),
+    ).toBe(true);
+
+    // Ordinary lines are not the offer, and neither is a clarifying question.
+    expect(isMachineAccessOffer("Nothing's running at the moment.")).toBe(false);
+    expect(isMachineAccessOffer('Which machine would you like — Mac mini or MacBook Pro?')).toBe(false);
+    expect(isMachineAccessOffer(null)).toBe(false);
   });
 
   it('finds the latest Stewra line, skipping the user\'s own turns', () => {

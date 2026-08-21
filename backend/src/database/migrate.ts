@@ -72,6 +72,7 @@ import * as m065 from './migrations/065_projects.js';
 import * as m066 from './migrations/066_runner_chat_relay.js';
 import * as m067 from './migrations/067_whatsapp_voice.js';
 import * as m068 from './migrations/068_whatsapp_reply_to.js';
+import * as m069 from './migrations/069_machine_access.js';
 import { logger } from '../utils/logger.js';
 
 interface Migration {
@@ -149,6 +150,7 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
   { name: '066_runner_chat_relay', up: m066.up },
   { name: '067_whatsapp_voice', up: m067.up },
   { name: '068_whatsapp_reply_to', up: m068.up },
+  { name: '069_machine_access', up: m069.up },
 ];
 
 async function ensureMigrationsTable(): Promise<void> {

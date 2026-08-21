@@ -1,4 +1,5 @@
 import type { BridgeWaState } from '../models/channel';
+import type { HostIdentity } from './hostIdentity';
 
 /**
  * The `/bridge` Socket.IO namespace: the wire between the Stewra Bridge app (running on the USER'S own
@@ -39,6 +40,15 @@ export type BridgeServerEvent = (typeof BRIDGE_SERVER_EVENTS)[keyof typeof BRIDG
 export interface BridgeHelloPayload {
   readonly appVersion: string;
   readonly waState: BridgeWaState;
+  /**
+   * Which computer this is — see `hostIdentity.ts`.
+   *
+   * Absent from two kinds of bridge, and they mean different things. A build older than
+   * `BRIDGE_HOST_MIN_VERSION` never learned to send it. A current build on a machine whose platform
+   * identifier could not be read sends nothing rather than something weaker. Neither is guessed at: the
+   * server records the absence, and Stewra says it cannot place the machine instead of placing it wrong.
+   */
+  readonly host?: HostIdentity;
 }
 
 /** `bridge:state` — a WhatsApp connection-state transition. */
@@ -94,6 +104,12 @@ export const BRIDGE_VOICE_MIN_VERSION = '1.2.0';
  * message — indistinguishable, in the self-chat, from one the person sent themself.
  */
 export const BRIDGE_REPLY_MIN_VERSION = '1.3.0';
+
+/**
+ * Bridges older than this send no `host` on `bridge:hello`, so the server cannot tell which computer they
+ * are running on — and every question about "this machine" is answered from org membership alone.
+ */
+export const BRIDGE_HOST_MIN_VERSION = '1.4.0';
 
 /** One chat the user has allowed. */
 export interface BridgeAllowedChat {
