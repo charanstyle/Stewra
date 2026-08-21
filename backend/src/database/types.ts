@@ -716,6 +716,8 @@ export interface WhatsappOutboundTable {
   body_ciphertext: string;
   /** The OGG/Opus clip to deliver as a voice note (migration 067); null for a text send. */
   audio_asset_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The person's message this send quotes as a WhatsApp reply (migration 068); null when it answers none. */
+  reply_to_provider_message_id: ColumnType<string | null, string | null | undefined, string | null>;
   status: Generated<'pending' | 'sent' | 'failed'>;
   attempts: Generated<number>;
   provider_message_id: ColumnType<string | null, string | null | undefined, string | null>;

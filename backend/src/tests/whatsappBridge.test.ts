@@ -21,6 +21,7 @@ import type { authService } from '../services/authService.js';
 import type { mediaService } from '../services/mediaService.js';
 import type { redis } from '../services/redisClient.js';
 import type { whatsappPersonalService } from '../services/whatsappPersonalService.js';
+import type { whatsappBridgeService } from '../services/whatsappBridgeService.js';
 import type { bridgeUserRoom } from '../websocket/bridgeTypes.js';
 import type { initSockets } from '../websocket/index.js';
 
@@ -116,6 +117,7 @@ process.env['UPLOADS_DIR'] = mkdtempSync(join(tmpdir(), 'stewra-bridge-test-'));
 interface Graph {
   readonly initSockets: typeof initSockets;
   readonly whatsappPersonalService: typeof whatsappPersonalService;
+  readonly whatsappBridgeService: typeof whatsappBridgeService;
   readonly bridgeDeviceRepository: typeof bridgeDeviceRepository;
   readonly whatsappStore: typeof whatsappStore;
   readonly authService: typeof authService;
@@ -131,6 +133,7 @@ async function loadGraph(enabled: boolean): Promise<Graph> {
   vi.resetModules();
   const { initSockets } = await import('../websocket/index.js');
   const { whatsappPersonalService } = await import('../services/whatsappPersonalService.js');
+  const { whatsappBridgeService } = await import('../services/whatsappBridgeService.js');
   const { bridgeDeviceRepository } = await import('../repositories/bridgeDeviceRepository.js');
   const { whatsappStore } = await import('../repositories/whatsappStore.js');
   const { authService } = await import('../services/authService.js');
@@ -141,6 +144,7 @@ async function loadGraph(enabled: boolean): Promise<Graph> {
   return {
     initSockets,
     whatsappPersonalService,
+    whatsappBridgeService,
     bridgeDeviceRepository,
     whatsappStore,
     authService,
@@ -207,8 +211,17 @@ class BridgeClient {
 
 const clients: ClientSocket[] = [];
 
-/** Connect to `/bridge` and resolve once the handshake succeeds, or reject with the server's reason. */
-async function connectBridge(token: string, url = live.url): Promise<BridgeClient> {
+/** The bridge build the tests impersonate unless a case says otherwise: current, so nothing is refused for age. */
+const CURRENT_BRIDGE_VERSION = '1.3.0';
+
+/**
+ * Connect to `/bridge` and resolve once the handshake succeeds, or reject with the server's reason.
+ *
+ * Says hello as a real bridge does on connect — the server only learns a bridge's version from that
+ * frame, and refuses quoted replies and voice notes to a version it does not know. `waState` is
+ * 'connecting' so the hello itself never drains the outbox; a case that wants a drain sends its own.
+ */
+async function connectBridge(token: string, url = live.url, appVersion = CURRENT_BRIDGE_VERSION): Promise<BridgeClient> {
   const socket = connectClient(`${url}/bridge`, {
     auth: { token },
     transports: ['websocket'],
@@ -219,7 +232,9 @@ async function connectBridge(token: string, url = live.url): Promise<BridgeClien
     socket.once('connect', () => resolve());
     socket.once('connect_error', (err: Error) => reject(err));
   });
-  return new BridgeClient(socket);
+  const bridge = new BridgeClient(socket);
+  bridge.say(BRIDGE_CLIENT_EVENTS.HELLO, { appVersion, waState: 'connecting' });
+  return bridge;
 }
 
 /** The same handshake, but for the cases where being REFUSED is the expected outcome. */
@@ -487,11 +502,13 @@ describe('bridge handshake auth', () => {
 describe('bridge:hello', () => {
   it('drains the outbox when the bridge has a live WhatsApp socket', async () => {
     const { userId, token, selfChatId } = await newUserWithBridge();
-    const outboxId = await on.whatsappStore.enqueueSend(
+    const outboxId = await on.whatsappStore.enqueueSend({
       userId,
-      selfChatId,
-      'sent while your laptop was shut',
-    );
+      chatId: selfChatId,
+      text: 'sent while your laptop was shut',
+      audioAssetId: null,
+      replyTo: null,
+    });
     const bridge = await connectBridge(token);
 
     bridge.say(BRIDGE_CLIENT_EVENTS.HELLO, { appVersion: '1.0.0', waState: 'open' });
@@ -510,7 +527,13 @@ describe('bridge:hello', () => {
 
   it('does NOT drain to a bridge whose WhatsApp socket is not open — it would have nowhere to send', async () => {
     const { userId, token, selfChatId } = await newUserWithBridge();
-    await on.whatsappStore.enqueueSend(userId, selfChatId, 'still waiting');
+    await on.whatsappStore.enqueueSend({
+      userId,
+      chatId: selfChatId,
+      text: 'still waiting',
+      audioAssetId: null,
+      replyTo: null,
+    });
     const bridge = await connectBridge(token);
 
     bridge.say(BRIDGE_CLIENT_EVENTS.HELLO, { appVersion: '1.0.0', waState: 'connecting' });
@@ -659,6 +682,63 @@ describe('the echo loop', () => {
     // Still ONE turn, and still ONE outbound message. The loop never starts.
     expect(modelPrompts).toHaveLength(1);
     expect(bridge.sent).toHaveLength(1);
+  });
+});
+
+/**
+ * In the self-chat every bubble is sent from the same account and drawn the same way, so Stewra's
+ * lines go out as WhatsApp REPLIES quoting the person's message — the one rendering that tells the
+ * two apart. A bridge too old to quote is refused, visibly, rather than handed a line it would post
+ * as if the person had written it.
+ */
+describe('quoted replies', () => {
+  it('answers a turn quoting the message it answers, and records the quote on the outbox row', async () => {
+    const { userId, token } = await newUserWithBridge();
+    const bridge = await connectBridge(token);
+
+    bridge.say(BRIDGE_CLIENT_EVENTS.INBOUND, inbound(SELF_JID, 'what is on today?', waId('q1')));
+    await waitFor('the reply to reach the bridge', () => bridge.sent.length > 0 || undefined);
+
+    expect(bridge.sent[0]).toMatchObject({ jid: SELF_JID, text: modelReply, replyTo: waId('q1') });
+    const row = await on.db
+      .selectFrom('whatsapp_outbound')
+      .select('reply_to_provider_message_id')
+      .where('user_id', '=', userId)
+      .executeTakeFirstOrThrow();
+    expect(row.reply_to_provider_message_id).toBe(waId('q1'));
+  });
+
+  it('quotes the person\'s latest message on an unsolicited line, and nothing when they never wrote', async () => {
+    const { userId, token } = await newUserWithBridge();
+    const bridge = await connectBridge(token);
+
+    // Nothing of theirs stored yet: the line still goes, unquoted — there is nothing to quote.
+    await on.whatsappBridgeService.sendUnsolicitedSelfChat(userId, 'Permission needed: npm test');
+    await waitFor('the first unsolicited line', () => bridge.sent.length >= 1 || undefined);
+    expect(bridge.sent[0]).toMatchObject({ jid: SELF_JID, text: 'Permission needed: npm test' });
+    expect(bridge.sent[0]?.replyTo).toBeUndefined();
+
+    bridge.say(BRIDGE_CLIENT_EVENTS.INBOUND, inbound(SELF_JID, 'run the tests', waId('q2')));
+    await waitFor('the turn to answer', () => bridge.sent.length >= 2 || undefined);
+
+    await on.whatsappBridgeService.sendUnsolicitedSelfChat(userId, 'Done: 12 passed');
+    await waitFor('the second unsolicited line', () => bridge.sent.length >= 3 || undefined);
+    expect(bridge.sent[2]).toMatchObject({ text: 'Done: 12 passed', replyTo: waId('q2') });
+  });
+
+  it('REFUSES a quoted reply to a bridge that predates quoting — it would post it in the person\'s own voice', async () => {
+    const { userId, token } = await newUserWithBridge();
+    const bridge = await connectBridge(token, live.url, '1.2.0');
+
+    bridge.say(BRIDGE_CLIENT_EVENTS.INBOUND, inbound(SELF_JID, 'morning', waId('q3')));
+
+    const row = await waitFor('the reply to be failed', async () =>
+      (await outbox(userId)).find((r) => r.status === 'failed'),
+    );
+    expect(row.last_error).toBe('bridge_too_old_for_reply');
+    // Nothing crossed the wire: the old bridge was never handed a frame it would have mangled.
+    await sleep(QUIET_MS);
+    expect(bridge.sent).toEqual([]);
   });
 });
 
@@ -848,7 +928,13 @@ describe('voice notes', () => {
       mime: 'audio/ogg',
       buffer: CLIP,
     });
-    const outboxId = await on.whatsappStore.enqueueSend(userId, selfChatId, 'spoken words', asset.id);
+    const outboxId = await on.whatsappStore.enqueueSend({
+      userId,
+      chatId: selfChatId,
+      text: 'spoken words',
+      audioAssetId: asset.id,
+      replyTo: null,
+    });
     const bridge = await connectBridge(token);
 
     bridge.say(BRIDGE_CLIENT_EVENTS.HELLO, { appVersion: '1.2.0', waState: 'open' });
@@ -882,7 +968,13 @@ describe('voice notes', () => {
       mime: 'audio/ogg',
       buffer: CLIP,
     });
-    const outboxId = await on.whatsappStore.enqueueSend(userId, selfChatId, 'spoken words', asset.id);
+    const outboxId = await on.whatsappStore.enqueueSend({
+      userId,
+      chatId: selfChatId,
+      text: 'spoken words',
+      audioAssetId: asset.id,
+      replyTo: null,
+    });
     const bridge = await connectBridge(token);
 
     bridge.say(BRIDGE_CLIENT_EVENTS.HELLO, { appVersion: '1.1.0', waState: 'open' });

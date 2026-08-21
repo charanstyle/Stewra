@@ -156,6 +156,25 @@ describe('StewraClient against a real /bridge namespace', () => {
     });
     expect(wrongContainer).toEqual({ ok: false, error: 'malformed_send' });
     expect(seen.sends).toHaveLength(2);
+
+    // A quoted reply carries the id of the person's message it answers, and nothing else changes.
+    const quoted = await socket.timeout(2_000).emitWithAck(BRIDGE_SERVER_EVENTS.SEND, {
+      outboxId: 'o4',
+      jid: 'x@s.whatsapp.net',
+      text: 'in reply',
+      replyTo: 'THEIR-MSG-1',
+    });
+    expect(quoted).toEqual({ ok: true, providerMessageId: 'WA-1' });
+    expect(seen.sends[2]).toEqual({ outboxId: 'o4', jid: 'x@s.whatsapp.net', text: 'in reply', replyTo: 'THEIR-MSG-1' });
+    // An empty id is not "no quote" — it is a malformed frame, refused before the handler.
+    const emptyQuote = await socket.timeout(2_000).emitWithAck(BRIDGE_SERVER_EVENTS.SEND, {
+      outboxId: 'o5',
+      jid: 'x@s.whatsapp.net',
+      text: 'in reply',
+      replyTo: '',
+    });
+    expect(emptyQuote).toEqual({ ok: false, error: 'malformed_send' });
+    expect(seen.sends).toHaveLength(3);
   });
 
   it('turns a send handler crash into an honest error ack instead of a dropped ack', async () => {

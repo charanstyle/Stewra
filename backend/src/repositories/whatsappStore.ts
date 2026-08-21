@@ -8,12 +8,25 @@ export interface StoredChat {
   readonly isSelfChat: boolean;
 }
 
-/** One queued send, decrypted for delivery to the bridge. `audioAssetId` set ⇒ deliver as a voice note. */
+/**
+ * One queued send, decrypted for delivery to the bridge. `audioAssetId` set ⇒ deliver as a voice note;
+ * `replyTo` set ⇒ deliver as a WhatsApp reply quoting that message of the person's.
+ */
 export interface PendingSend {
   readonly outboxId: string;
   readonly jid: string;
   readonly text: string;
   readonly audioAssetId: string | null;
+  readonly replyTo: string | null;
+}
+
+/** What a send is queued with. See {@link PendingSend} for what each field means on the wire. */
+export interface SendToQueue {
+  readonly userId: string;
+  readonly chatId: string;
+  readonly text: string;
+  readonly audioAssetId: string | null;
+  readonly replyTo: string | null;
 }
 
 /**
@@ -172,20 +185,41 @@ class WhatsappStore {
   }
 
   /**
+   * The provider id of the person's most recent message in this chat — what an UNSOLICITED line (a
+   * runner's permission gate, its result) quotes, so that even a line Stewra volunteers is drawn as a
+   * reply to something of theirs rather than as one more bubble in their own voice. Null when nothing
+   * inbound is stored.
+   */
+  async lastInboundProviderMessageId(userId: string, chatId: string): Promise<string | null> {
+    const row = await db
+      .selectFrom('whatsapp_messages')
+      .select('provider_message_id')
+      .where('user_id', '=', userId)
+      .where('chat_id', '=', chatId)
+      .where('direction', '=', 'inbound')
+      .orderBy('sent_at', 'desc')
+      .orderBy('created_at', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+    return row?.provider_message_id ?? null;
+  }
+
+  /**
    * Queue an approved send. Enqueued BEFORE any attempt to deliver it, because the bridge may simply be
    * off — the user's laptop is shut. A closed lid then costs latency, never a lost message.
    *
    * With `audioAssetId` the send is a voice note: the bridge delivers the clip, and `text` records the
-   * words it speaks.
+   * words it speaks. With `replyTo` it is delivered quoting that message of the person's.
    */
-  async enqueueSend(userId: string, chatId: string, text: string, audioAssetId: string | null = null): Promise<string> {
+  async enqueueSend(send: SendToQueue): Promise<string> {
     const row = await db
       .insertInto('whatsapp_outbound')
       .values({
-        user_id: userId,
-        chat_id: chatId,
-        body_ciphertext: encryptField(text),
-        audio_asset_id: audioAssetId,
+        user_id: send.userId,
+        chat_id: send.chatId,
+        body_ciphertext: encryptField(send.text),
+        audio_asset_id: send.audioAssetId,
+        reply_to_provider_message_id: send.replyTo,
       })
       .returning('id')
       .executeTakeFirstOrThrow();
@@ -201,6 +235,7 @@ class WhatsappStore {
         'whatsapp_outbound.id as id',
         'whatsapp_outbound.body_ciphertext as body_ciphertext',
         'whatsapp_outbound.audio_asset_id as audio_asset_id',
+        'whatsapp_outbound.reply_to_provider_message_id as reply_to_provider_message_id',
         'whatsapp_chats.jid_ciphertext as jid_ciphertext',
       ])
       .where('whatsapp_outbound.user_id', '=', userId)
@@ -213,6 +248,7 @@ class WhatsappStore {
       jid: decryptField(r.jid_ciphertext),
       text: decryptField(r.body_ciphertext),
       audioAssetId: r.audio_asset_id,
+      replyTo: r.reply_to_provider_message_id,
     }));
   }
 

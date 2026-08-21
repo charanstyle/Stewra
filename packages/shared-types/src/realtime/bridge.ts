@@ -89,6 +89,12 @@ export interface BridgeVoiceNote {
 /** Bridges older than this strip `audio` from `bridge:send` and would deliver a voiced reply as text only. */
 export const BRIDGE_VOICE_MIN_VERSION = '1.2.0';
 
+/**
+ * Bridges older than this strip `replyTo` from `bridge:send` and would deliver Stewra's line as a plain
+ * message — indistinguishable, in the self-chat, from one the person sent themself.
+ */
+export const BRIDGE_REPLY_MIN_VERSION = '1.3.0';
+
 /** One chat the user has allowed. */
 export interface BridgeAllowedChat {
   readonly jid: string;
@@ -117,12 +123,18 @@ export interface BridgeAllowedChatsPayload {
  * With `audio` present the bridge sends the bytes as a WhatsApp voice note (PTT) and `text` is the
  * spoken words, kept for the server's own records; without it, the bridge sends `text` as a message.
  * A voiced Stewra reply is therefore TWO sends — the note, then the text — never one frame doing both.
+ *
+ * `replyTo` is the Baileys `key.id` of the PERSON'S message this line answers. The bridge delivers the
+ * line as a WhatsApp reply quoting it. In the self-chat every bubble is sent from the same account and
+ * drawn the same way, so the quote is what makes Stewra's words and voice notes tellable from the
+ * person's own. Absent only when there is nothing of theirs to quote.
  */
 export interface BridgeSendPayload {
   readonly outboxId: string;
   readonly jid: string;
   readonly text: string;
   readonly audio?: BridgeVoiceNote;
+  readonly replyTo?: string;
 }
 
 /** The bridge's ack to `bridge:send`. `providerMessageId` is what WhatsApp assigned the sent message. */

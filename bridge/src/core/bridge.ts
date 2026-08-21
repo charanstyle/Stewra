@@ -247,7 +247,11 @@ export class Bridge {
 
   /** Stewra approved a send. We deliver it and report back honestly, including when we failed. */
   private async handleSend(payload: BridgeSendPayload): Promise<BridgeSendAck> {
-    console.error(`Stewra Bridge: Stewra asked to send a reply to ${payload.jid}.`);
+    const replyTo = payload.replyTo ?? null;
+    console.error(
+      `Stewra Bridge: Stewra asked to send a reply to ${payload.jid}` +
+        (replyTo === null ? '.' : ` quoting ${replyTo}.`),
+    );
     if (this.waState !== 'open') {
       console.error('Stewra Bridge: WhatsApp is not connected; the reply could not be delivered.');
       return { ok: false, error: 'whatsapp_not_connected' };
@@ -255,8 +259,8 @@ export class Bridge {
     try {
       const providerMessageId =
         payload.audio === undefined
-          ? await this.whatsapp.sendText(payload.jid, payload.text)
-          : await this.whatsapp.sendVoiceNote(payload.jid, Buffer.from(payload.audio.data, 'base64'));
+          ? await this.whatsapp.sendText(payload.jid, payload.text, replyTo)
+          : await this.whatsapp.sendVoiceNote(payload.jid, Buffer.from(payload.audio.data, 'base64'), replyTo);
       console.error(
         `Stewra Bridge: delivered Stewra's ${payload.audio === undefined ? 'reply' : 'voice note'} to ` +
           `${payload.jid} (id ${providerMessageId}).`,

@@ -28,6 +28,8 @@ const sendPayloadSchema = z.object({
       seconds: z.number().positive().optional(),
     })
     .optional(),
+  // Present ⇒ deliver as a WhatsApp reply quoting this message of the person's (its Baileys `key.id`).
+  replyTo: z.string().min(1).optional(),
 });
 
 const claimResponseSchema = z.object({
@@ -130,16 +132,23 @@ export class StewraClient {
         ack({ ok: false, error: 'malformed_send' });
         return;
       }
-      const { outboxId, jid, text, audio } = parsed.data;
-      const payload: BridgeSendPayload =
-        audio === undefined
-          ? { outboxId, jid, text }
+      const { outboxId, jid, text, audio, replyTo } = parsed.data;
+      // Rebuilt field by field, so an absent option stays absent under exactOptionalPropertyTypes.
+      const payload: BridgeSendPayload = {
+        outboxId,
+        jid,
+        text,
+        ...(audio === undefined
+          ? {}
           : {
-              outboxId,
-              jid,
-              text,
-              audio: { data: audio.data, mime: audio.mime, ...(audio.seconds !== undefined ? { seconds: audio.seconds } : {}) },
-            };
+              audio: {
+                data: audio.data,
+                mime: audio.mime,
+                ...(audio.seconds !== undefined ? { seconds: audio.seconds } : {}),
+              },
+            }),
+        ...(replyTo === undefined ? {} : { replyTo }),
+      };
       void this.events
         .onSend(payload)
         .then(ack)
