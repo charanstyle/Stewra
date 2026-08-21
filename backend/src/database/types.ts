@@ -476,7 +476,9 @@ export interface ConversationsTable {
   type: ConversationType;
   title: string | null;
   avatar_url: string | null;
-  created_by: string;
+  // Nullable on read since 062: the creator's account can be deleted and the thread survives for the
+  // people still in it. Still required on INSERT — a conversation is always started by someone.
+  created_by: ColumnType<string | null, string, string | null>;
   last_message_at: ColumnType<Date, Date | undefined, Date>;
   is_archived: ColumnType<boolean, boolean | undefined, boolean>;
   created_at: CreatedAt;
@@ -815,7 +817,9 @@ export interface OrganizationsTable {
   name: string;
   slug: string;
   status: Generated<OrgStatus>;
-  created_by: string;
+  // Nullable on read since 062: provenance that releases when the founder deletes their account,
+  // matching every other attribution column in the commerce plane. Required on INSERT.
+  created_by: ColumnType<string | null, string, string | null>;
   created_at: CreatedAt;
 }
 

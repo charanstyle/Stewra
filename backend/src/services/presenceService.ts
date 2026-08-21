@@ -112,6 +112,18 @@ export class PresenceService {
     return this.redis.get(this.seenKey(userId));
   }
 
+  /**
+   * Erase all presence state for a user. Called by account deletion.
+   *
+   * `presence:socks:` would expire on its own (`touchTtl`), but `presence:seen:` would NOT — it is
+   * written with a bare `set` and no expiry, so a deleted user's last-seen timestamp would otherwise
+   * sit in Redis indefinitely, keyed by their id. It is a small fact, but it is a fact about a
+   * person who asked to be forgotten, and nothing else would ever come back to remove it.
+   */
+  async forgetUser(userId: string): Promise<void> {
+    await this.redis.del(this.socksKey(userId), this.seenKey(userId));
+  }
+
   /** Resolve current presence for a set of users in one round-trip (for a presence:subscribe reply). */
   async statuses(
     userIds: ReadonlyArray<string>,

@@ -266,7 +266,14 @@ const PrivacyPage: React.FC = () => (
     <Section id="delete" heading="Deleting your data">
       <div className={styles.callout}>
         <p>
-          <strong>To delete everything:</strong> email{' '}
+          <strong>To delete everything, yourself, right now:</strong> go to{' '}
+          <strong>Settings → Danger zone → Delete account</strong>, in the app or on the web. It is
+          immediate and permanent, and you do not need to ask us. Our{' '}
+          <a href="/account-deletion">account deletion page</a> sets out exactly what is removed,
+          what is kept, and what happens to any organization you belong to.
+        </p>
+        <p>
+          <strong>If you cannot sign in:</strong> email{' '}
           <a href={`mailto:${CONTACT_EMAIL}?subject=Delete%20my%20data`}>{CONTACT_EMAIL}</a> from the
           address on your account, with the subject &quot;Delete my data&quot;. We will verify it is
           you, delete your account and all associated personal data within 30 days, and confirm in

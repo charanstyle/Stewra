@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import multer from 'multer';
 import { avatarController } from '../controllers/avatarController.js';
+import { accountController } from '../controllers/accountController.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireEmailVerification } from '../middleware/requireEmailVerification.js';
 import { config } from '../config/unifiedConfig.js';
@@ -21,6 +22,17 @@ const uploadAvatar = multer({
 
 router.post('/me/avatar', requireAuth, verified, uploadAvatar, (req, res) => {
   void avatarController.upload(req, res);
+});
+
+// Account deletion. NOT behind `verified`: an unverified account is still an account with data in
+// it, and gating erasure on finishing onboarding would leave the people least invested in the
+// product with no way out of it.
+router.get('/me/deletion-preview', requireAuth, (req, res) => {
+  void accountController.deletionPreview(req, res);
+});
+
+router.delete('/me', requireAuth, (req, res) => {
+  void accountController.deleteAccount(req, res);
 });
 
 export default router;

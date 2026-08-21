@@ -13,7 +13,9 @@ interface ConversationRow {
   readonly type: ConversationType;
   readonly title: string | null;
   readonly avatar_url: string | null;
-  readonly created_by: string;
+  // Null once the creator deletes their account (migration 062). The thread itself outlives them:
+  // the other participants keep it, and their messages keep pointing at real senders.
+  readonly created_by: string | null;
   readonly last_message_at: Date;
   readonly is_archived: boolean;
   readonly created_at: Date;

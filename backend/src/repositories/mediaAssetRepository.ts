@@ -86,6 +86,20 @@ export class MediaAssetRepository {
       .executeTakeFirst();
     return row ? toMediaAsset(row) : undefined;
   }
+
+  /**
+   * Every asset this user owns. Read by account deletion BEFORE the `users` row goes, because that
+   * is the only moment the paths are still knowable: `media_assets.owner_id` is `ON DELETE CASCADE`,
+   * so the rows vanish with the user while the bytes they name stay on disk forever.
+   */
+  async listForOwner(ownerId: string): Promise<ReadonlyArray<MediaAsset>> {
+    const rows = await db
+      .selectFrom('media_assets')
+      .select(MEDIA_ASSET_COLUMNS)
+      .where('owner_id', '=', ownerId)
+      .execute();
+    return rows.map(toMediaAsset);
+  }
 }
 
 export const mediaAssetRepository = new MediaAssetRepository();

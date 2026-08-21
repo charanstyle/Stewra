@@ -39,6 +39,13 @@ Convention: kebab-case `<screen-or-area>-<element>`.
 | `settings-connect-google` | `src/components/settings/ConnectionsCard.tsx` | The "Connect a Google account" button (opens the consent alert, then the browser) |
 | `settings-pause-switch` | `src/screens/settings/SettingsScreen.tsx` | The global "Pause Stewra" kill switch |
 | `settings-activity-link` | `src/screens/settings/SettingsScreen.tsx` | The Settings row that pushes the Activity screen |
+| `settings-delete-account` | `src/components/settings/DeleteAccountCard.tsx` | Opens the deletion sheet. Does NOT delete anything — it fetches the server's preview first, so a flow must then assert on the sheet rather than on a signed-out app |
+| `delete-account-password` | `src/components/settings/DeleteAccountCard.tsx` | Password re-entry inside the sheet. Not mounted when a blocker is present (a sole owner is shown the reason instead of a way to proceed) |
+| `delete-account-confirm` | `src/components/settings/DeleteAccountCard.tsx` | **Irreversible.** Deletes the account for real — no staging, no undo. Any flow using it must create its own throwaway account first; pointing it at a shared QA account destroys the suite |
+| `delete-account-cancel` | `src/components/settings/DeleteAccountCard.tsx` | Closes the sheet, changing nothing. The safe half of the pair |
+| `delete-blocker` | `src/components/settings/DeleteAccountCard.tsx` | One reason deletion is refused (repeats). Present ⇒ the confirm button is absent by construction |
+| `create-org-name` | `src/screens/commerce/CommerceScreen.tsx` | Business-name `TextInput` in the Commerce tab's "No business yet" state. Only mounted when the account belongs to no organization, and only after `GET /orgs` has answered — the screen shows a spinner until then, so a flow must wait rather than assume the branch |
+| `create-org` | `src/screens/commerce/CommerceScreen.tsx` | The "Create business" button beneath it. Disabled while the name is blank or the request is in flight, so its presence does not imply it is tappable |
 | `open-subscription` | `src/screens/commerce/CommerceScreen.tsx` | The "Subscription and billing" row that pushes the Subscription screen |
 | `subscription-screen` | `src/screens/commerce/SubscriptionScreen.tsx` | The Subscription screen's scroll container — presence only means it mounted, so flows assert on the plan card below as well |
 | `subscription-plan-card` | `src/screens/commerce/SubscriptionScreen.tsx` | The "Your plan" card, rendered once `GET /orgs/:orgId/billing` has answered |

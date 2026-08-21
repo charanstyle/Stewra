@@ -54,6 +54,7 @@ export const LegalShell: React.FC<LegalShellProps> = ({ title, lede, toc, childr
     <footer className={styles.footer}>
       <Link to="/privacy">Privacy policy</Link>
       <Link to="/terms">Terms of service</Link>
+      <Link to="/account-deletion">Delete your account</Link>
       <Link to="/">Back to {PRODUCT_NAME}</Link>
     </footer>
   </div>

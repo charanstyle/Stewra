@@ -338,6 +338,15 @@ export type {
 } from './api/messages';
 export type { UploadAvatarResponse } from './api/avatar';
 export type {
+  AccountDeletionBlocker,
+  AccountDeletionPreview,
+  AccountDeletionResult,
+  AccountDeletionRevocation,
+  DeleteAccountRequest,
+  DeleteAccountResponse,
+  GetAccountDeletionPreviewResponse,
+} from './api/account';
+export type {
   GrantWhatsappPersonalConsentRequest,
   GrantWhatsappPersonalConsentResponse,
   StartBridgePairingResponse,

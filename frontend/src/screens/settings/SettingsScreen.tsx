@@ -11,6 +11,7 @@ import { theme } from '../../theme/colors';
 import { TinyAvatar } from '../../components/chat/TinyAvatar';
 import { EmailOverWhatsappToggle } from '../../components/settings/EmailOverWhatsappToggle';
 import { ConnectionsCard } from '../../components/settings/ConnectionsCard';
+import { DeleteAccountCard } from '../../components/settings/DeleteAccountCard';
 
 /** Derive an upload filename + MIME from a picked asset, falling back to JPEG when the picker omits them. */
 function fileMetaFor(asset: ImagePicker.ImagePickerAsset): { fileName: string; mimeType: string } {
@@ -167,6 +168,9 @@ export default function SettingsScreen({
 
         {/* Renders nothing unless the server reports the capability available (kill-switch on). */}
         <EmailOverWhatsappToggle />
+
+        {/* Last on the screen deliberately: irreversible, and nothing below it to tap by accident. */}
+        <DeleteAccountCard />
       </ScrollView>
     </SafeAreaView>
   );
