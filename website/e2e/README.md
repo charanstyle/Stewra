@@ -44,6 +44,8 @@ authenticate as the wrong user.
 | `E2E_SIGNUP_MAILBOX` | — | Real mailbox whose maildir holds the emailed verification codes. Setting it enables the UI sign-up test; leaving it unset skips that test. Plus-addressed per run (`qa@x.com` → `qa+signup<rand>@x.com`), so one mailbox covers unlimited sign-ups. |
 | `E2E_SIGNUP_SSH_HOST` | ⚠️ | ssh host running the mail server's Docker daemon. **Required once `E2E_SIGNUP_MAILBOX` is set** — never defaulted, so a half-configured run fails loudly instead of ssh-ing somewhere unintended. |
 | `E2E_SIGNUP_IMAP_CONTAINER` | ⚠️ | Container whose `/mail/<mailbox>/` maildir is read via `docker exec`. Same rule as above. |
+| `TELNYX_E2E_NUMBERS` | — | The install's own test numbers (comma-separated E.164). Texts sent to them are delivered by Telnyx to the production webhook and read back with `sms.mjs` (`waitForSmsCode`) as the install owner — the SMS twin of the mailbox above, for services that verify by text. These are VoIP-class numbers: consumer WhatsApp refuses them, so WhatsApp identities come from real SIMs. |
+| `E2E_OWNER_EMAIL` / `E2E_OWNER_PASSWORD` | ⚠️ | Install-admin login that `sms.mjs` reads the inbox with (`GET /platform/telnyx/inbound/<number>` is `requireInstallAdmin`). Required once `TELNYX_E2E_NUMBERS` is set. |
 
 ```bash
 cp ../../.env.e2e.example ../../.env.e2e   # repo-root, gitignored — fill in real values
