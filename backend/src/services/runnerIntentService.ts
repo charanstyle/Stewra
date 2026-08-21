@@ -158,6 +158,29 @@ export function openExchangeUserText(
   return pieces.join('\n');
 }
 
+/**
+ * The cheap gate in front of the classifier. A turn reaches the model when it mentions the runner (a
+ * generic word or one of the person's own project names), when something concrete awaits an answer (a
+ * pending proposal or permission, so a bare "yes" means something), or when Stewra's previous line was
+ * its own clarifying question — "on qa-macos" carries no runner word and no project name and is only
+ * meaningful because of the "Which one?" before it. Without that last clause the answer fell through to
+ * the ordinary agent, which had no idea what it was being told.
+ */
+export function turnReachesClassifier(params: {
+  latestUserText: string;
+  projects: ReadonlyArray<Project>;
+  hasPendingProposal: boolean;
+  hasPendingPermission: boolean;
+  history: ReadonlyArray<ConversationTurn>;
+}): boolean {
+  return (
+    looksLikeRunnerIntent(params.latestUserText, params.projects) ||
+    params.hasPendingProposal ||
+    params.hasPendingPermission ||
+    isClarifyingAsk(lastAssistantTurn(params.history))
+  );
+}
+
 /** How many recent turns of context to give the classifier (bounds the prompt). */
 const CONTEXT_TURNS = 8;
 
@@ -313,9 +336,13 @@ class RunnerIntentService {
     const pendingPermission = await runnerChatRelayService.latestPendingPermission(userId);
     const everyProject = await this.projectsAcrossOrgs(userId);
     if (
-      !looksLikeRunnerIntent(latestUserText, everyProject) &&
-      pendingProposalMessage === undefined &&
-      pendingPermission === null
+      !turnReachesClassifier({
+        latestUserText,
+        projects: everyProject,
+        hasPendingProposal: pendingProposalMessage !== undefined,
+        hasPendingPermission: pendingPermission !== null,
+        history,
+      })
     ) {
       return null;
     }

@@ -12,6 +12,7 @@ const {
   lastAssistantTurn,
   userNamedDevice,
   openExchangeUserText,
+  turnReachesClassifier,
 } = await import('../services/runnerIntentService.js');
 
 /**
@@ -130,6 +131,23 @@ describe('recognizing Stewra\'s own clarifying questions', () => {
     ];
     expect(userNamedDevice(openExchangeUserText(closed, 'run the tests on Sandbox'), 'qa-macos')).toBe(false);
     expect(openExchangeUserText([], 'on the mini')).toBe('on the mini');
+  });
+
+  it('lets the answer to Stewra\'s own question through the gate even with no runner word in it', () => {
+    // "on qa-macos" is meaningful only because of the "Which one?" before it. Seen live on WhatsApp:
+    // the gate returned null and the ordinary agent replied that it had no tool to target a machine.
+    const asked = [
+      { role: 'user' as const, content: 'run npm run lint on Sandbox' },
+      { role: 'assistant' as const, content: 'Sandbox is ready on more than one machine — qa-macos or qa-linux. Which one?' },
+    ];
+    const base = { latestUserText: 'on qa-macos', projects: [project('Sandbox')], hasPendingProposal: false, hasPendingPermission: false };
+    expect(turnReachesClassifier({ ...base, history: asked })).toBe(true);
+    // The same words after an ordinary reply do not: nothing is being answered.
+    expect(turnReachesClassifier({ ...base, history: [{ role: 'assistant' as const, content: 'Nothing is running right now.' }] })).toBe(false);
+    expect(turnReachesClassifier({ ...base, history: [] })).toBe(false);
+    // A pending proposal or permission keeps a bare "yes" meaningful, as before.
+    expect(turnReachesClassifier({ ...base, latestUserText: 'yes', history: [], hasPendingProposal: true })).toBe(true);
+    expect(turnReachesClassifier({ ...base, latestUserText: 'yes', history: [], hasPendingPermission: true })).toBe(true);
   });
 
   it('finds the latest Stewra line, skipping the user\'s own turns', () => {
