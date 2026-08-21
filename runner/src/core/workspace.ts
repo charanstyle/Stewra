@@ -223,8 +223,8 @@ export async function openPullRequest(
 
 // ── Cloud-VM workspaces (Phase 4): the runner clones repos it will run against ──────────────────────────
 
-/** True when `dir` is the top of a git working tree — used to decide clone-vs-fetch. */
-async function isGitWorktreeRoot(dir: string): Promise<boolean> {
+/** True when `dir` is the top of a git working tree — decides clone-vs-fetch, and what a root scan reports. */
+export async function isGitWorktreeRoot(dir: string): Promise<boolean> {
   try {
     return (await git(dir, ['rev-parse', '--show-toplevel'])).length > 0;
   } catch {
