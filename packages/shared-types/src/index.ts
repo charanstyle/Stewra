@@ -395,6 +395,7 @@ export type {
   OpenRunnerPrRequest,
   OpenRunnerPrResponse,
 } from './api/runner';
+export type { InboundSms, ListInboundSmsResponse } from './api/telnyx';
 export type {
   CreateProjectRequest,
   CreateProjectResponse,

@@ -318,6 +318,14 @@ const EnvSchema = z.object({
   // gate — the fail-closed direction: an install that has not named its operators cannot load
   // prices, rather than an install that forgot the var letting anyone who guesses the route in.
   INSTALL_ADMIN_EMAILS: z.string().default(''),
+  // ── Telnyx inbound SMS (operator surface) ──────────────────────────────────────────────────────────
+  // The install's own test numbers receive the codes other services text them (WhatsApp registration,
+  // 2FA). Telnyx delivers those to /webhooks/telnyx and signs each delivery with the account's
+  // Ed25519 key; the messages are kept for an hour and read back by an install admin.
+  TELNYX_INBOUND_SMS_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // The account's PUBLIC signing key (base64, 32 bytes) from Telnyx → Mission Control → API keys.
+  // Without it the webhook cannot tell Telnyx from anyone who guessed the URL.
+  TELNYX_PUBLIC_KEY: z.string().regex(/^[A-Za-z0-9+/]{43}=$/).optional(),
   META_COMMERCE_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
   // The Meta app id, sent to the browser to launch the Embedded Signup dialog. Public by nature.
   META_COMMERCE_APP_ID: z.string().min(1).optional(),
@@ -634,6 +642,13 @@ if (env.WHATSAPP_ENABLED) {
   }
 }
 
+// Fail loud when Telnyx inbound SMS is enabled without the signing key: the webhook would have nothing
+// to authenticate deliveries with, and an unauthenticated inbox of verification codes is strictly
+// worse than no inbox.
+if (env.TELNYX_INBOUND_SMS_ENABLED && env.TELNYX_PUBLIC_KEY === undefined) {
+  throw new Error('TELNYX_INBOUND_SMS_ENABLED=true requires: TELNYX_PUBLIC_KEY');
+}
+
 // Fail loud when the commerce plane's Meta app is enabled but under-configured. Every one of these
 // names a target or authenticates one: without the app secret /webhooks/meta cannot tell Meta from a
 // forged POST carrying another tenant's WABA id; without the config id Embedded Signup opens the wrong
@@ -897,6 +912,19 @@ export type MetaCommerceConfig =
       /** Graph origin, overridable so the connect flow can be driven against a local stand-in. */
       readonly graphBaseUrl: string;
     };
+
+/** Telnyx inbound SMS. Same discriminated shape as the Meta app: narrow on `enabled`, no empty keys. */
+export type TelnyxInboundConfig =
+  | { readonly enabled: false }
+  | { readonly enabled: true; readonly publicKey: string };
+
+function readTelnyxInboundConfig(): TelnyxInboundConfig {
+  if (!env.TELNYX_INBOUND_SMS_ENABLED) return { enabled: false };
+  if (env.TELNYX_PUBLIC_KEY === undefined) {
+    throw new Error('TELNYX_INBOUND_SMS_ENABLED=true but TELNYX_PUBLIC_KEY is not set');
+  }
+  return { enabled: true, publicKey: env.TELNYX_PUBLIC_KEY };
+}
 
 function readMetaCommerceConfig(): MetaCommerceConfig {
   if (!env.META_COMMERCE_ENABLED) return { enabled: false };
@@ -1334,6 +1362,8 @@ export const config = {
    * credentials; there are no empty-string stand-ins here.
    */
   metaCommerce: readMetaCommerceConfig(),
+  /** The install's Telnyx inbox of inbound SMS — an operator surface for reading test-number codes. */
+  telnyxInbound: readTelnyxInboundConfig(),
   /** How invoices are collected. `manual` records money; only `stripe` moves it. */
   commerceBilling: readCommerceBillingConfig(),
   appleStore: readAppleStoreConfig(),

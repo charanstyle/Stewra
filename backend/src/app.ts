@@ -27,6 +27,8 @@ import orgRunnerRoutes from './routes/orgRunner.js';
 import projectRoutes from './routes/projects.js';
 import githubAppRoutes from './routes/githubApp.js';
 import whatsappWebhookRoutes from './routes/whatsappWebhook.js';
+import telnyxWebhookRoutes from './routes/telnyxWebhook.js';
+import telnyxInboundRoutes from './routes/telnyxInbound.js';
 import orgRoutes from './tenancy/routes/organizations.js';
 import commerceOrgRoutes from './commerce/routes/orgSurface.js';
 import rateCardRoutes from './commerce/routes/rateCards.js';
@@ -93,6 +95,8 @@ export function createApp(): Express {
   // token in the Authorization header — but it shares the router because the alternative is one
   // store's deliveries being parsed by a different pipeline from the other's.
   app.use('/webhooks/stores', storeWebhookRoutes);
+  // Telnyx signs `${timestamp}|${raw body}` with the account's Ed25519 key — raw bytes again.
+  app.use('/webhooks/telnyx', telnyxWebhookRoutes);
 
   app.use(express.json({ limit: '1mb' }));
 
@@ -135,6 +139,8 @@ export function createApp(): Express {
   app.use('/platform/rate-cards', rateCardRoutes);
   app.use('/platform/spend-caps', spendCapRoutes);
   app.use('/platform/billing', billingRoutes);
+  // The install's Telnyx inbox: the codes other services text to its own test numbers.
+  app.use('/platform/telnyx/inbound', telnyxInboundRoutes);
   app.use('/conversations', conversationsRoutes);
   app.use('/messages', messagesRoutes);
   app.use('/users', usersRoutes);
