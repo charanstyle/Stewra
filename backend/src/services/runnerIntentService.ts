@@ -133,6 +133,31 @@ export function lastAssistantTurn(history: ReadonlyArray<ConversationTurn>): str
   return null;
 }
 
+/**
+ * The user's words in the exchange that is still open: every user turn back to (not across) Stewra's
+ * last line that was not a question. "run the linter on Sandbox" → "Which one?" → "on qa-macos" →
+ * "What command?" → "npm run lint" is one request answered in three pieces, and a machine the person
+ * named in the second piece is still theirs in the third. A statement from Stewra (a proposal, a result,
+ * a refusal) closes the exchange, so a machine named for an earlier, finished request is never carried
+ * into a new one — that would be the silent pick {@link userNamedDevice} exists to prevent.
+ */
+export function openExchangeUserText(
+  history: ReadonlyArray<ConversationTurn>,
+  latestUserText: string,
+): string {
+  const pieces = [latestUserText];
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const turn = history[i];
+    if (turn === undefined) continue;
+    if (turn.role === 'assistant') {
+      if (!turn.content.trim().endsWith('?')) break;
+      continue;
+    }
+    pieces.push(turn.content);
+  }
+  return pieces.join('\n');
+}
+
 /** How many recent turns of context to give the classifier (bounds the prompt). */
 const CONTEXT_TURNS = 8;
 
@@ -357,9 +382,14 @@ class RunnerIntentService {
     // The model has been seen filling deviceId with a plausible machine when a request was merely
     // repeated after "Which one?" — a silent pick, which is the one thing this surface must never do.
     // With the id blanked, `resolve` asks again (or uses the single ready machine, which is not a guess).
+    // "The user's words" are the whole open exchange, not just this line: "on qa-macos" answered two
+    // turns ago still counts while Stewra has only asked questions since.
     if (data.deviceId.trim().length > 0) {
       const device = state.devices.find((d) => d.id === data.deviceId);
-      if (device === undefined || !userNamedDevice(latestUserText, device.name)) {
+      if (
+        device === undefined ||
+        !userNamedDevice(openExchangeUserText(history, latestUserText), device.name)
+      ) {
         logger.info('runner-intent: dropping a deviceId the user did not name', {
           deviceId: data.deviceId,
           device: device?.name ?? null,
