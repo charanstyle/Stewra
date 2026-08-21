@@ -133,6 +133,29 @@ export function userNamedDevice(text: string, deviceName: string): boolean {
     .some((w) => w.length >= 4 && haystack.includes(w));
 }
 
+/** A machine of the person's own that lives in one of their OTHER organizations. */
+export interface MachineElsewhere {
+  readonly deviceName: string;
+  readonly orgName: string;
+}
+
+/**
+ * The machine the person just named, when the org this conversation answers for does not have it but
+ * another of their own organizations does.
+ *
+ * "What is running on the Mac mini right now" came back as "Nothing's running in QA Web A" — true, and
+ * not an answer to the question, because the Mac mini is paired in Nurturing Lab Limited and nothing
+ * said so. Only orgs the person is a member of are ever considered, so this tells them nothing they
+ * cannot already see on their own Fleet page.
+ */
+export function machineNamedElsewhere(
+  latestUserText: string,
+  elsewhere: ReadonlyArray<MachineElsewhere>,
+): MachineElsewhere | null {
+  const hit = elsewhere.find((m) => userNamedDevice(latestUserText, m.deviceName));
+  return hit === undefined ? null : hit;
+}
+
 /** The most recent Stewra line in the history, or null when the user has spoken only. */
 export function lastAssistantTurn(history: ReadonlyArray<ConversationTurn>): string | null {
   for (let i = history.length - 1; i >= 0; i -= 1) {
@@ -463,9 +486,9 @@ class RunnerIntentService {
       case 'cancel_session':
         return this.cancelSession(actor, state.sessions, data.reply);
       case 'list_sessions':
-        return { reply: this.describeSessions(state, latestUserText), proposal: null };
+        return { reply: await this.describeSessions(state, latestUserText), proposal: null };
       case 'list_devices':
-        return { reply: this.describeDevices(state, latestUserText), proposal: null };
+        return { reply: await this.describeDevices(state, latestUserText), proposal: null };
       case 'none':
       default:
         return null;
@@ -812,14 +835,39 @@ class RunnerIntentService {
    * the answer falls back to the org — and says so by name, which is what lets the reader see they are
    * being told about a tenant that has never heard of the machine they asked about.
    */
-  private describeSessions(state: TurnState, latestUserText: string): string {
+  private async describeSessions(state: TurnState, latestUserText: string): Promise<string> {
     const named = state.devices.filter((d) => userNamedDevice(latestUserText, d.name));
     const only = named[0];
     if (named.length === 1 && only !== undefined) {
       const mine = state.sessions.filter((s) => s.deviceId === only.id);
       return this.sessionReport(mine, `on ${only.name}`);
     }
-    return this.sessionReport(state.sessions, `in ${state.orgName}`);
+    const elsewhere = named.length === 0 ? await this.namedElsewhere(state, latestUserText) : null;
+    const report = this.sessionReport(state.sessions, `in ${state.orgName}`);
+    return elsewhere === null ? report : `${elsewhere}\n${report}`;
+  }
+
+  /**
+   * The sentence for a machine the person named that this org does not have but another of THEIR OWN
+   * organizations does.
+   *
+   * "What is running on the Mac mini right now" was answered with "Nothing's running in QA Web A" —
+   * every word true and the question left unanswered, because the machine asked about was paired in a
+   * different organization of the same person's and nothing said so. Only orgs this user is a member of
+   * are consulted, so this reveals nothing they cannot already see on their own Fleet page.
+   */
+  private async namedElsewhere(state: TurnState, latestUserText: string): Promise<string | null> {
+    const memberships = await organizationRepository.listForUser(state.actor.userId);
+    const others: MachineElsewhere[] = [];
+    for (const m of memberships) {
+      if (m.org.id === state.actor.orgId) continue;
+      const { devices } = await runnerService.listDevices(m.org.id);
+      for (const d of devices) others.push({ deviceName: d.name, orgName: m.org.name });
+    }
+    const hit = machineNamedElsewhere(latestUserText, others);
+    return hit === null
+      ? null
+      : `I can't see ${hit.deviceName} from here — it's paired in ${hit.orgName}, and this conversation answers for ${state.orgName}.`;
   }
 
   /** The sessions report itself. `scope` says what "nothing" is a statement about. */
@@ -874,17 +922,20 @@ class RunnerIntentService {
    * ANOTHER of the person's organizations is invisible here by design; saying whose machines these are
    * is what makes that visible instead of silent.
    */
-  private describeDevices(state: TurnState, latestUserText: string): string {
+  private async describeDevices(state: TurnState, latestUserText: string): Promise<string> {
     if (state.devices.length === 0) {
       return `No machines are connected to ${state.orgName} yet. Once the Stewra runner is running on one, it'll show up here.`;
     }
     // A machine the person named by name is the machine they asked about; the rest are noise.
     const named = state.devices.filter((d) => userNamedDevice(latestUserText, d.name));
     const shown = named.length > 0 ? named : state.devices;
+    const elsewhere = named.length === 0 ? await this.namedElsewhere(state, latestUserText) : null;
     const heading =
       named.length > 0
         ? `In ${state.orgName}:`
-        : `Machines in ${state.orgName} (anything paired in another of your organizations won't be here):`;
+        : elsewhere !== null
+          ? `${elsewhere} Here's ${state.orgName}:`
+          : `Machines in ${state.orgName} (anything paired in another of your organizations won't be here):`;
     const lines = shown.map((d) => {
       const ready = state.projects
         .filter((p) => this.readyOn(state, p).some((c) => c.device.id === d.id))

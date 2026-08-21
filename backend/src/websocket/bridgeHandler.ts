@@ -118,7 +118,12 @@ export function registerBridgeHandler(socket: BridgeSocketLike): void {
     // Remembered so a voice-note send can be refused for a build that would strip it (see dispatchToBridge).
     socket.data.bridgeAppVersion = parsed.data.appVersion;
     guard(BRIDGE_CLIENT_EVENTS.HELLO, () =>
-      whatsappBridgeService.onBridgeOnline(userId, deviceId, parsed.data.waState),
+      whatsappBridgeService.onBridgeOnline(
+        userId,
+        deviceId,
+        parsed.data.waState,
+        parsed.data.appVersion,
+      ),
     );
   });
 

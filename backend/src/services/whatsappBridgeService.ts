@@ -47,8 +47,13 @@ type SelfChatTurn =
  */
 class WhatsappBridgeService {
   /** The bridge came online (or changed state). Record it, then hand it anything that was waiting. */
-  async onBridgeOnline(userId: string, deviceId: string, waState: BridgeWaState): Promise<void> {
-    await bridgeDeviceRepository.markSeen(deviceId, waState);
+  async onBridgeOnline(
+    userId: string,
+    deviceId: string,
+    waState: BridgeWaState,
+    appVersion: string,
+  ): Promise<void> {
+    await bridgeDeviceRepository.markSeen(deviceId, waState, appVersion);
     // Only a bridge with a live WhatsApp socket can actually deliver anything.
     if (waState === 'open') {
       await this.drainOutbox(userId);

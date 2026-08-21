@@ -13,6 +13,7 @@ const {
   userNamedDevice,
   openExchangeUserText,
   turnReachesClassifier,
+  machineNamedElsewhere,
 } = await import('../services/runnerIntentService.js');
 
 /**
@@ -164,6 +165,26 @@ describe('recognizing Stewra\'s own clarifying questions', () => {
     // A pending proposal or permission keeps a bare "yes" meaningful, as before.
     expect(turnReachesClassifier({ ...base, latestUserText: 'yes', history: [], hasPendingProposal: true })).toBe(true);
     expect(turnReachesClassifier({ ...base, latestUserText: 'yes', history: [], hasPendingPermission: true })).toBe(true);
+  });
+
+  it('names the organization a machine of theirs actually lives in', () => {
+    // Asked from WhatsApp: "What is running on the Mac mini right now?" The account texting answers for
+    // QA Web A, which has no Mac mini — and the reply was "Nothing's running in QA Web A", every word
+    // true and the question unanswered. The Mac mini is the same person's, paired in another of their
+    // own organizations, and saying so is the whole answer.
+    const elsewhere = [
+      { deviceName: 'Mac mini', orgName: 'Nurturing Lab Limited' },
+      { deviceName: 'MacBook Pro', orgName: 'Nurturing Lab Limited' },
+    ];
+    expect(machineNamedElsewhere('What is running on the Mac mini right now?', elsewhere)).toEqual({
+      deviceName: 'Mac mini',
+      orgName: 'Nurturing Lab Limited',
+    });
+    expect(machineNamedElsewhere('is the macbook up', elsewhere)?.deviceName).toBe('MacBook Pro');
+    // A question that names no machine must not drag another org into the answer.
+    expect(machineNamedElsewhere("what's running?", elsewhere)).toBeNull();
+    expect(machineNamedElsewhere('what is running on qa-macos', elsewhere)).toBeNull();
+    expect(machineNamedElsewhere('what is running on the Mac mini', [])).toBeNull();
   });
 
   it('finds the latest Stewra line, skipping the user\'s own turns', () => {

@@ -190,11 +190,22 @@ class BridgeDeviceRepository {
     });
   }
 
-  /** Record the bridge's reported WhatsApp state and liveness (driven by `bridge:hello`/`bridge:state`). */
-  async markSeen(deviceId: string, waState: BridgeWaState): Promise<void> {
+  /**
+   * Record the bridge's reported WhatsApp state and liveness (driven by `bridge:hello`/`bridge:state`).
+   *
+   * `appVersion` is written whenever the bridge announces one, because it is only otherwise set the day
+   * the device was linked: production showed "1.2.0" on the security panel while a 1.3.0 bridge was the
+   * one connected and quoting messages. A `bridge:state` carries no version and passes undefined, which
+   * leaves the column as it was rather than blanking it.
+   */
+  async markSeen(deviceId: string, waState: BridgeWaState, appVersion?: string): Promise<void> {
     await db
       .updateTable('bridge_devices')
-      .set({ wa_state: waState, last_seen_at: new Date() })
+      .set({
+        wa_state: waState,
+        last_seen_at: new Date(),
+        ...(appVersion === undefined ? {} : { app_version: appVersion }),
+      })
       .where('id', '=', deviceId)
       .execute();
   }
