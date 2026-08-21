@@ -212,6 +212,42 @@ export function extractLid(user: object): string | null {
   return typeof lid === 'string' && lid.length > 0 ? lid : null;
 }
 
+/** One entry of a Baileys `onWhatsApp` (USync) answer, reduced to the fields we read. */
+export interface UsyncEntry {
+  readonly jid?: string | null | undefined;
+  readonly lid?: unknown;
+  /** Part of the answer; deliberately not consulted — we are asking about our own account's LID, not
+   * whether the number is on WhatsApp, and an entry can say `exists` while carrying no LID. */
+  readonly exists?: unknown;
+}
+
+/**
+ * The account's own LID out of a `sock.onWhatsApp(ownJid)` answer.
+ *
+ * This is the second place a LID can come from, and the one that matters: `extractLid` reads what the
+ * open handshake happened to carry, and a QR-linked session is routinely handed NOTHING there — while
+ * the phone still addresses the self-chat by LID. The USync directory query is WhatsApp's own answer to
+ * "what is the LID for this number", so nothing here is inferred; we either get told or we do not.
+ *
+ * Null when the answer has no entry for this account or the entry carries no LID string. The caller
+ * says so out loud — a missing LID is not papered over with a guess, because a wrong self-identity
+ * would let another person's chat be treated as the user's own.
+ */
+export function lidFromUsync(entries: readonly UsyncEntry[] | undefined, ownJid: string): string | null {
+  if (entries === undefined) return null;
+  const wanted = bareUser(ownJid);
+  for (const entry of entries) {
+    if (typeof entry.jid !== 'string' || bareUser(entry.jid) !== wanted) continue;
+    if (typeof entry.lid === 'string' && entry.lid.length > 0) return entry.lid;
+  }
+  return null;
+}
+
+/** The `user` part of a JID, without any device suffix — how two spellings of one account are compared. */
+function bareUser(jid: string): string {
+  return (jid.split('@')[0] ?? '').split(':')[0] ?? '';
+}
+
 /**
  * Render a WhatsApp pairing QR as a PNG `data:` URL, sized for the app window.
  *

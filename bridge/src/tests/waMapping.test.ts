@@ -5,6 +5,7 @@ import {
   extractStatusCode,
   extractText,
   extractVoiceNote,
+  lidFromUsync,
   mapUpsert,
   metas,
   renderQr,
@@ -252,6 +253,30 @@ describe('extractLid', () => {
     expect(extractLid({ id: '1:2@s.whatsapp.net', lid: '99@lid' })).toBe('99@lid');
     expect(extractLid({ id: '1:2@s.whatsapp.net' })).toBeNull();
     expect(extractLid({ lid: '' })).toBeNull();
+  });
+});
+
+describe('lidFromUsync', () => {
+  // The exact shape Baileys' `onWhatsApp` returns: `{ jid, exists, lid }` per number asked about.
+  const answer = [
+    { jid: '17143077593@s.whatsapp.net', exists: true, lid: '207864303997014@lid' },
+    { jid: '16025003513@s.whatsapp.net', exists: true, lid: '138187015987214@lid' },
+  ];
+
+  it('finds THIS account among the answers, not merely the first one', () => {
+    expect(lidFromUsync(answer, '16025003513@s.whatsapp.net')).toBe('138187015987214@lid');
+    expect(lidFromUsync(answer, '17143077593@s.whatsapp.net')).toBe('207864303997014@lid');
+  });
+
+  it('matches an account whose jid carries a device suffix', () => {
+    expect(lidFromUsync(answer, '17143077593:41@s.whatsapp.net')).toBe('207864303997014@lid');
+  });
+
+  it('is null when the account is absent, carries no lid, or the query returned nothing', () => {
+    expect(lidFromUsync(answer, '15550001111@s.whatsapp.net')).toBeNull();
+    expect(lidFromUsync([{ jid: '17143077593@s.whatsapp.net', exists: true }], '17143077593@s.whatsapp.net')).toBeNull();
+    expect(lidFromUsync([{ jid: '17143077593@s.whatsapp.net', lid: '' }], '17143077593@s.whatsapp.net')).toBeNull();
+    expect(lidFromUsync(undefined, '17143077593@s.whatsapp.net')).toBeNull();
   });
 });
 
