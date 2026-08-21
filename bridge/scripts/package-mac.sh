@@ -139,9 +139,12 @@ npx electron-builder --mac dmg zip --prepackaged "$app" --publish never \
 
 # Inspect what actually ended up in the image rather than trusting that pass 2 did the right thing.
 # Both failure modes here produce a dmg of entirely plausible size that nothing else complains about.
-staged_dmg="$(find "$build_dir" -maxdepth 1 -name '*.dmg' -print -quit)"
+# Select by arch suffix, not "the first .dmg": when the build runs in place, release/ still holds the
+# other arch's artifacts from the previous run, and -quit would verify THOSE — then compare the fresh
+# latest-mac.yml against the wrong zip and abort a perfectly good build.
+staged_dmg="$(find "$build_dir" -maxdepth 1 -name "*-$arch.dmg" -print -quit)"
 if [ -z "$staged_dmg" ]; then
-  echo "!! no .dmg produced in $build_dir" >&2
+  echo "!! no *-$arch.dmg produced in $build_dir" >&2
   exit 1
 fi
 mnt="$(mktemp -d)"
@@ -174,10 +177,10 @@ echo ">> dmg contents verified: valid bundle$([ "$ticket_ok" -eq 1 ] && echo ', 
 # mismatch here (a stale yml from an earlier pass, a zip rebuilt out of band) ships an auto-update that
 # every installed bridge downloads and then rejects, forever — silent in the release, loud on every
 # user's machine. Assert the pair agrees before anything leaves this script.
-staged_zip="$(find "$build_dir" -maxdepth 1 -name '*.zip' -print -quit)"
+staged_zip="$(find "$build_dir" -maxdepth 1 -name "*-$arch.zip" -print -quit)"
 yml="$build_dir/latest-mac.yml"
 if [ -z "$staged_zip" ]; then
-  echo "!! no .zip produced in $build_dir — macOS auto-update has nothing to apply" >&2
+  echo "!! no *-$arch.zip produced in $build_dir — macOS auto-update has nothing to apply" >&2
   exit 1
 fi
 if [ ! -f "$yml" ]; then
@@ -206,14 +209,14 @@ echo ">> latest-mac.yml verified against $(basename "$staged_zip")"
 # actually ships.
 if [ "$build_dir" != "$OUT_DIR" ]; then
   shopt -s nullglob
-  dmgs=("$build_dir"/*.dmg)
+  dmgs=("$build_dir"/*-"$arch".dmg)
   if [ ${#dmgs[@]} -eq 0 ]; then
     echo "!! no .dmg produced in $build_dir" >&2
     exit 1
   fi
   # *.blockmap enables differential downloads; electron-updater falls back to a full download when a
   # blockmap is absent, so they ride along when produced but nothing asserts on them.
-  for d in "${dmgs[@]}" "$build_dir"/*.zip "$build_dir"/*.blockmap; do
+  for d in "${dmgs[@]}" "$build_dir"/*-"$arch".zip "$build_dir"/*-"$arch".*.blockmap; do
     cp -f "$d" "$OUT_DIR/"
     echo ">> $(basename "$d") -> $OUT_DIR/"
   done

@@ -6,12 +6,20 @@
 #   xcrun notarytool store-credentials "$NOTARY_PROFILE" --team-id 35JR7LFXPF
 # (it prompts for the Apple ID and an app-specific password from appleid.apple.com — never passed on the CLI).
 #
-# Usage: bridge/scripts/notarize-dmg.sh <path-to.dmg> [keychain-profile]
+# Usage: bridge/scripts/notarize-dmg.sh <path-to.dmg> [more.dmg ...]
+# The keychain profile comes from STEWRA_NOTARY_PROFILE (default stewra-notary) — never from a
+# positional argument, so `notarize-dmg.sh release/*.dmg` cannot hand the second dmg's path to
+# notarytool as the profile name.
 set -euo pipefail
 
-DMG="${1:?usage: notarize-dmg.sh <path-to.dmg> [keychain-profile]}"
-NOTARY_PROFILE="${2:-stewra-notary}"
-[ -f "$DMG" ] || { echo "ERROR: no such dmg: $DMG" >&2; exit 1; }
+[ $# -ge 1 ] || { echo "usage: notarize-dmg.sh <path-to.dmg> [more.dmg ...]" >&2; exit 1; }
+NOTARY_PROFILE="${STEWRA_NOTARY_PROFILE:-stewra-notary}"
+for DMG in "$@"; do
+  [ -f "$DMG" ] || { echo "ERROR: no such dmg: $DMG" >&2; exit 1; }
+done
+
+for DMG in "$@"; do
+echo "=== $DMG"
 
 echo ">> submitting to Apple notary service (this can take a few minutes) ..."
 xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
@@ -51,3 +59,4 @@ rmdir "$mnt" 2>/dev/null || true
 echo ">> shasum:"
 shasum -a 256 "$DMG"
 echo ">> DONE — notarized + stapled."
+done
