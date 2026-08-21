@@ -97,6 +97,26 @@ test:e2e:report` opens it), `results.json`, traces/videos/screenshots on failure
 | `tests/today.spec.ts` | `today.mjs` | The proactive `/today` home: greeting, briefing card vs. backend truth, nudge list vs. backend suggestions, expand/draft/snooze/dismiss/chat-about-this, AppNav order, console-error-free navigation. |
 | `tests/runner.spec.ts` | Phase 5 control surface | The in-chat "Run coding agent" card: ask Stewra (in the Stewra thread) to run a coding agent on one of your machines → the intent classifier proposes → the card renders → **Start** dispatches a real session. Auto-discovers an online runner via `GET /runner/devices` and **skips** if none is paired/online — no synthetic runner. |
 
+## The runner's machines — QA virtual machines, paired through the screens
+
+`runner.spec.ts` and `fleet.spec.ts` need a machine **paired to QA user A**, online, with a harness and
+a git checkout. The real Macs belong to the business account, so the QA account has two disposable
+guests of its own: `qa-linux` (Debian 13 under KVM/libvirt on stewra-server) and `qa-macos` (macOS
+under Tart on the Mac mini, kept alive by `com.stewra.qa-macos` launchd). Each runs `stewra-runner`
+0.2.0 as a service, has `claude-agent-acp` on PATH, a throwaway `~/work/e2e-sandbox` repo, and its
+Claude login in `~/.stewra-runner/credentials/claude-code` (never in an env var, never in this repo).
+
+They were paired the way a customer pairs a laptop — sign in, `/fleet`, "Pair a machine", copy the
+command. `qa-runner-pair.mjs` does exactly that and nothing else:
+
+```bash
+node qa-runner-pair.mjs A     # prints CODE=STEWRA-…, minted in A's active org
+# then, inside the guest:  STEWRA_API_URL=https://www.stewra.com stewra-runner pair STEWRA-…
+```
+
+`structure.mjs` is the same idea for the business account (org, projects, bindings). Neither
+touches the API directly; if a step cannot be done from a screen, the script cannot do it either.
+
 ## The commerce suite — `commerce/`, its own config and its own stack
 
 Everything above drives **production**. The commerce plane can't: it isn't deployed, and connecting a
