@@ -94,6 +94,30 @@ export function looksLikeRunnerIntent(text: string, projects: readonly Project[]
   return false;
 }
 
+/**
+ * The three clarifying questions {@link RunnerIntentService.resolve} can ask when a run request cannot
+ * be pinned to one checkout. None of them creates a proposal, so the turn that answers one ("on the Mac
+ * mini") has nothing to confirm — it must be read as the original request with the blank filled in.
+ * Kept as one predicate so the sentences in `resolve` and this recognizer cannot drift apart unnoticed.
+ */
+export function isClarifyingAsk(text: string | null): boolean {
+  if (text === null) return false;
+  return (
+    /is ready on more than one machine — .+\. Which one\?$/.test(text) ||
+    /^Which project — .+\?/.test(text) ||
+    /^Which checkout on .+ — .+\?$/.test(text)
+  );
+}
+
+/** The most recent Stewra line in the history, or null when the user has spoken only. */
+export function lastAssistantTurn(history: ReadonlyArray<ConversationTurn>): string | null {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const turn = history[i];
+    if (turn !== undefined && turn.role === 'assistant') return turn.content.trim();
+  }
+  return null;
+}
+
 /** How many recent turns of context to give the classifier (bounds the prompt). */
 const CONTEXT_TURNS = 8;
 
@@ -159,6 +183,12 @@ const SYSTEM_PROMPT = [
   '  If you cannot resolve a project from the context, still use "start_request" with projectId empty.',
   '- If there is a pending permission AND a pending proposal, a bare "yes"/"no" answers the PERMISSION',
   '  (a blocked session is the more urgent thing).',
+  '- When Stewra\'s previous line was a CLARIFYING QUESTION about a run request that could not be pinned',
+  '  down ("… is ready on more than one machine — A or B. Which one?", "Which project — …?", "Which',
+  '  checkout on …?") and the user answers it ("the Mac mini", "on the MacBook Pro", "Truetalk"), that is a',
+  '  "start_request" — NOT confirm_proposal, because no proposal exists yet. Carry the task ("prompt"), the',
+  '  project and anything else from the original ask in the recent conversation, and fill in the field the',
+  '  user just answered (copy its id from the context).',
   '- "reply": ONE short, warm sentence in Stewra\'s voice. For start_request/revise_proposal it should',
   '  restate what will run — use the PROJECT\'s name, not the repo folder — and ask the user to confirm',
   '  (yes) or say what to change. For the executed intents it should acknowledge the action. Never claim',
@@ -269,6 +299,14 @@ class RunnerIntentService {
             .map((t) => `${t.role === 'assistant' ? 'Stewra' : 'User'}: ${t.content}`)
             .join('\n'),
           '',
+          ...(isClarifyingAsk(lastAssistantTurn(history))
+            ? [
+                'Note: Stewra\'s previous line was a clarifying question about an unresolved run request',
+                '(no proposal exists yet). If the latest message answers it, classify as "start_request"',
+                'carrying the original task and project from the conversation above.',
+                '',
+              ]
+            : []),
           `Latest user message:\n${latestUserText}`,
         ].join('\n'),
       },
