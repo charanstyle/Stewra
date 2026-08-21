@@ -463,7 +463,7 @@ class RunnerIntentService {
       case 'cancel_session':
         return this.cancelSession(actor, state.sessions, data.reply);
       case 'list_sessions':
-        return { reply: this.describeSessions(state.sessions), proposal: null };
+        return { reply: this.describeSessions(state, latestUserText), proposal: null };
       case 'list_devices':
         return { reply: this.describeDevices(state, latestUserText), proposal: null };
       case 'none':
@@ -803,15 +803,42 @@ class RunnerIntentService {
 
   // ── read-only answers: on WhatsApp these ARE the fleet page ─────────────────────────────────────────
 
-  /** "What's running?" — the live sessions, then the most recent finished ones. */
-  private describeSessions(sessions: readonly RunnerSession[]): string {
+  /**
+   * "What's running?" — the live sessions, then the most recent finished ones.
+   *
+   * When the person named one of this org's machines, only that machine's work is reported; naming a
+   * machine and being answered about every machine is how "what is running on the Mac mini" came back
+   * as three sessions on someone else's runners. A machine this org does not have matches nothing, so
+   * the answer falls back to the org — and says so by name, which is what lets the reader see they are
+   * being told about a tenant that has never heard of the machine they asked about.
+   */
+  private describeSessions(state: TurnState, latestUserText: string): string {
+    const named = state.devices.filter((d) => userNamedDevice(latestUserText, d.name));
+    const only = named[0];
+    if (named.length === 1 && only !== undefined) {
+      const mine = state.sessions.filter((s) => s.deviceId === only.id);
+      return this.sessionReport(mine, `on ${only.name}`);
+    }
+    return this.sessionReport(state.sessions, `in ${state.orgName}`);
+  }
+
+  /** The sessions report itself. `scope` says what "nothing" is a statement about. */
+  private sessionReport(sessions: readonly RunnerSession[], scope: string): string {
     const running = sessions.filter((s) => s.endedAt === null);
     const finished = sessions.filter((s) => s.endedAt !== null).slice(0, 3);
     const lines: string[] = [];
     if (running.length === 0) {
-      lines.push(finished.length > 0 ? "Nothing's running at the moment." : "Nothing's running at the moment, and nothing has run yet.");
+      lines.push(
+        finished.length > 0
+          ? `Nothing's running ${scope} at the moment.`
+          : `Nothing's running ${scope} at the moment, and nothing has run yet.`,
+      );
     } else {
-      lines.push(running.length === 1 ? "Here's what's running:" : `Here's what's running — ${running.length} things:`);
+      lines.push(
+        running.length === 1
+          ? `Here's what's running ${scope}:`
+          : `Here's what's running ${scope} — ${running.length} things:`,
+      );
       for (const s of running) lines.push(`• ${this.sessionLine(s)}`);
     }
     if (finished.length > 0) {
