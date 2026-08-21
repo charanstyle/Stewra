@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { BrowserWindow, Menu, Tray, app, dialog, ipcMain, nativeImage, shell } from 'electron';
-import type { BridgeAllowedChat, BridgeWaState } from '@stewra/shared-types';
+import type { BridgeAllowedChat, BridgeWaState, HostIdentity } from '@stewra/shared-types';
 import { normalizeJid } from '../core/allowlist.js';
 import { Bridge } from '../core/bridge.js';
 import { claimBridgeToken } from '../core/stewraClient.js';
@@ -11,7 +11,9 @@ import { AllowedChatsStore, ChatDirectoryCache } from './allowedChatsStore.js';
 import { Autostart, AutostartDecision, linuxExecPath, startedAtLogin } from './autostart.js';
 import { BAKED_API_URL } from './bakedConfig.js';
 import { linuxKeyStorageBackend } from './keyStorageBackend.js';
+import { readHostIdentity } from './hostIdentity.js';
 import { createSafeStorageSecretStore } from './secretStore.js';
+import { SECOND_PROFILE_MESSAGE, userDataOverride } from './singleProfile.js';
 import { TokenStore } from './tokenStore.js';
 import { quitAndInstall, startUpdater } from './updater.js';
 import type { SecretStore } from '../core/authState.js';
@@ -44,6 +46,11 @@ let autostart: Autostart | null = null;
 let autostartDecision: AutostartDecision | null = null;
 /** The chats the user ticked, as synced to the gate and the server. Loaded from disk at boot. */
 let tickedChats: readonly BridgeAllowedChat[] = [];
+/**
+ * Which computer this is, read once at boot. `null` only on a platform we read no identifier for; a
+ * platform we DO support that cannot answer never gets this far — see the boot block below.
+ */
+let hostIdentity: HostIdentity | null = null;
 /** Set only by the tray's Quit item. Closing the window HIDES it — a bridge that quit is a bridge that
  * stopped answering, and the user would not find out until they wondered why Stewra had gone silent. */
 let quitting = false;
@@ -281,6 +288,7 @@ function createBridge(activeConfig: BridgeConfig, secrets: SecretStore): Bridge 
   const instance: Bridge = new Bridge({
     config: activeConfig,
     authDir: join(app.getPath('userData'), 'whatsapp'),
+    host: hostIdentity,
     secretStore: secrets,
     events: {
       onState: (waState, message) => {
@@ -376,7 +384,10 @@ function registerIpc(activeConfig: BridgeConfig, secrets: SecretStore, store: To
   ipcMain.handle(IPC.UNPAIR, async (): Promise<void> => {
     // Local half of a revoke. The user should ALSO remove "Stewra Bridge" from WhatsApp → Linked Devices
     // on their phone; the UI says so, because this app cannot do it for them.
-    bridge?.stop();
+    //
+    // `unlink()`, not `stop()`: the WhatsApp session is wiped here. Whoever pairs this machine next may be
+    // a different Stewra account, and a resumed session would hand them the previous person's WhatsApp.
+    await bridge?.unlink();
     bridge = null;
     await store.clear();
     // Unlinking ends this account's relationship with this machine; its chat list and ticks go too.
@@ -423,7 +434,23 @@ if (keyStorageBackend !== null) {
 
 // A second copy would fight the first for the same WhatsApp session — `connectionReplaced`, on loop. That
 // is precisely the reconnect storm that gets accounts flagged.
-if (!app.requestSingleInstanceLock()) {
+//
+// The lock is keyed on the userData directory, so it only answers "is this profile already running". The
+// check above it answers the question the lock cannot: "is this a SECOND profile on this machine" — see
+// singleProfile.ts. Both refusals quit; only one of them is an error.
+if (userDataOverride(process.argv) !== null) {
+  // Chromium consumed the switch before any of this ran, so there is no carrying on in the default
+  // profile: the session dir is already the overridden one. Say so in both places — the terminal for
+  // whoever passed the flag, the dialog for whoever double-clicked something that passes it.
+  console.error(`Stewra Bridge cannot start: ${SECOND_PROFILE_MESSAGE}`);
+  void app.whenReady().then(() => {
+    dialog.showErrorBox('Stewra Bridge cannot start', SECOND_PROFILE_MESSAGE);
+    app.quit();
+  });
+} else if (!app.requestSingleInstanceLock()) {
+  // Not a failure — the copy already running takes focus via `second-instance` below. It still gets a
+  // line, because a launch that exits silently reads as a broken app to whoever ran it from a terminal.
+  console.error('Stewra Bridge is already running on this machine; bringing that window to the front.');
   app.quit();
 } else {
   app.on('second-instance', () => showWindow());
@@ -437,12 +464,18 @@ if (!app.requestSingleInstanceLock()) {
       // guessed at a server URL would point a WhatsApp session somewhere the user never agreed to; a
       // bridge with no real keystore would write that session to disk where anyone could read it. Neither
       // is a degraded mode worth running in, so neither gets a silent fallback.
+      // Which computer this is joins that list. A bridge that cannot say where it is running is a bridge
+      // Stewra cannot answer "what's running on this machine?" from — and reading a hostname instead
+      // would pair unrelated computers, which is worse than not knowing. On macOS and Linux this is a
+      // one-line read that only fails on a badly broken system; on anything else it returns null, which
+      // is a supported state rather than an error.
       // A GUI launch carries no STEWRA_API_URL; fall back to the value baked in at package time.
       activeConfig = loadBridgeConfig(
         { STEWRA_API_URL: process.env['STEWRA_API_URL'] ?? BAKED_API_URL },
         app.getVersion(),
       );
       secrets = createSafeStorageSecretStore();
+      hostIdentity = await readHostIdentity(process.platform);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Stewra Bridge is misconfigured.';
       // Both, not either. The dialog is for the person double-clicking an icon; the stderr line is for

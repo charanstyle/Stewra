@@ -16,7 +16,10 @@ export const IPC = {
   GET_STATE: 'stewra:get-state',
   /** renderer → main, invoke. Claim the pairing code, then bring up WhatsApp. */
   PAIR: 'stewra:pair',
-  /** renderer → main, invoke. Wipe the WhatsApp session and this device's Stewra token. */
+  /**
+   * renderer → main, invoke. Wipe the local WhatsApp session, this device's Stewra token, its ticks and
+   * its chat directory. WhatsApp still lists the link until the user removes it from their phone.
+   */
   UNPAIR: 'stewra:unpair',
   SET_AUTOSTART: 'stewra:set-autostart',
   /** renderer → main, invoke. Hide the "we turned this on for you" banner. Does not change the setting. */

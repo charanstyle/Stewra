@@ -2,6 +2,7 @@
 // through the screen. Project creation and editing need no machine and always run. The binding and
 // cell-state checks need a runner ONLINE with at least one reported checkout; without one they skip,
 // unless E2E_REQUIRE_RUNNER=1 turns that leniency off (same discipline as runner.spec.ts).
+import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures';
 import { WEB, apiCall, uiHasTestids } from '../lib.mjs';
 import { env } from '../env.mjs';
@@ -18,7 +19,7 @@ function skipUnlessRequired(unmet: boolean, reason: string): void {
 const CELL_STATES = ['ready', 'stale', 'offline', 'unbound'];
 
 /** The org the page is showing — read from its selector so the spec cleans up in the same tenant. */
-async function selectedOrgId(page: import('@playwright/test').Page): Promise<string> {
+async function selectedOrgId(page: Page): Promise<string> {
   const value = await page.getByTestId('fleet-org-select').inputValue();
   expect(value, 'fleet org selector has a value').not.toBe('');
   return value;

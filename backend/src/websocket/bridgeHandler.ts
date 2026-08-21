@@ -1,7 +1,8 @@
 import * as Sentry from '@sentry/node';
 import { z } from 'zod';
-import { BRIDGE_CLIENT_EVENTS, BRIDGE_WA_STATES } from '@stewra/shared-types';
+import { BRIDGE_CLIENT_EVENTS, BRIDGE_WA_STATES, HOST_ID_KINDS } from '@stewra/shared-types';
 import type { BridgeInboundPayload } from '@stewra/shared-types';
+import { machineAccessService } from '../services/machineAccessService.js';
 import { whatsappBridgeService } from '../services/whatsappBridgeService.js';
 import { logger } from '../utils/logger.js';
 import { bridgeUserRoom } from './bridgeTypes.js';
@@ -13,9 +14,21 @@ import type { BridgeSocketLike } from './bridgeTypes.js';
  */
 const waStateSchema = z.enum(BRIDGE_WA_STATES);
 
+/**
+ * Which computer the bridge is on. Optional because bridges older than `BRIDGE_HOST_MIN_VERSION` do not
+ * send it and must keep working — absence means "we do not know", never "no machine".
+ */
+const hostSchema = z.object({
+  kind: z.enum(HOST_ID_KINDS),
+  // Bounded like every other client-supplied string here: a UUID or a machine-id, not a payload.
+  value: z.string().min(1).max(128),
+  hostname: z.string().min(1).max(255),
+});
+
 const helloSchema = z.object({
   appVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
   waState: waStateSchema,
+  host: hostSchema.optional(),
 });
 
 const stateSchema = z.object({ waState: waStateSchema });
@@ -125,6 +138,12 @@ export function registerBridgeHandler(socket: BridgeSocketLike): void {
         parsed.data.appVersion,
       ),
     );
+    // Which computer this is. Recorded on every hello rather than only the first: a machine can be
+    // re-imaged, and a stale host id would point Stewra at the wrong box with total confidence.
+    const { host } = parsed.data;
+    if (host !== undefined) {
+      guard(BRIDGE_CLIENT_EVENTS.HELLO, () => machineAccessService.noteBridgeHost(deviceId, host));
+    }
   });
 
   socket.on(BRIDGE_CLIENT_EVENTS.STATE, (raw: unknown) => {

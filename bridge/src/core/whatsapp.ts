@@ -3,14 +3,14 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   jidNormalizedUser,
 } from '@whiskeysockets/baileys';
-import type { WAMessage, WASocket } from '@whiskeysockets/baileys';
+import type { proto, WAMessage, WASocket } from '@whiskeysockets/baileys';
 import type { BridgeWaState } from '@stewra/shared-types';
 import { decideCloseAction } from './closePolicy.js';
 import { useEncryptedAuthState } from './authState.js';
 import type { SecretStore } from './authState.js';
 import type { ChatMeta } from './chatDirectory.js';
 import { RecentMessages } from './recentMessages.js';
-import { extractLid, extractStatusCode, mapUpsert, metas, renderQr } from './waMapping.js';
+import { extractLid, extractStatusCode, lidFromUsync, mapUpsert, metas, renderQr } from './waMapping.js';
 import type { WhatsappMessage } from './waMapping.js';
 
 export type { VoiceNote, WhatsappMessage } from './waMapping.js';
@@ -103,6 +103,12 @@ export class WhatsappClient {
   private reconnectTimer: NodeJS.Timeout | null = null;
   /** Live messages by id, so a reply can quote the message it answers (see `quoteOptions`). */
   private readonly recent = new RecentMessages<WAMessage>(RECENT_MESSAGES_KEPT);
+  /**
+   * What this bridge has SENT, by id — the only thing it can honestly re-send when WhatsApp asks (see
+   * `getMessage`). Separate from `recent` on purpose: that one holds other people's messages so a reply
+   * can quote them, and the two must never be confused for one another.
+   */
+  private readonly sentMessages = new RecentMessages<proto.IMessage>(RECENT_MESSAGES_KEPT);
 
   constructor(private readonly options: WhatsappOptions) {}
 
@@ -171,9 +177,38 @@ export class WhatsappClient {
       // 'Desktop' is the platform type (an icon hint); the third is our version, shown as the device
       // version. See the class comment: this label being honest is what lets the user revoke us.
       browser: [this.options.deviceName ?? 'Stewra Bridge', 'Desktop', this.options.appVersion],
-      // We keep no message store, so we cannot re-send an old message on WhatsApp's request. Returning
-      // undefined is honest; inventing something here would be worse than a failed retry.
-      getMessage: async () => undefined,
+      // WhatsApp asks for this when a device could not decrypt something we sent and wants it again.
+      // Answer it for our OWN sends, which we hold in `sentMessages`.
+      //
+      // ⚠️ NOT optional, and returning `undefined` unconditionally — which this did — breaks the product
+      // in a way nothing else reports. Measured on the linked iPhone (2026-08-21): Stewra's reply left
+      // here, WhatsApp accepted it and reported it delivered, and the phone rendered "Waiting for this
+      // message. This may take a while." — permanently. The phone asks for a re-send exactly once and
+      // gives up; with nothing to give it, every reply this bridge sent was unreadable while every log
+      // line said success. With the store in place the same exchange re-sends and renders. The self-chat
+      // is the one conversation where this always bites: a companion device pairs with no prior session
+      // to the phone, so the FIRST message each way needs the retry.
+      //
+      // Anything we have not sent is still `undefined`: we keep no store of other people's messages and
+      // will not invent one.
+      getMessage: async (key) => {
+        const id = key.id;
+        if (id === null || id === undefined) {
+          console.error('Stewra Bridge: a device asked for a message again but named no id; nothing to re-send.');
+          return undefined;
+        }
+        const ours = this.sentMessages.get(id);
+        // Logged either way, and loudly: this ask is the ONLY signal that a reply landed unreadable, and
+        // without it the failure is invisible here and permanent on the phone.
+        console.error(
+          `Stewra Bridge: ${key.remoteJid ?? 'a device'} could not read message ${id} and asked for it ` +
+            (ours === null
+              ? 'again — this bridge does not hold it (sent before this run started), so it stays ' +
+                'unreadable on their phone.'
+              : 'again — re-sending it.'),
+        );
+        return ours === null ? undefined : ours;
+      },
     });
     this.sock = sock;
 
@@ -183,13 +218,54 @@ export class WhatsappClient {
     // open-time identity drops the user's own first message as "not_allowed". Re-announce when the
     // identity grows, and the Bridge rebuilds the gate (handleWaOpen is idempotent).
     let announced: { ownJid: string; ownLid: string | null } | null = null;
+    /** The LID as the directory answered it, when the handshake carried none. See `learnOwnLid`. */
+    let lookedUpLid: string | null = null;
     const announceIdentity = (): void => {
       const user = sock.user;
       if (user === null || user === undefined || user.id.length === 0) return;
-      const identity = { ownJid: jidNormalizedUser(user.id), ownLid: extractLid(user) };
+      const fromHandshake = extractLid(user);
+      const identity = {
+        ownJid: jidNormalizedUser(user.id),
+        // Both sources are WhatsApp's own answer about THIS account — the handshake's, or the directory
+        // lookup below when the handshake had nothing. Neither is inferred from a message we received.
+        ownLid: fromHandshake === null ? lookedUpLid : fromHandshake,
+      };
       if (announced !== null && announced.ownJid === identity.ownJid && announced.ownLid === identity.ownLid) return;
       announced = identity;
       this.options.events.onOpen(identity);
+    };
+
+    /**
+     * Ask WhatsApp for this account's own LID when neither the handshake nor `creds.update` produced one.
+     *
+     * Measured on a QR-linked session (2026-08-21): the socket opened as `<number>@s.whatsapp.net` with no
+     * LID at all, and none ever arrived — while the user's phone addressed the "Message yourself" chat by
+     * LID. The gate could not recognise the self-chat, so every message the user sent themselves was
+     * dropped on this machine and Stewra answered nothing. A pairing-code session on the same build got
+     * its LID in the handshake, which is why this went unseen until a real QR link.
+     *
+     * `onWhatsApp` is a USync directory query — WhatsApp telling us the LID for a number. If it answers
+     * with none, the capability is DROPPED and said out loud; nothing is guessed in its place, because a
+     * wrong self-identity would hand someone else's chat to Stewra as if it were the user's own.
+     */
+    const learnOwnLid = async (): Promise<void> => {
+      const user = sock.user;
+      if (user === null || user === undefined || user.id.length === 0) return;
+      if (extractLid(user) !== null) return;
+
+      const ownJid = jidNormalizedUser(user.id);
+      const lid = lidFromUsync(await sock.onWhatsApp(ownJid), ownJid);
+      if (lid === null) {
+        console.error(
+          `Stewra Bridge: WhatsApp reported no LID for ${ownJid}. If this account's phone addresses the ` +
+            'self-chat by LID, those messages cannot be recognised as the self-chat and will be dropped ' +
+            '— each one logged by the allowlist gate.',
+        );
+        return;
+      }
+      console.error(`Stewra Bridge: ${ownJid} is also ${lid} (asked WhatsApp; the handshake carried no LID).`);
+      lookedUpLid = lid;
+      announceIdentity();
     };
 
     sock.ev.on('creds.update', () => {
@@ -213,6 +289,9 @@ export class WhatsappClient {
         this.pairingAttempt = 0;
         announceIdentity();
         this.options.events.onState('open');
+        // Not awaited: 'open' must not wait on a directory round-trip. A rejection here is a broken
+        // socket, and Baileys' own close handling is what answers that.
+        void learnOwnLid();
         return;
       }
       if (update.connection === 'close') {
@@ -327,6 +406,7 @@ export class WhatsappClient {
     if (id === null || id === undefined) {
       throw new Error('WhatsApp accepted the voice note but returned no id');
     }
+    this.rememberSent(id, sent?.message);
     return id;
   }
 
@@ -343,7 +423,26 @@ export class WhatsappClient {
     if (id === null || id === undefined) {
       throw new Error('WhatsApp accepted the message but returned no id');
     }
+    this.rememberSent(id, sent?.message);
     return id;
+  }
+
+  /**
+   * Hold on to what we just sent, so a device that could not decrypt it can be answered.
+   *
+   * A send with no content on it is the one case worth shouting about rather than storing: WhatsApp
+   * took the message, the recipient may well fail to decrypt it, and we would then have nothing to
+   * re-send and no idea why. Say so now, while the send is still on screen.
+   */
+  private rememberSent(id: string, content: proto.IMessage | null | undefined): void {
+    if (content === null || content === undefined) {
+      console.error(
+        `Stewra Bridge: WhatsApp returned message ${id} with no content; if the recipient asks for it ` +
+          'again there is nothing to re-send.',
+      );
+      return;
+    }
+    this.sentMessages.remember(id, content);
   }
 
   /**

@@ -15,6 +15,8 @@ import { config } from '../config/unifiedConfig.js';
 import { modelClient } from '../agent-host/modelClient.js';
 import { messageRepository } from '../repositories/messageRepository.js';
 import { projectRepository } from '../repositories/projectRepository.js';
+import { machineAccessService } from './machineAccessService.js';
+import type { MachineAccessOutcome } from './machineAccessService.js';
 import { runnerService } from './runnerService.js';
 import type { OrgActor } from './runnerService.js';
 import { runnerSessionService } from './runnerSessionService.js';
@@ -54,6 +56,7 @@ type RunnerIntent =
   | 'cancel_session'
   | 'list_sessions'
   | 'list_devices'
+  | 'request_machine_access'
   | 'none';
 
 /** Human labels for the harness ids, for the confirm line the user actually reads. */
@@ -190,6 +193,18 @@ export function openExchangeUserText(
   return pieces.join('\n');
 }
 
+/** The sentence Stewra ends the offer with. One constant, so the offer and its recognizer cannot drift. */
+export const MACHINE_ACCESS_OFFER = 'Would you like me to ask them for permission?';
+
+/**
+ * Was Stewra's last line the offer to ask another organization for sight of this computer? A bare "yes"
+ * to it carries no runner word, no project name and answers no proposal, so without this it would never
+ * reach the classifier and the offer would be one Stewra makes and cannot hear the answer to.
+ */
+export function isMachineAccessOffer(text: string | null): boolean {
+  return text !== null && text.endsWith(MACHINE_ACCESS_OFFER);
+}
+
 /**
  * The cheap gate in front of the classifier. A turn reaches the model when it mentions the runner (a
  * generic word or one of the person's own project names), when something concrete awaits an answer (a
@@ -205,11 +220,13 @@ export function turnReachesClassifier(params: {
   hasPendingPermission: boolean;
   history: ReadonlyArray<ConversationTurn>;
 }): boolean {
+  const lastFromStewra = lastAssistantTurn(params.history);
   return (
     looksLikeRunnerIntent(params.latestUserText, params.projects) ||
     params.hasPendingProposal ||
     params.hasPendingPermission ||
-    isClarifyingAsk(lastAssistantTurn(params.history))
+    isClarifyingAsk(lastFromStewra) ||
+    isMachineAccessOffer(lastFromStewra)
   );
 }
 
@@ -229,6 +246,7 @@ const responseSchema = z.object({
     'cancel_session',
     'list_sessions',
     'list_devices',
+    'request_machine_access',
     'none',
   ]),
   /** For start_request / revise_proposal: the chosen ids, copied from context. */
@@ -280,6 +298,10 @@ const SYSTEM_PROMPT = [
   '  For BOTH list intents, if the user named a machine, copy that name into "machineMention" exactly as',
   '  they wrote it — even, and especially, when no such machine appears in the context. That is how the',
   '  answer can say the machine is not here instead of reporting on the others as if it were.',
+  '- "request_machine_access": Stewra has said that the computer it runs on is paired to an organization',
+  '  the user is not in, and offered to ask that organization for permission — and the user is SAYING YES',
+  '  to that offer ("yes", "please do", "go ahead and ask them"). Only ever in answer to that offer; a',
+  '  "yes" to anything else is not this.',
   '- "none": the message is not about the runner at all.',
   '',
   'Rules:',
@@ -431,6 +453,14 @@ class RunnerIntentService {
                 '',
               ]
             : []),
+          ...(isMachineAccessOffer(lastAssistantTurn(history))
+            ? [
+                'Note: Stewra\'s previous line offered to ask another organization for permission to see',
+                'the computer it runs on. If the latest message accepts that offer, classify as',
+                '"request_machine_access". If it declines, classify as "none".',
+                '',
+              ]
+            : []),
           `Latest user message:\n${latestUserText}`,
         ].join('\n'),
       },
@@ -505,6 +535,8 @@ class RunnerIntentService {
           reply: await this.describeDevices(state, latestUserText, this.mentioned(data, latestUserText)),
           proposal: null,
         };
+      case 'request_machine_access':
+        return { reply: await this.requestMachineAccess(state), proposal: null };
       case 'none':
       default:
         return null;
@@ -881,7 +913,74 @@ class RunnerIntentService {
     if (mention.length === 0) return null;
     const elsewhere = await this.namedElsewhere(state, latestUserText);
     if (elsewhere !== null) return elsewhere;
+    const here = await this.namedThisComputer(state, latestUserText);
+    if (here !== null) return here;
     return `I don't have a machine called "${mention}" in ${state.orgName}.`;
+  }
+
+  /**
+   * The machine the person named is the very computer Stewra is running on — and it belongs to somebody
+   * else's organization.
+   *
+   * This is the case the flat "I don't have a machine called that" was worst at. It was true and it was
+   * useless: the machine is right here, Stewra can prove it (the bridge and the runner report the same
+   * host identity), and the only thing standing between the two is a permission nobody had a way to ask
+   * for. So say what is actually true, and — when asking is available — offer to ask.
+   *
+   * Gated on the person's own words naming that machine. Their bridge is always on SOME computer, and
+   * volunteering "by the way, this box belongs to Acme" on a turn about something else would be Stewra
+   * telling them about a machine they never asked about.
+   */
+  private async namedThisComputer(state: TurnState, latestUserText: string): Promise<string | null> {
+    const standing = await machineAccessService.inspectOwnMachine(state.actor.userId);
+    if (standing.kind === 'host-unknown' || standing.kind === 'no-runner') return null;
+    // `already-visible` means it is in one of their own orgs, which `namedElsewhere` has already said
+    // better — it names the org this conversation answers for as well.
+    if (standing.kind === 'already-visible') return null;
+    if (!userNamedDevice(latestUserText, standing.deviceName)) return null;
+
+    switch (standing.kind) {
+      case 'granted':
+        return `${standing.deviceName} is the computer I'm running on, and ${standing.orgName} has let you see it — but this conversation answers for ${state.orgName}, so switch there and I can tell you about it.`;
+      case 'pending':
+        return `${standing.deviceName} is the computer I'm running on, but it's paired to ${standing.orgName} — I've asked them for permission and they haven't answered yet.`;
+      case 'denied':
+        return `${standing.deviceName} is the computer I'm running on, but it's paired to ${standing.orgName}, and they turned down the request to let you see it.`;
+      case 'can-ask':
+        return `${standing.deviceName} is the computer I'm running on, but it's paired to ${standing.orgName} and I'm not in it, so I can't see what's on it. ${MACHINE_ACCESS_OFFER}`;
+      default:
+        // Unreachable today: the four kinds above are what is left after the guards. A new kind lands
+        // here rather than silently borrowing one of these sentences.
+        throw new Error(`unhandled machine-access outcome: ${JSON.stringify(standing)}`);
+    }
+  }
+
+  /**
+   * "Yes, ask them." Files the request against the owning org, where an admin decides it in the Stewra
+   * app. Every other outcome is something that changed between the offer and the answer, and each gets
+   * its own sentence rather than a cheerful "asked!" that did nothing.
+   */
+  private async requestMachineAccess(state: TurnState): Promise<string> {
+    const outcome: MachineAccessOutcome = await machineAccessService.askForOwnMachine(state.actor.userId);
+    switch (outcome.kind) {
+      case 'asked':
+        return `Done — I've asked ${outcome.orgName} to let you see ${outcome.deviceName}. Whoever runs that organization will find it in Stewra, and I'll be able to answer about this machine as soon as they say yes.`;
+      case 'pending':
+        return `That request is already with ${outcome.orgName} — they haven't answered it yet. I'll be able to see ${outcome.deviceName} the moment they do.`;
+      case 'denied':
+        return `${outcome.orgName} has already turned that down, so I won't ask again — someone there would need to approve it in Stewra.`;
+      case 'granted':
+        return `You already have it: ${outcome.orgName} has let you see ${outcome.deviceName}. This conversation answers for ${state.orgName} though, so switch organizations and ask me again.`;
+      case 'already-visible':
+        return `${outcome.deviceName} is already yours to see — no permission needed.`;
+      case 'no-runner':
+        return `There's nothing to ask for: no machine is paired to Stewra on ${outcome.hostname}. Install the Stewra runner there and pair it, and it's yours.`;
+      case 'host-unknown':
+        return "I can't tell which computer I'm running on, so I don't know who to ask. Updating Stewra Bridge to the current version is what fixes that.";
+      case 'can-ask':
+        // `askForOwnMachine` returns this only if the row vanished between its two reads.
+        return 'Something changed while I was asking — try me again in a moment.';
+    }
   }
 
   /**

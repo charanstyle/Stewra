@@ -48,16 +48,18 @@ export function verifyTelnyxSignature(req: Request, _res: Response, next: NextFu
     logger.warn('telnyx webhook: timestamp outside the accepted window — rejecting', { age });
     throw new AuthenticationError('Invalid webhook signature');
   }
-  const signed = Buffer.concat([Buffer.from(`${timestamp}|`, 'utf8'), req.body]);
-  let ok = false;
-  try {
-    ok = verify(null, signed, publicKey(), Buffer.from(signature, 'base64'));
-  } catch (error) {
-    // A signature that is not even well-formed base64/Ed25519 — same answer as a wrong one.
-    logger.warn('telnyx webhook: signature could not be checked', { error: String(error) });
+  // Checked before `verify` rather than around it. An Ed25519 signature is exactly 64 bytes, so anything
+  // else is a malformed request — the caller's fault, answered like any other bad signature. Wrapping the
+  // call in try/catch instead would have caught OUR faults too: `publicKey()` throws when TELNYX_PUBLIC_KEY
+  // is not a 32-byte key, and that was being reported to Telnyx as "invalid signature" and logged as a
+  // warning — a webhook rejecting every genuine delivery forever, with nothing on fire.
+  const signatureBytes = Buffer.from(signature, 'base64');
+  if (signatureBytes.length !== 64) {
+    logger.warn('telnyx webhook: signature is not a 64-byte Ed25519 signature — rejecting');
     throw new AuthenticationError('Invalid webhook signature');
   }
-  if (!ok) {
+  const signed = Buffer.concat([Buffer.from(`${timestamp}|`, 'utf8'), req.body]);
+  if (!verify(null, signed, publicKey(), signatureBytes)) {
     logger.warn('telnyx webhook: signature mismatch — rejecting');
     throw new AuthenticationError('Invalid webhook signature');
   }

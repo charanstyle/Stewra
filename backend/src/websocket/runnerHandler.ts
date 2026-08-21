@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/node';
 import { z } from 'zod';
 import {
+  HOST_ID_KINDS,
   RUNNER_CLIENT_EVENTS,
   RUNNER_HARNESS_IDS,
   RUNNER_PERMISSION_KINDS,
@@ -19,6 +20,7 @@ import type {
 } from '@stewra/shared-types';
 import { config } from '../config/unifiedConfig.js';
 import { hostedRunnerService } from '../services/hostedRunnerService.js';
+import { machineAccessService } from '../services/machineAccessService.js';
 import { runnerService } from '../services/runnerService.js';
 import { runnerSessionService } from '../services/runnerSessionService.js';
 import { logger } from '../utils/logger.js';
@@ -43,11 +45,23 @@ const workspaceSchema = z.object({
   defaultBranch: z.string().max(256).optional(),
 });
 
+/**
+ * Which computer the runner is on — the other half of the pair that lets the server recognise a Stewra
+ * Bridge on the same box. Optional: runners older than `RUNNER_HOST_MIN_VERSION` do not send it, and a
+ * hosted container has no desktop to be on.
+ */
+const hostSchema = z.object({
+  kind: z.enum(HOST_ID_KINDS),
+  value: z.string().min(1).max(128),
+  hostname: z.string().min(1).max(255),
+});
+
 const helloSchema = z.object({
   appVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
   os: z.string().max(32),
   harnesses: z.array(harnessSchema).max(16),
   workspaces: z.array(workspaceSchema).max(256),
+  host: hostSchema.optional(),
 });
 
 const updateSchema = z.object({
@@ -191,6 +205,13 @@ export function registerRunnerHandler(socket: RunnerSocketLike): void {
         workspaces: parsed.data.workspaces.map(normalizeWorkspace),
       }),
     );
+
+    // Which computer this is. Every hello, not just the first: a machine can be re-imaged, and a stale
+    // host id would let Stewra place a bridge on the wrong box with total confidence.
+    const { host } = parsed.data;
+    if (host !== undefined) {
+      guard(RUNNER_CLIENT_EVENTS.HELLO, () => machineAccessService.noteRunnerHost(deviceId, host));
+    }
 
     // A hosted runner that says hello has proved its container is up, which is stronger evidence than
     // anything the provisioner can report — Docker's "running" only means the process started. This is

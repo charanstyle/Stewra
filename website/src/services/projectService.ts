@@ -4,9 +4,12 @@ import type {
   BindProjectWorkspaceResponse,
   CreateProjectRequest,
   CreateProjectResponse,
+  DecideMachineAccessRequest,
+  DecideMachineAccessResponse,
   DecideRunnerPermissionRequest,
   GetProjectResponse,
   GetRunnerStatusResponse,
+  ListMachineAccessRequestsResponse,
   ListOrgProjectBindingsResponse,
   ListProjectsResponse,
   ListRunnerSessionsResponse,
@@ -120,4 +123,23 @@ export const orgRunnerService = {
 
   openPr: (orgId: string, id: string, body: OpenRunnerPrRequest): Promise<OpenRunnerPrResponse> =>
     request(`/orgs/${orgId}/runner/sessions/${id}/pr`, { method: 'POST', body }),
+};
+
+/**
+ * People outside this organization asking to see a machine inside it.
+ *
+ * They are asking because their Stewra Bridge is running on that very computer — the server matched the
+ * two devices by a host identity both report. Approving grants sight of THAT ONE MACHINE: not
+ * membership, not the org's other machines, and not the ability to start a session on it.
+ */
+export const machineAccessService = {
+  list: (orgId: string): Promise<ListMachineAccessRequestsResponse> =>
+    request(`/orgs/${orgId}/machine-access`),
+
+  decide: (
+    orgId: string,
+    requestId: string,
+    body: DecideMachineAccessRequest,
+  ): Promise<DecideMachineAccessResponse> =>
+    request(`/orgs/${orgId}/machine-access/${requestId}/decide`, { method: 'POST', body }),
 };

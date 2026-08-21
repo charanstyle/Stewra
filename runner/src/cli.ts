@@ -9,6 +9,7 @@ import {
   formatCredentialAnswer,
   parseCredentialRequest,
 } from './core/gitCredentialHelper.js';
+import { readHostIdentity } from './core/hostIdentity.js';
 import { fetchGitCredentials } from './core/hostedApi.js';
 import { StewraRunnerClient } from './core/stewraRunnerClient.js';
 import { clearToken, hostedDeviceToken, loadToken, saveToken } from './core/tokenStore.js';
@@ -114,12 +115,24 @@ async function runConnect(): Promise<void> {
     await configureGitCredentialHelper();
   }
 
+  // Which computer this is. Read once, at startup, where a failure stops the process instead of being
+  // discovered later as a machine Stewra cannot place: `os` and the device name never could tell the
+  // server that this runner and a Stewra Bridge are the same box. `null` means a platform we read no
+  // identifier for — a known state, not a failure — and the runner runs on without it.
+  const host = await readHostIdentity(process.platform);
+
   const helloProvider = async (): Promise<RunnerHelloPayload> => {
     const [harnesses, workspaces] = await Promise.all([
       detectHarnesses(),
       detectWorkspaces(hosted ? { config, token } : undefined),
     ]);
-    return { appVersion: VERSION, os: process.platform, harnesses, workspaces };
+    return {
+      appVersion: VERSION,
+      os: process.platform,
+      harnesses,
+      workspaces,
+      ...(host === null ? {} : { host }),
+    };
   };
 
   client.connect(token, helloProvider, {

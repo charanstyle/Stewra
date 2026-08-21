@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { roleMeetsMinimum, RUNNER_ENVIRONMENTS } from '@stewra/shared-types';
 import type {
   CreateProjectRequest,
+  MachineAccessRequest,
   Project,
   ProjectWorkspaceBinding,
   RunnerDevice,
@@ -13,7 +14,7 @@ import type {
 } from '@stewra/shared-types';
 import { AppNav } from '../../components/AppNav/AppNav';
 import { api, ApiError } from '../../services/api';
-import { orgRunnerService, projectService } from '../../services/projectService';
+import { machineAccessService, orgRunnerService, projectService } from '../../services/projectService';
 import { useCommerceOrg } from '../commerce/useCommerceOrg';
 import FleetMatrix, { cellOf } from './FleetMatrix';
 import type { Cell } from './FleetMatrix';
@@ -56,6 +57,7 @@ export default function FleetPage(): React.JSX.Element {
   const [devices, setDevices] = useState<readonly RunnerDevice[]>([]);
   const [projects, setProjects] = useState<readonly Project[]>([]);
   const [bindings, setBindings] = useState<readonly ProjectWorkspaceBinding[]>([]);
+  const [accessRequests, setAccessRequests] = useState<readonly MachineAccessRequest[]>([]);
   const [pairing, setPairing] = useState<StartRunnerPairingResponse | null>(null);
   const [dialog, setDialog] = useState<Dialog>({ kind: 'none' });
   const [busy, setBusy] = useState(false);
@@ -67,15 +69,17 @@ export default function FleetPage(): React.JSX.Element {
   const refresh = useCallback(async (): Promise<void> => {
     if (orgId === null) return;
     try {
-      const [status, projectList, bindingList] = await Promise.all([
+      const [status, projectList, bindingList, access] = await Promise.all([
         orgRunnerService.getStatus(orgId),
         projectService.list(orgId),
         projectService.listBindings(orgId),
+        machineAccessService.list(orgId),
       ]);
       setEnabled(status.enabled);
       setDevices(status.devices);
       setProjects(projectList.projects);
       setBindings(bindingList.bindings);
+      setAccessRequests(access.requests);
     } catch (err) {
       setError(describeError(err));
     }
@@ -85,6 +89,7 @@ export default function FleetPage(): React.JSX.Element {
     setDevices([]);
     setProjects([]);
     setBindings([]);
+    setAccessRequests([]);
     setPairing(null);
     setDialog({ kind: 'none' });
     void refresh();
@@ -158,6 +163,25 @@ export default function FleetPage(): React.JSX.Element {
       return `${device.name} moved to ${toName}. Its past sessions stay here.`;
     });
   };
+
+  // ── Machine access ───────────────────────────────────────────────────────────────────────────
+  /**
+   * Answer someone outside this organization who is asking to see one of its machines.
+   *
+   * Approving grants sight of THAT ONE MACHINE — not membership, not the org's other machines, not the
+   * ability to start a session on it. A refusal is a decision and is recorded as one: nothing re-asks it.
+   */
+  const decideAccess = (req: MachineAccessRequest, approve: boolean): void => {
+    if (orgId === null) return;
+    void act(async () => {
+      await machineAccessService.decide(orgId, req.id, { approve });
+      return approve
+        ? `${req.requestedByName} can now see ${req.deviceName}.`
+        : `Turned down ${req.requestedByName}'s request to see ${req.deviceName}.`;
+    });
+  };
+
+  const pendingAccess = accessRequests.filter((r) => r.status === 'pending');
 
   // ── Projects ─────────────────────────────────────────────────────────────────────────────────
   const createProject = async (body: CreateProjectRequest): Promise<void> => {
@@ -296,6 +320,52 @@ export default function FleetPage(): React.JSX.Element {
 
         {orgId !== null && enabled === true && (
           <>
+            {pendingAccess.length > 0 && (
+              <section className={styles.card} data-testid="fleet-access-requests">
+                <h2 className={styles.cardTitle}>Waiting on you</h2>
+                <p className={styles.muted}>
+                  These people are running Stewra Bridge on the very computer one of {orgName}&rsquo;s
+                  machines is paired from. Saying yes lets them ask Stewra about <em>that machine only</em> —
+                  it is not membership, it does not reveal the rest of the fleet, and it does not let them
+                  start anything on it.
+                </p>
+                <ul className={styles.deviceList}>
+                  {pendingAccess.map((r) => (
+                    <li key={r.id} className={styles.deviceRow} data-testid="fleet-access-request">
+                      <span className={styles.deviceName}>{r.deviceName}</span>
+                      <span className={styles.deviceMeta}>
+                        {r.requestedByName} · from {r.hostname} · asked {new Date(r.requestedAt).toLocaleString()}
+                      </span>
+                      {canWrite ? (
+                        <span className={styles.deviceActions}>
+                          <button
+                            type="button"
+                            className={styles.secondary}
+                            disabled={busy}
+                            onClick={() => decideAccess(r, true)}
+                            data-testid="fleet-access-approve"
+                          >
+                            Let them see it
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.ghost}
+                            disabled={busy}
+                            onClick={() => decideAccess(r, false)}
+                            data-testid="fleet-access-deny"
+                          >
+                            No
+                          </button>
+                        </span>
+                      ) : (
+                        <span className={styles.muted}>An admin decides this one.</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
             <section className={styles.card}>
               <h2 className={styles.cardTitle}>
                 Machines

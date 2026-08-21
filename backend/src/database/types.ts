@@ -23,6 +23,7 @@ import type {
   OrgRole,
   OrgKind,
   OrgStatus,
+  MachineAccessStatus,
   MessageType,
   MessagingChannel,
   ParticipantRole,
@@ -666,6 +667,13 @@ export interface BridgeDevicesTable {
   wa_state: BridgeWaState;
   consent_version: number;
   consented_at: ColumnType<Date, Date, never>;
+  /**
+   * Which computer this bridge runs on: `sha256(kind + ':' + value)` of what it reported reading
+   * (migration 069). NULL means it never told us — a build older than `BRIDGE_HOST_MIN_VERSION`, or a
+   * platform with no identifier we read. NULL is NOT a value: two NULLs are not the same machine.
+   */
+  host_id: ColumnType<string | null, string | null | undefined, string | null>;
+  hostname: ColumnType<string | null, string | null | undefined, string | null>;
   last_seen_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   created_at: CreatedAt;
 }
@@ -761,8 +769,40 @@ export interface RunnerDevicesTable {
     RunnerContainerStatus | null
   >;
   container_last_started_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  /**
+   * Which computer this runner runs on: `sha256(kind + ':' + value)` (migration 069). The other half of
+   * the pair that lets the server say a bridge and this runner are the same box. NULL means it never told
+   * us — an older runner, or a hosted container, which is nobody's desktop. NULL is never a match.
+   */
+  host_id: ColumnType<string | null, string | null | undefined, string | null>;
+  hostname: ColumnType<string | null, string | null | undefined, string | null>;
   last_seen_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
   created_at: CreatedAt;
+}
+
+/**
+ * A bridge asking to see the machine it is already running on (migration 069).
+ *
+ * One row is the request AND, once approved, the grant — there is no second table, because "who may see
+ * this machine" and "who asked to" are the same fact viewed before and after a decision. A denial is
+ * recorded rather than deleted so a refused bridge can be told it was refused instead of asking forever.
+ */
+export interface MachineAccessRequestsTable {
+  id: Generated<string>;
+  /** The org that owns the runner device — the tenant whose admins decide. */
+  org_id: string;
+  device_id: string;
+  /** Snapshotted at request time, so a decided row still reads sensibly after a rename. */
+  device_name: string;
+  bridge_device_id: string;
+  requested_by_user_id: string;
+  requested_by_name: string;
+  hostname: string;
+  host_id: string;
+  status: Generated<MachineAccessStatus>;
+  requested_at: Generated<Date>;
+  decided_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+  decided_by: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /**
@@ -1668,6 +1708,7 @@ export interface Database {
   whatsapp_outbound: WhatsappOutboundTable;
   runner_devices: RunnerDevicesTable;
   runner_pair_codes: RunnerPairCodesTable;
+  machine_access_requests: MachineAccessRequestsTable;
   runner_sessions: RunnerSessionsTable;
   projects: ProjectsTable;
   project_workspaces: ProjectWorkspacesTable;

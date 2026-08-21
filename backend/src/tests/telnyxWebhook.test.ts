@@ -87,6 +87,11 @@ describe('the Telnyx inbound-SMS webhook', () => {
     expect(await post(body, {})).toBe(401);
     const stale = String(Math.floor(Date.now() / 1000) - 10 * 60);
     expect(await post(body, headers(body, stale))).toBe(401);
+    // Not a 64-byte Ed25519 signature at all. Refused as a bad signature — 401, never a 500: this is the
+    // caller sending nonsense, which is a different thing from Stewra holding the wrong key.
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const malformed = { 'telnyx-signature-ed25519': 'not-a-signature', 'telnyx-timestamp': timestamp };
+    expect(await post(body, malformed)).toBe(401);
     expect((await telnyxInboundSmsService.list(TO)).some((m) => m.text === 'forged')).toBe(false);
   });
 

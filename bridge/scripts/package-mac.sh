@@ -69,6 +69,11 @@ else
   mkdir -p "$build_dir"
 fi
 
+# Clear every unpacked bundle first. electron-builder names this directory for the arch — `mac` for the
+# host's, `mac-<arch>` for the other — so back-to-back arch runs leave two of them side by side, and the
+# search below has no way to tell this run's from last run's. See the guard on that search.
+rm -rf "$build_dir"/mac "$build_dir"/mac-*
+
 # PASS 1 of 2: build and sign the .app only. The dmg is built separately, below, AFTER the app has
 # been notarized and stapled — a bundle sealed inside a read-only disk image can no longer be stapled,
 # and an app with no ticket of its own forces Gatekeeper online on first launch. See notarize-app.sh.
@@ -84,6 +89,35 @@ if [ -z "$app" ]; then
   echo "!! no .app produced in $build_dir" >&2
   exit 1
 fi
+
+# Is this run's bundle the one that was found? `-print -quit` returns whichever directory the
+# filesystem happens to list first, and until the rm above there were routinely two.
+#
+# Measured 2026-08-21: an --arm64 run found the PREVIOUS x64 build, notarized that, stapled it, and
+# pass 2 wrapped it in Stewra-Bridge-1.4.0-arm64.dmg. Every check in this script passed — the bundle
+# was real, correctly signed, and genuinely ticketed. It was simply the wrong app: an Intel 1.3.0
+# published under the Apple Silicon 1.4.0 name, which fails for the first time on a user's Mac. So
+# assert what the bundle IS, not merely that one exists.
+want_macho="arm64"
+[ "$arch" = "x64" ] && want_macho="x86_64"
+got_macho="$(file -b "$app/Contents/MacOS/$(basename "$app" .app)")"
+case "$got_macho" in
+  *"$want_macho"*) ;;
+  *)
+    echo "!! $app is $got_macho, but this run is building $arch ($want_macho)" >&2
+    exit 1
+    ;;
+esac
+want_version="$(node -p 'require("./package.json").version')"
+# `defaults read` insists on an absolute path and silently reads a DIFFERENT domain when given a
+# relative one, so resolve it here rather than hand it "release/mac/…".
+app_abs="$(cd "$(dirname "$app")" && pwd)/$(basename "$app")"
+got_version="$(defaults read "$app_abs/Contents/Info.plist" CFBundleShortVersionString)"
+if [ "$got_version" != "$want_version" ]; then
+  echo "!! $app is version $got_version, but this build is $want_version" >&2
+  exit 1
+fi
+echo ">> bundle is $want_version $want_macho, as requested"
 
 sidecars="$(find "$app" -name '._*' | wc -l | tr -d ' ')"
 # `|| true`: grep exits 1 when it matches nothing, which is the PASSING case here — without this,

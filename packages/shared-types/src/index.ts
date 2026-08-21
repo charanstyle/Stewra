@@ -395,6 +395,12 @@ export type {
   OpenRunnerPrRequest,
   OpenRunnerPrResponse,
 } from './api/runner';
+export type { MachineAccessStatus, MachineAccessRequest } from './models/machineAccess';
+export type {
+  ListMachineAccessRequestsResponse,
+  DecideMachineAccessRequest,
+  DecideMachineAccessResponse,
+} from './api/machineAccess';
 export type { InboundSms, ListInboundSmsResponse } from './api/telnyx';
 export type {
   CreateProjectRequest,
@@ -625,6 +631,7 @@ export {
   BRIDGE_SERVER_EVENTS,
   BRIDGE_VOICE_MIN_VERSION,
   BRIDGE_REPLY_MIN_VERSION,
+  BRIDGE_HOST_MIN_VERSION,
 } from './realtime/bridge';
 export type {
   BridgeClientEvent,
@@ -654,6 +661,7 @@ export {
   RUNNER_UPDATE_KINDS,
   RUNNER_PERMISSION_KINDS,
   RUNNER_UI_EVENTS,
+  RUNNER_HOST_MIN_VERSION,
 } from './realtime/runner';
 export type {
   RunnerClientEvent,
@@ -684,6 +692,10 @@ export type {
   RunnerPermissionPromptPayload,
   RunnerPermissionDecisionPayload,
 } from './realtime/runner';
+
+// Realtime — host identity, the one field both namespaces share (see hostIdentity.ts)
+export { HOST_ID_KINDS } from './realtime/hostIdentity';
+export type { HostIdKind, HostIdentity } from './realtime/hostIdentity';
 
 // Audit
 export type { AuditResourceType, AuditAction, AuditEvent, NewAuditEvent } from './audit/events';

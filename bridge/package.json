@@ -1,6 +1,6 @@
 {
   "name": "@stewra/bridge",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "description": "Stewra Bridge — the companion-device app that runs on the user's OWN computer. It holds the WhatsApp connection; Stewra's servers never do.",
