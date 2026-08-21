@@ -77,6 +77,12 @@ export type AuditAction =
   // kind of event the activity feed exists to make visible.
   | 'pause'
   | 'resume'
+  // `delete` records an entire account being destroyed. Distinct from `forget`, which is scoped to
+  // memories and learnings and leaves the account standing — conflating the two would make "Stewra
+  // dropped something it had learned" and "this person no longer exists" read identically in the
+  // feed. This row outlives its own subject: `audit_log.user_id` releases to NULL on the delete
+  // (migration 047), so the event survives with the name taken off it.
+  | 'delete'
   | 'auth.register'
   | 'auth.login'
   | 'auth.refresh'

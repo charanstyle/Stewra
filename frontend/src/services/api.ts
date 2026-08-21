@@ -48,6 +48,9 @@ import type {
   SendVoiceMessageResponse,
   ListReadReceiptsResponse,
   UploadAvatarResponse,
+  DeleteAccountRequest,
+  DeleteAccountResponse,
+  GetAccountDeletionPreviewResponse,
   GetPreferencesResponse,
   UpdatePreferencesRequest,
   UpdatePreferencesResponse,
@@ -60,6 +63,8 @@ import type {
   GetEmailOverWhatsappResponse,
   SetEmailOverWhatsappRequest,
   SetEmailOverWhatsappResponse,
+  CreateOrgRequest,
+  CreateOrgResponse,
   ListOrgsResponse,
   SetActiveOrgRequest,
   SetActiveOrgResponse,
@@ -429,6 +434,17 @@ export const api = {
   updatePreferences: (body: UpdatePreferencesRequest): Promise<UpdatePreferencesResponse> =>
     request('/preferences', { method: 'PATCH', body }),
 
+  /** What deleting this account would do, and anything blocking it. Reads only — destroys nothing. */
+  getAccountDeletionPreview: (): Promise<GetAccountDeletionPreviewResponse> =>
+    request('/users/me/deletion-preview'),
+
+  /**
+   * Permanently delete the account. Irreversible, and the session is dead the moment it returns —
+   * the caller must clear its tokens and send the user back to the sign-in screen.
+   */
+  deleteAccount: (body: DeleteAccountRequest): Promise<DeleteAccountResponse> =>
+    request('/users/me', { method: 'DELETE', body }),
+
   /** Multipart avatar upload: a single `avatar` image file field. Returns the new `/media/:id` URL. */
   uploadAvatar: (imageUri: string, fileName: string, mimeType: string): Promise<UploadAvatarResponse> => {
     const formData = new FormData();
@@ -487,6 +503,14 @@ export const api = {
   // Meta's Embedded Signup is a browser dialog.
 
   listOrgs: (): Promise<ListOrgsResponse> => request('/orgs'),
+
+  /**
+   * Create an organization; the caller becomes its owner. Slug is omitted deliberately — the server
+   * derives it from the name and resolves collisions by suffixing, so a phone keyboard never has to
+   * produce a URL-safe handle or retry on a taken one.
+   */
+  createOrg: (body: CreateOrgRequest): Promise<CreateOrgResponse> =>
+    request('/orgs', { method: 'POST', body }),
 
   /** Which org texting Stewra acts on. Per-user, not per-device — a WhatsApp text has no tab. */
   setActiveOrg: (body: SetActiveOrgRequest): Promise<SetActiveOrgResponse> =>

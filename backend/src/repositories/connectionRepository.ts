@@ -151,6 +151,26 @@ export class ConnectionRepository {
     return rows.map((r) => this.toPublic(r));
   }
 
+  /**
+   * Every connection row this user has, vault handle included, regardless of provider or status.
+   *
+   * Distinct from `listActive` on both counts, and deliberately so: this is what account deletion
+   * iterates, and a `revoked` connection still holds a `vault_ref`. Disconnect deletes the vault
+   * secret as it revokes (`connectionController.disconnect`), but a connection revoked by a *lost
+   * grant* — `handleFetchError` flips the status and nothing else — keeps its ciphertext. Skipping
+   * revoked rows would leave exactly those secrets behind, which is the case most likely to hold a
+   * token the provider never confirmed was dead.
+   */
+  async listAllForUser(userId: string): Promise<ReadonlyArray<ConnectionRow>> {
+    const rows = await db
+      .selectFrom('connections')
+      .selectAll()
+      .where('user_id', '=', userId)
+      .orderBy('created_at', 'asc')
+      .execute();
+    return rows.map((r) => this.toRow(r));
+  }
+
   async findByIdForUser(id: string, userId: string): Promise<ConnectionRow | undefined> {
     const row = await db
       .selectFrom('connections')

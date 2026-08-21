@@ -63,6 +63,9 @@ import type {
   ConfirmCommerceReplyResponse,
   SendVoiceMessageResponse,
   UploadAvatarResponse,
+  DeleteAccountRequest,
+  DeleteAccountResponse,
+  GetAccountDeletionPreviewResponse,
   TurnCredentialsResponse,
   ListCallHistoryResponse,
   GetBriefingResponse,
@@ -344,6 +347,17 @@ export const api = {
     request(`/memory/${id}`, { method: 'DELETE' }),
 
   getPreferences: (): Promise<GetPreferencesResponse> => request('/preferences'),
+
+  /** What deleting this account would do, and anything blocking it. Reads only — destroys nothing. */
+  getAccountDeletionPreview: (): Promise<GetAccountDeletionPreviewResponse> =>
+    request('/users/me/deletion-preview'),
+
+  /**
+   * Permanently delete the account. Irreversible, and the session is dead the moment it returns —
+   * the caller must log out and send the user back to the sign-in page.
+   */
+  deleteAccount: (body: DeleteAccountRequest): Promise<DeleteAccountResponse> =>
+    request('/users/me', { method: 'DELETE', body }),
 
   updatePreferences: (body: UpdatePreferencesRequest): Promise<UpdatePreferencesResponse> =>
     request('/preferences', { method: 'PATCH', body }),

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { config } from '../config/unifiedConfig.js';
 import { conversationRepository } from '../repositories/conversationRepository.js';
@@ -126,6 +126,43 @@ class MediaService {
       throw new NotFoundError('Media not found');
     }
     return { asset, absPath };
+  }
+
+  /**
+   * Erase every binary this user owns from disk. Returns how many files were removed.
+   *
+   * The `media_assets` rows are `ON DELETE CASCADE` on `owner_id`, which makes this the ONLY window
+   * in which the deletion is possible: once the `users` row goes, the rows naming these paths go
+   * with it and the bytes — voice notes, photos, avatars — are unreachable orphans under
+   * `UPLOADS_DIR` that no code can ever attribute to anyone again. So this runs BEFORE the DB
+   * delete, and the caller must treat a failure here as a failed deletion rather than press on.
+   *
+   * Paths are bounds-checked against `UPLOADS_DIR` exactly as `resolveForDownload` does, for the
+   * same defense-in-depth reason: filenames are server-generated, but an unbounded `rm` driven by a
+   * stored string is not something to leave to that assumption.
+   *
+   * `force: true` is not a swallowed error — it is scoped precisely to "the file is already gone",
+   * which is a legitimate state (an earlier partial deletion, or a hand-cleaned uploads dir) and one
+   * where the desired end state already holds. Every other failure — a permission error, a read-only
+   * mount, an I/O fault — still throws, because those mean the user's data is still on disk.
+   */
+  async deleteAllForOwner(ownerId: string): Promise<number> {
+    const assets = await mediaAssetRepository.listForOwner(ownerId);
+    const root = resolve(this.dir);
+    let removed = 0;
+
+    for (const asset of assets) {
+      const absPath = resolve(root, asset.path);
+      if (absPath !== root && !absPath.startsWith(root + sep)) {
+        throw new Error(
+          `media asset ${asset.id} resolves outside UPLOADS_DIR (${asset.path}); refusing to delete`,
+        );
+      }
+      await rm(absPath, { force: true });
+      removed += 1;
+    }
+
+    return removed;
   }
 }
 

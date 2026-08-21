@@ -34,6 +34,7 @@ const BillingPage = lazy(() => import('./app/commerce/BillingPage'));
 const InviteAcceptPage = lazy(() => import('./app/commerce/InviteAcceptPage'));
 const PrivacyPage = lazy(() => import('./app/legal/PrivacyPage'));
 const TermsPage = lazy(() => import('./app/legal/TermsPage'));
+const AccountDeletionPage = lazy(() => import('./app/legal/AccountDeletionPage'));
 
 export default function App(): React.JSX.Element {
   return (
@@ -179,6 +180,10 @@ export default function App(): React.JSX.Element {
               would otherwise send /privacy to /today and straight into the auth gate. */}
             <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/terms" element={<TermsPage />} />
+            {/* Public for the same reason, and one more: Google Play's Data safety form requires a
+              deletion URL that a reviewer can open logged out — and the person most likely to need
+              this page is one who can no longer sign in to reach it. */}
+            <Route path="/account-deletion" element={<AccountDeletionPage />} />
             <Route path="*" element={<Navigate to="/today" replace />} />
           </Routes>
         </Suspense>

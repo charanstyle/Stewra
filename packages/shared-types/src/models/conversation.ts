@@ -21,7 +21,12 @@ export interface Conversation {
   readonly type: ConversationType;
   readonly title: string | null;
   readonly avatarUrl: string | null;
-  readonly createdBy: UUID;
+  /**
+   * Null once the creator deletes their account. The thread survives them — it belongs to everyone
+   * in it, not to whoever happened to tap "new group" — so this releases rather than taking the
+   * conversation with it, exactly like `Message.senderId`.
+   */
+  readonly createdBy: UUID | null;
   readonly lastMessageAt: ISODateString;
   readonly isArchived: boolean;
   readonly createdAt: ISODateString;
